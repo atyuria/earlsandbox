@@ -41,6 +41,7 @@ namespace Carl
 
         void Update()
         {
+            if (WorldFreeze.On) return;
             fuse -= Time.deltaTime;
             armed += Time.deltaTime;
             if (fuse <= 0f && !exploded) Explode();
@@ -49,6 +50,9 @@ namespace Carl
         void Explode()
         {
             exploded = true;
+            // the grenade's own shell must not shield the body it is lying on from its blast (the line of sight
+            // from just above it ran straight back through it, so whatever it rested on was never hurt)
+            foreach (var own in GetComponentsInChildren<Collider>()) own.enabled = false;
             Vector3 c = transform.position + Vector3.up * 0.05f;
             Fx.Explosion(c);
             WindowGlass.Blast(c, 7f);
@@ -82,19 +86,30 @@ namespace Carl
                     if (d > 7f) continue;
                     // how far the blast is from this part's surface (a grenade against the belly is ~0 m away)
                     float ds = bp.col != null ? Vector3.Distance(bp.col.ClosestPoint(c), c) : d;
-                    if (Physics.Linecast(c, bp.transform.position, out var hit, ~0, QueryTriggerInteraction.Ignore))
-                    {
-                        // body parts don't shield each other from the overpressure; walls and floors do
-                        var other = hit.collider.GetComponentInParent<BodyPart>();
-                        if (other == null && !(hit.collider is CharacterController)) continue;
-                    }
+                    // body parts don't shield each other from the overpressure, nor does loose stuff lying about
+                    // (shot-off armour, other grenades); walls and floors do
+                    if (Shielded(c, bp.transform.position)) continue;
+                    // a plate still worn between the blast and this part takes the worst of it (the vest itself has
+                    // just been shredded by ArmourSystem.Blast; if that tore it off, nothing is left to help)
+                    Vector3 toPart = bp.transform.position - c;
+                    var plate = ArmourSystem.Raycast(c, toPart.normalized, toPart.magnitude, out _, out _, h);
+                    if (plate != null && (plate.plateUnder || plate.steel) && plate.part == bp) ds = Mathf.Max(ds, 0.22f);
                     float intensity = Mathf.Pow(Mathf.Clamp01(1f - ds / 2f), 2f); // overpressure only matters up close; fragments do the killing
+                    if (plate != null && (plate.plateUnder || plate.steel) && plate.part == bp) intensity *= 0.55f;
                     int lk = LimbKey(bp.id);
                     bool mayLoseLimb = lk < 0 || (closestInLimb.TryGetValue(lk, out var cl) && cl.bp == bp);
                     h.damage.ApplyBlast(bp, c, intensity, ds, mayLoseLimb);
                     if (d < 1.6f) knocked = true;
                 }
                 if (knocked) h.ragdoll.Fall();
+            }
+
+            // you: the overpressure (the fragments reach you as projectiles)
+            if (PlayerBody.I != null && PlayerAvatar.Body == null)
+            {
+                Vector3 pc = PlayerBody.I.transform.position + Vector3.up * 0.9f;
+                float pd = Vector3.Distance(pc, c);
+                if (pd < 4f && !Shielded(c, pc)) PlayerBody.I.Blast(c, Mathf.Pow(Mathf.Clamp01(1f - pd / 4f), 2f));
             }
 
             // knockback on everything with a rigidbody
@@ -120,6 +135,24 @@ namespace Carl
                 }
             }
             Destroy(gameObject);
+        }
+
+        static readonly RaycastHit[] sightBuf = new RaycastHit[16];
+
+        /// <summary>Is there a wall, floor or other fixed thing between the blast and this point?</summary>
+        static bool Shielded(Vector3 from, Vector3 to)
+        {
+            Vector3 d = to - from;
+            int n = Physics.RaycastNonAlloc(from, d.normalized, sightBuf, d.magnitude, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
+            {
+                var col = sightBuf[i].collider;
+                if (col is CharacterController || col.GetComponentInParent<BodyPart>() != null) continue;
+                var rb = col.attachedRigidbody;
+                if (rb != null && !rb.isKinematic) continue;          // loose objects get blown away, they don't shield
+                return true;
+            }
+            return false;
         }
 
         /// <summary>Which limb a part belongs to (0-3), or -1 for torso/head.</summary>

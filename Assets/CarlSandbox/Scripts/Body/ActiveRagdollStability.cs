@@ -28,6 +28,14 @@ namespace Carl
         /// <summary>How hard this person fights to get away / get up (personality).</summary>
         [HideInInspector] public float will = 0.7f;
 
+        /// <summary>An even, neutral walk with no personal quirks (the player).</summary>
+        public void SetPlainStyle()
+        {
+            styled = true;
+            styleStride = styleCadence = styleArm = styleBounce = 1f;
+            styleLean = 0f; styleKnee = 0f; styleWidth = 0.1f;
+        }
+
         void EnsureStyle()
         {
             if (styled) return;
@@ -96,7 +104,8 @@ namespace Carl
             s -= panic * 0.08f;
             s = Mathf.Clamp01(s);
             // react fast when things get worse, recover slowly
-            Steadiness = Mathf.MoveTowards(Steadiness, s, dt * (s < Steadiness ? 2f : 0.25f));
+            s = Mathf.Clamp01(s + (grit - 1f) * 0.25f);
+            Steadiness = Mathf.MoveTowards(Steadiness, s, dt * (s < Steadiness ? 2f / grit : 0.25f * grit));
         }
 
         float Unsteady => 1f - Steadiness;
@@ -117,7 +126,7 @@ namespace Carl
             sinkT = 0f;
             sinkRolled = false;
             sinkDur = Mathf.Lerp(0.6f, 1.3f, Steadiness) * Mathf.Lerp(1f, 0.35f, quick) * Random.Range(0.85f, 1.15f);
-            sinkRecover = crit ? 0f : Mathf.Clamp01(Steadiness * 0.75f - 0.15f - quick * 0.4f);
+            sinkRecover = crit ? 0f : Mathf.Clamp01(Steadiness * 0.75f - 0.15f - quick * 0.4f + (grit - 1f) * 0.4f);
             if (mode == BodyMode.GettingUp) sinkRecover *= 0.3f;
             Vector3 v = Vector3.ProjectOnPlane(body.Pelvis.rb.linearVelocity, Vector3.up);
             if (sinkDir.sqrMagnitude < 0.01f || v.sqrMagnitude > 0.5f)
@@ -212,7 +221,7 @@ namespace Carl
             {
                 float t = Time.time * (0.35f + u * 0.5f);
                 Vector3 drift = new Vector3(Mathf.PerlinNoise(swaySeed, t) - 0.5f, 0f, Mathf.PerlinNoise(t, swaySeed) - 0.5f) * 2f;
-                chest.AddForce(drift * M * u * 2.2f);
+                chest.AddForce(drift * M * u * 2.2f / (grit * grit));
             }
             // a hand on a nearby wall holds them up
             if (BracingOnWall)
@@ -364,13 +373,13 @@ namespace Carl
         // ----------------------------------------------------------------- getting up
 
         /// <summary>How long they lie there before trying to get up: quick if barely hurt, longer if hurt.</summary>
-        float GetUpDelay => Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty;
+        float GetUpDelay => (Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty) / grit;
 
         void UpdateGetUpAttempt(float dt)
         {
             if (mode != BodyMode.GettingUp || sinking) return;
             // a hurt person's attempt can fail partway up
-            if (getUpT > 0.4f && Random.value < Unsteady * Unsteady * dt * 1.2f)
+            if (getUpT > 0.4f && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit))
             {
                 getUpPenalty += 1.5f;
                 Topple("failed to get up", 0.3f);

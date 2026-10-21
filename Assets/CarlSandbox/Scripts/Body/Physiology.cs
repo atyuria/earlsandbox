@@ -279,17 +279,40 @@ namespace Carl
             return f;
         }
 
-        public float LegSupport(int side)
+        // Leg and arm state is asked for many times per body every physics step (balance, gait, getting up, the
+        // gunner...). Worked out once per step (or frame) and reused: it can't change within one.
+        float limbStamp = float.NaN;
+        float legCacheL, legCacheR;
+        bool armCacheL, armCacheR;
+        static float Stamp => Time.inFixedTimeStep ? Time.fixedTime : -1f - Time.time;
+        void RefreshLimbs()
+        {
+            float st = Stamp;
+            if (st == limbStamp) return;
+            limbStamp = st;
+            legCacheL = ComputeLegSupport(-1); legCacheR = ComputeLegSupport(1);
+            armCacheL = ComputeArmUsable(-1); armCacheR = ComputeArmUsable(1);
+        }
+        /// <summary>Forget the cached limb state (a limb was just hit, broken or cut off).</summary>
+        public void LimbsChanged() => limbStamp = float.NaN;
+
+        public float LegSupport(int side) { RefreshLimbs(); return side < 0 ? legCacheL : legCacheR; }
+        public bool ArmUsable(int side) { RefreshLimbs(); return side < 0 ? armCacheL : armCacheR; }
+
+        static readonly string[] femurN = { "LEFT FEMUR", "RIGHT FEMUR" }, tibiaN = { "LEFT TIBIA", "RIGHT TIBIA" }, fibulaN = { "LEFT FIBULA", "RIGHT FIBULA" },
+            footN = { "LEFT FOOT BONES", "RIGHT FOOT BONES" }, humerusN = { "LEFT HUMERUS", "RIGHT HUMERUS" };
+
+        float ComputeLegSupport(int side)
         {
             PartId th = side < 0 ? PartId.ThighL : PartId.ThighR;
             PartId sh = side < 0 ? PartId.ShinL : PartId.ShinR;
             PartId ft = side < 0 ? PartId.FootL : PartId.FootR;
             float s = Mathf.Min(MotorFactor(th), MotorFactor(sh));
-            string sn = side < 0 ? "LEFT " : "RIGHT ";
-            var femur = body[th].Find(sn + "FEMUR");
-            var tibia = body[sh].Find(sn + "TIBIA");
-            var fib = body[sh].Find(sn + "FIBULA");
-            var foot = body[ft].Find(sn + "FOOT BONES");
+            int si = side < 0 ? 0 : 1;
+            var femur = body[th].Find(femurN[si]);
+            var tibia = body[sh].Find(tibiaN[si]);
+            var fib = body[sh].Find(fibulaN[si]);
+            var foot = body[ft].Find(footN[si]);
             if (femur != null && femur.Fractured) s *= femur.BadlyBroken ? 0.02f : 0.12f;
             if (tibia != null && tibia.Fractured) s *= tibia.BadlyBroken ? 0.08f : 0.3f;
             if (fib != null && fib.Fractured) s *= 0.8f;
@@ -302,13 +325,13 @@ namespace Carl
             return Mathf.Clamp01(s);
         }
 
-        public bool ArmUsable(int side)
+        bool ComputeArmUsable(int side)
         {
             PartId ua = side < 0 ? PartId.UpperArmL : PartId.UpperArmR;
             PartId fa = side < 0 ? PartId.ForearmL : PartId.ForearmR;
             if (body[ua].severed || body[fa].severed) return false;
             if (MotorFactor(ua) < 0.3f || MotorFactor(fa) < 0.3f) return false;
-            var hum = body[ua].Find((side < 0 ? "LEFT " : "RIGHT ") + "HUMERUS");
+            var hum = body[ua].Find(humerusN[side < 0 ? 0 : 1]);
             return hum == null || !hum.BadlyBroken;
         }
 
@@ -378,6 +401,7 @@ namespace Carl
         {
             float dt = Time.deltaTime;
             if (dt <= 0f || body == null) return;
+            if (WorldFreeze.On && body != PlayerAvatar.Body) return;   // frozen world: no bleeding, no clock
 
             // --- bleeding
             float pressure = Mathf.Clamp01(systolic / 120f);

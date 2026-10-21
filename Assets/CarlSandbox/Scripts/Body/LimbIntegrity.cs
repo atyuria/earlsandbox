@@ -272,6 +272,22 @@ namespace Carl
             return false;
         }
 
+        /// <summary>
+        /// Everything this part draws (skin, flesh layers, wound tunnels, the anatomy seen through wounds) is torn
+        /// away past a plane (part space; normalPart points at the side that is gone). Used when a limb comes off
+        /// at a joint, so the meat of the stump shows instead of the closed ends of the flesh layers.
+        /// </summary>
+        public static void ClipAt(BodyPart part, Vector3 pointPart, Vector3 normalPart)
+        {
+            foreach (var r in part.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                if (r.GetComponentInParent<ArmourPiece>() != null || InXray(r.transform) || r.name == "StumpCap") continue;
+                Matrix4x4 M = part.transform.worldToLocalMatrix * r.transform.localToWorldMatrix;
+                bool organ = r.sharedMaterial != null && r.sharedMaterial.shader != null && r.sharedMaterial.shader.name == "Carl/RevealOrgan";
+                SetPlane(r, M, pointPart, normalPart.normalized, organ);
+            }
+        }
+
         static void SetPlane(MeshRenderer r, Matrix4x4 objToPart, Vector3 pointPart, Vector3 normalPart, bool partSpace)
         {
             Vector4 plane;

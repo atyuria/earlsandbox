@@ -890,7 +890,7 @@ namespace Carl
         IEnumerator NewTest(SandboxGame g)
         {
             Vector3 basePos = g.player.transform.position; basePos.y = 0f;
-            var sg = AmmoTable.For("SHOTGUN");
+            var sg = AmmoTable.For("MOSSBERG 590");
             AmmoType Find(AmmoType[] t, string n) { foreach (var a in t) if (a.name.Contains(n)) return a; return t[0]; }
             void FireAmmo(AmmoType a, Vector3 from, Vector3 at)
             {

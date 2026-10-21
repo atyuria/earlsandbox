@@ -95,6 +95,12 @@ namespace Carl
                 case "Polymer": return Mats.Lit(new Color(0.1f, 0.1f, 0.11f), 0.3f);
                 case "Steel": return Mats.Lit(new Color(0.62f, 0.64f, 0.67f), 0.75f, 0.85f);
                 case "Olive": return Mats.Lit(new Color(0.3f, 0.36f, 0.22f), 0.3f);
+                case "Yellow": return Mats.Lit(new Color(0.95f, 0.78f, 0.08f), 0.45f);          // Taser body
+                case "Tan": return Mats.Lit(new Color(0.62f, 0.52f, 0.38f), 0.3f);               // flat dark earth
+                case "Rubber": return Mats.Lit(new Color(0.06f, 0.06f, 0.065f), 0.12f);          // grip panels, pads
+                case "Brass": return Mats.Lit(new Color(0.78f, 0.6f, 0.26f), 0.7f, 0.9f);
+                case "Lens": return Mats.Lit(new Color(0.75f, 0.8f, 0.85f), 0.95f, 0.3f);         // torch lens, laser window
+                case "Anod": return Mats.Lit(new Color(0.11f, 0.11f, 0.12f), 0.55f, 0.7f);        // anodised aluminium
                 case "Glass":
                     if (glass == null) { glass = new Material(Mats.Find("Carl/Glass")); }
                     return glass;

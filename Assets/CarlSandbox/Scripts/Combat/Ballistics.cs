@@ -10,6 +10,8 @@ namespace Carl
     public class Ballistics : MonoBehaviour
     {
         public static Ballistics Instance;
+        /// <summary>Set around a Fire() call by whoever is shooting, so their own rounds (and ricochets) never hit them.</summary>
+        public static HumanBody FiringBody;
 
         class Proj
         {
@@ -23,6 +25,8 @@ namespace Carl
             public bool alive = true;
             public int ricochets;
             public float pen = 3f, wall = 1f, expand = 1f;   // armour class it defeats, wall penetration, wound size
+            public bool incendiary;                          // burning magnesium (dragon's breath)
+            public HumanBody owner;                          // whoever fired it: it can never hit them
             public ArmourPiece ignoreArmour;
             public int walls;
         }
@@ -54,7 +58,9 @@ namespace Carl
                 // without an ammo type: estimate from energy (fragments ~1-2, pistol ~2, rifle ~4)
                 pen = ammo != null ? ammo.pen : kind == HitKind.Shrapnel ? Mathf.Clamp(e0 / 300f, 0.3f, 2.4f) : Mathf.Clamp(Mathf.Sqrt(e0) / 11f, 1f, 6.5f),
                 wall = ammo != null ? ammo.wall : 1f,
-                expand = ammo != null ? ammo.expand : 1f
+                expand = ammo != null ? ammo.expand : 1f,
+                incendiary = ammo != null && ammo.incendiary,
+                owner = FiringBody
             };
             if (tracer)
             {
@@ -88,7 +94,7 @@ namespace Carl
         void Update()
         {
             float dt = Time.deltaTime;
-            if (dt <= 0f) return;
+            if (dt <= 0f || WorldFreeze.On) return;
             for (int i = live.Count - 1; i >= 0; i--)
             {
                 var p = live[i];
@@ -120,14 +126,18 @@ namespace Carl
                 int bi = -1; float bd = float.MaxValue;
                 for (int k = 0; k < n; k++)
                 {
-                    if (buf[k].collider is CharacterController) continue;
+                    // the player: a round that reaches you hurts you (your own shots start inside your capsule and never do)
+                    if (buf[k].collider is CharacterController && (PlayerBody.I == null || buf[k].collider.gameObject != PlayerBody.I.gameObject)) continue;
                     if (p.ignore != null && buf[k].collider == p.ignore.col) continue;
+                    // never the body that fired it - not even a ricochet coming back
+                    if (p.owner != null && buf[k].collider.GetComponentInParent<HumanBody>() == p.owner) continue;
+                    if (p.owner != null && p.owner == PlayerAvatar.Body && buf[k].collider is CharacterController) continue;
                     if (buf[k].distance < bd) { bd = buf[k].distance; bi = k; }
                 }
                 if (bi < 0)
                 {
                     // nothing solid hit - but armour (helmets, visors) can stick out past the body's colliders
-                    var ap0 = ArmourSystem.Raycast(p.pos, dir, remaining, out float ad0, out Vector3 aL0);
+                    var ap0 = ArmourSystem.Raycast(p.pos, dir, remaining, out float ad0, out Vector3 aL0, null, p.owner);
                     if (ap0 != null && ap0 != p.ignoreArmour)
                     {
                         p.traveled += ad0; remaining -= ad0; p.pos += dir * ad0;
@@ -141,11 +151,17 @@ namespace Carl
                     break;
                 }
                 var hit = buf[bi];
+                if (hit.collider is CharacterController && PlayerBody.I != null)
+                {
+                    PlayerBody.I.Hit(hit.point, dir, 0.5f * p.mass * p.vel.sqrMagnitude, p.kind, p.diam);
+                    p.alive = false;
+                    break;
+                }
 
                 // armour in front of whatever was hit?
                 // (body colliders sit a few cm outside the skin, armour is on the skin: look a little past a body hit)
                 bool bodyHit = hit.collider.GetComponent<BodyPart>() != null;
-                var ap = ArmourSystem.Raycast(p.pos, dir, hit.distance + (bodyHit ? 0.14f : 0.02f), out float ad, out Vector3 aLocal);
+                var ap = ArmourSystem.Raycast(p.pos, dir, hit.distance + (bodyHit ? 0.14f : 0.02f), out float ad, out Vector3 aLocal, null, p.owner);
                 if (ap != null && ap != p.ignoreArmour)
                 {
                     p.traveled += ad; remaining -= ad;
@@ -248,6 +264,15 @@ namespace Carl
         {
             float energy = 0.5f * p.mass * p.vel.sqrMagnitude;
             if (p.kind == HitKind.Bullet || Random.value < 0.15f) Sfx.Play("impact_flesh", point, 0.9f, 1f, 2f);
+            if (p.incendiary)
+            {
+                // burning magnesium: sears the skin around where it lands and hurts far more than it wounds
+                Vector3 lp = bp.transform.InverseTransformPoint(point);
+                bp.flesh.Paint(lp, 0.03f, 2, 0.9f);
+                bp.flesh.Paint(lp, 0.045f, 1, 0.5f);
+                bp.body.physio.AddPain(0.12f, bp.id);
+                Fx.Sparks(point, -dir, 8);
+            }
             DamageModel.ProjectileExpand = p.expand;
             float left = bp.body.damage.ApplyProjectile(bp, point, dir, energy, p.diam, p.kind, out Vector3 exit, out bool exited);
             DamageModel.ProjectileExpand = 1f;
@@ -486,6 +511,24 @@ namespace Carl
             for (int i = 0; i < 3; i++)
                 Emit(I.smoke, pos + dir * 0.05f, dir * Random.Range(0.4f, 1.2f) + up2 * 0.3f + Random.insideUnitSphere * 0.2f, Random.Range(0.08f, 0.16f) * (0.6f + power * 0.5f), new Color(0.75f, 0.74f, 0.72f, 0.25f), Random.Range(0.6f, 1.2f));
             if (Random.value < 0.6f) Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.3f).normalized * 6f, 0.008f, new Color(1f, 0.75f, 0.35f), 0.15f);
+        }
+
+        /// <summary>Dragon's breath: a long jet of burning magnesium out of the barrel, showering sparks.</summary>
+        public static void DragonsBreath(Vector3 pos, Vector3 dir)
+        {
+            if (I == null) return;
+            dir.Normalize();
+            for (int i = 0; i < 70; i++)
+            {
+                float k = Random.value;
+                Vector3 v = (dir + Random.insideUnitSphere * Mathf.Lerp(0.04f, 0.16f, k)).normalized * Mathf.Lerp(30f, 8f, k);
+                Emit(I.flame, pos + dir * Random.Range(0f, 0.2f), v, Random.Range(0.06f, 0.2f), new Color(1f, Random.Range(0.45f, 0.75f), Random.Range(0.1f, 0.3f), 1f), Random.Range(0.25f, 0.8f));
+            }
+            for (int i = 0; i < 40; i++)
+                Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.2f).normalized * Random.Range(15f, 40f), 0.01f, new Color(1f, 0.85f, 0.5f), Random.Range(0.4f, 1.2f));
+            for (int i = 0; i < 6; i++)
+                Emit(I.smoke, pos + dir * Random.Range(0.2f, 1.5f), dir * Random.Range(1f, 3f) + Random.insideUnitSphere * 0.4f, Random.Range(0.2f, 0.4f), new Color(0.6f, 0.58f, 0.55f, 0.3f), Random.Range(1f, 2f));
+            Flash(pos + dir * 1.5f, 6f, 12f, 0.25f);
         }
 
         public static void Flash(Vector3 pos, float intensity, float range, float duration)

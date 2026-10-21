@@ -76,17 +76,20 @@ namespace Carl
             I.delayed.Add((Time.time + delay, group, pos, volume, spatial));
         }
 
-        public static void Gun(string weapon, Vector3 pos)
+        public static void Gun(string weapon, Vector3 pos, bool suppressed = false)
         {
-            string g = weapon == "AK-47" ? "gun_ak" : weapon == "GLOCK 17" ? "gun_glock" : weapon == "AWP" ? "gun_awp" : weapon == ".50 CAL" ? "gun_50" : "gun_shotgun";
-            Play(g, pos, 1f, 0.25f, 3f, 0.04f);
-            PlayLater(Random.Range(0.35f, 0.6f), "casing", pos + Vector3.down * 1.4f, 0.5f, 0.6f);
+            if (weapon == "TASER") { Play("taser_pop", pos, 0.8f, 0.3f, 1f, 0.05f, 25f); return; }
+            string g = weapon == "AK-47" || weapon == "AR-15" ? "gun_ak" : weapon == "GLOCK 17" || weapon == "BERETTA M9" ? "gun_glock" : weapon == "AWP" ? "gun_awp" : weapon == ".50 CAL" ? "gun_50" : "gun_shotgun";
+            // a suppressor doesn't make it quiet, it takes the crack off: still a hard slap, carrying much less far
+            if (suppressed) Play(g, pos, 0.32f, 0.5f, 1f, 0.06f, 45f);
+            else Play(g, pos, 1f, 0.25f, 3f, 0.04f);
+            if (weapon != "MOSSBERG 590") PlayLater(Random.Range(0.35f, 0.6f), "casing", pos + Vector3.down * 1.4f, 0.5f, 0.6f);
         }
 
         /// <summary>The noises of a reload, spread over its length.</summary>
         public static void Reload(string weapon, Vector3 pos, float length)
         {
-            if (weapon == "SHOTGUN")
+            if (weapon == "MOSSBERG 590")
             {
                 for (float tt = 0.1f; tt < length - 0.5f; tt += 0.45f) PlayLater(tt, "reload_shell", pos, 0.8f, 0.2f);
                 PlayLater(length - 0.35f, "reload_pump", pos, 0.9f, 0.2f);
@@ -126,39 +129,93 @@ namespace Carl
         class Voice
         {
             public AudioSource src;
-            public float cooldown = 2f, lastPain, pitch, spokeDeath;
+            public AudioLowPassFilter muffle;
+            public float cooldown = 2f, lastPain, pitch, spokeDeath, vol = 1f;
             public bool wasDead;
         }
         readonly Dictionary<HumanBody, Voice> voices = new Dictionary<HumanBody, Voice>();
         readonly List<HumanBody> gone = new List<HumanBody>();
+        AudioListener listener;
+
+        /// <summary>A voice carries this far (m); past it the person can't be heard at all.</summary>
+        const float VoiceRange = 40f;
+        static AnimationCurve voiceFalloff;
+
+        /// <summary>
+        /// Loudness against distance (as a fraction of VoiceRange): full up close, roughly inverse-square after
+        /// a couple of metres, and properly silent at the edge, unlike Unity's logarithmic curve that never
+        /// reaches zero.
+        /// </summary>
+        static AnimationCurve VoiceFalloff()
+        {
+            if (voiceFalloff != null) return voiceFalloff;
+            var keys = new List<Keyframe>();
+            const float near = 1.5f / VoiceRange;
+            keys.Add(new Keyframe(0f, 1f));
+            for (int i = 0; i <= 12; i++)
+            {
+                float x = Mathf.Lerp(near, 1f, i / 12f);
+                float d = x * VoiceRange;
+                float inv = 1.5f / d;                                      // inverse distance from the near radius
+                float edge = Mathf.SmoothStep(1f, 0f, Mathf.InverseLerp(0.6f, 1f, x));
+                keys.Add(new Keyframe(x, Mathf.Clamp01(inv) * edge));
+            }
+            voiceFalloff = new AnimationCurve(keys.ToArray());
+            for (int i = 0; i < voiceFalloff.length; i++) voiceFalloff.SmoothTangents(i, 0f);
+            return voiceFalloff;
+        }
 
         void UpdateVoices(float dt)
         {
             gone.Clear();
             foreach (var kv in voices) if (kv.Key == null) gone.Add(kv.Key);
             foreach (var g in gone) voices.Remove(g);
+            if (listener == null || !listener.isActiveAndEnabled) listener = FindAnyObjectByType<AudioListener>();
             foreach (var h in HumanBody.All)
             {
                 if (h == null || h.physio == null || h.Head == null) continue;
                 if (!voices.TryGetValue(h, out var v))
                 {
                     var s = h.Head.gameObject.AddComponent<AudioSource>();
-                    s.playOnAwake = false; s.spatialBlend = 1f; s.minDistance = 1.2f; s.maxDistance = 45f;
-                    s.rolloffMode = AudioRolloffMode.Logarithmic; s.dopplerLevel = 0f;
-                    v = new Voice { src = s, pitch = Random.Range(0.9f, 1.1f), cooldown = Random.Range(1f, 3f) };
+                    s.playOnAwake = false; s.spatialBlend = 1f; s.minDistance = 1.5f; s.maxDistance = VoiceRange;
+                    s.rolloffMode = AudioRolloffMode.Custom;
+                    s.SetCustomCurve(AudioSourceCurveType.CustomRolloff, VoiceFalloff());
+                    s.dopplerLevel = 0f; s.spread = 30f;
+                    var lp = h.Head.gameObject.AddComponent<AudioLowPassFilter>();
+                    lp.cutoffFrequency = 22000f;
+                    v = new Voice { src = s, muffle = lp, pitch = Random.Range(0.9f, 1.1f), cooldown = Random.Range(1f, 3f) };
                     voices[h] = v;
                 }
+                Hear(h, v);
                 Think(h, v, dt);
             }
         }
 
+        /// <summary>Settings and distance: off means silent; far away means quieter (the curve) and duller.</summary>
+        void Hear(HumanBody h, Voice v)
+        {
+            if (!GameSettings.DummyVoices)
+            {
+                if (v.src.isPlaying) v.src.Stop();
+                return;
+            }
+            v.src.volume = v.vol * GameSettings.Volume * GameSettings.VoiceVolume;
+            if (listener == null) return;
+            // air soaks up the high end over distance: a scream across the map is a dull, distant cry
+            float d = Vector3.Distance(listener.transform.position, h.Head.transform.position);
+            float far = Mathf.InverseLerp(4f, VoiceRange, d);
+            v.muffle.cutoffFrequency = Mathf.Lerp(22000f, 1800f, Mathf.Sqrt(far));
+        }
+
         void Say(Voice v, string group, float vol = 1f, float pitchMul = 1f)
         {
+            if (!GameSettings.DummyVoices) return;
             var clip = Clip(group) ?? Clip("moan");
             if (clip == null) return;
             v.src.Stop();
             v.src.clip = clip;
-            v.src.volume = vol * GameSettings.Volume;
+            v.vol = vol;
+            v.src.volume = vol * GameSettings.Volume * GameSettings.VoiceVolume;
             v.src.pitch = v.pitch * pitchMul * Random.Range(0.97f, 1.03f);
             v.src.Play();
             v.cooldown = clip.length + Random.Range(0.6f, 2.5f);

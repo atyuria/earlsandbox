@@ -12,6 +12,10 @@ namespace Carl
         public static bool InfiniteAmmo;
         public static float MouseSensitivity = 1f;
         public static float Volume = 0.8f;
+        /// <summary>The Earls' screams, moans and begging. Off = silent dummies.</summary>
+        public static bool DummyVoices = true;
+        /// <summary>Loudness of the Earls' voices, on top of the master volume.</summary>
+        public static float VoiceVolume = 1f;
 
         static bool loaded;
 
@@ -27,6 +31,8 @@ namespace Carl
             InfiniteAmmo = PlayerPrefs.GetInt("earl.infiniteAmmo", 0) == 1;
             MouseSensitivity = PlayerPrefs.GetFloat("earl.sens", 1f);
             Volume = PlayerPrefs.GetFloat("earl.volume", 0.8f);
+            DummyVoices = PlayerPrefs.GetInt("earl.voices", 1) == 1;
+            VoiceVolume = PlayerPrefs.GetFloat("earl.voiceVolume", 1f);
         }
 
         public static void Save()
@@ -36,6 +42,8 @@ namespace Carl
             PlayerPrefs.SetInt("earl.infiniteAmmo", InfiniteAmmo ? 1 : 0);
             PlayerPrefs.SetFloat("earl.sens", MouseSensitivity);
             PlayerPrefs.SetFloat("earl.volume", Volume);
+            PlayerPrefs.SetInt("earl.voices", DummyVoices ? 1 : 0);
+            PlayerPrefs.SetFloat("earl.voiceVolume", VoiceVolume);
             PlayerPrefs.Save();
         }
 

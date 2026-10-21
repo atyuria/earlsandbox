@@ -23,6 +23,65 @@ float WoundNoise(float3 p)
 
 float WoundRagged(float3 q, float seed) { return 0.75 + 0.5 * WoundNoise(q * 2.2 + seed * 3.7) + 0.2 * WoundNoise(q * 7.0 + seed); }
 
+// ---- cut meat --------------------------------------------------------------------------------------------
+// Muscle cut across is not a flat red: it is bundles of fibres (fascicles) wrapped in thin pale connective tissue,
+// marbled with fat, dotted with dark clots and small vessels, and wet. Cells of a 3D Voronoi pattern make the
+// bundles; their borders are the fascia.
+
+float3 MeatHash3(float3 p)
+{
+    p = float3(dot(p, float3(127.1, 311.7, 74.7)), dot(p, float3(269.5, 183.3, 246.1)), dot(p, float3(113.5, 271.9, 124.6)));
+    return frac(sin(p) * 43758.5453);
+}
+
+// x = distance to the nearest cell centre, y = distance to the cell border, z = random id of the cell
+float3 MeatCells(float3 p)
+{
+    float3 i = floor(p), f = frac(p);
+    float d1 = 8, d2 = 8; float id = 0;
+    [unroll] for (int z = -1; z <= 1; z++)
+    [unroll] for (int y = -1; y <= 1; y++)
+    [unroll] for (int x = -1; x <= 1; x++)
+    {
+        float3 g = float3(x, y, z);
+        float3 o = MeatHash3(i + g);
+        float d = length(g + o - f);
+        if (d < d1) { d2 = d1; d1 = d; id = o.x; }
+        else if (d < d2) d2 = d;
+    }
+    return float3(d1, (d2 - d1) * 0.5, id);
+}
+
+// Albedo of torn / cut muscle at object-space point P. base: the tissue's own colour. scale: bundles per metre.
+float3 MeatAlbedo(float3 P, float3 base, float scale)
+{
+    float3 c = MeatCells(P * scale);
+    // each bundle a slightly different red; fibres show as fine streaks inside it
+    float3 col = base * lerp(0.78, 1.18, c.z);
+    col *= 0.85 + 0.3 * WoundNoise(P * scale * float3(2.5, 9.0, 2.5));
+    // fascia between bundles: thin, pale pink-white
+    float fascia = 1.0 - smoothstep(0.01, 0.045, c.y);
+    col = lerp(col, float3(0.8, 0.5, 0.48), fascia * 0.4);
+    // marbling: the odd thin streak of fat
+    float marb = smoothstep(0.8, 0.86, WoundNoise(P * scale * 0.35 + 17.0));
+    col = lerp(col, float3(0.9, 0.74, 0.55), marb * 0.35);
+    // dark clotted blood pooling in the dips
+    float clot = smoothstep(0.66, 0.82, WoundNoise(P * scale * 0.6 + 5.0));
+    col = lerp(col, float3(0.2, 0.0, 0.02), clot * 0.6);
+    // small vessels: pinpoint dark-red dots
+    float3 v = MeatCells(P * scale * 3.1 + 9.0);
+    col = lerp(col, float3(0.3, 0.0, 0.02), (1.0 - smoothstep(0.03, 0.06, v.x)) * step(0.82, v.z));
+    return col;
+}
+
+// How the cut surface catches light: wet, with a slight sheen on the fascia and bumps at the bundles.
+float3 MeatBump(float3 P, float scale)
+{
+    float3 e = float3(0.35 / scale, 0, 0);
+    float h0 = MeatCells(P * scale).y;
+    return float3(MeatCells((P + e.xyy) * scale).y - h0, MeatCells((P + e.yxy) * scale).y - h0, MeatCells((P + e.yyx) * scale).y - h0) * 2.5;
+}
+
 // A limb shot in two: each half is drawn only on its own side of the tear (_ClipPlane: normal xyz, offset w, in
 // the space of the point passed; all zero = not torn). The tear wanders a few centimetres either side of the
 // plane in ragged tongues and notches, like the bullet holes that caused it - never a clean slice.

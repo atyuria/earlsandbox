@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Carl
@@ -41,17 +42,73 @@ namespace Carl
             GL.End();
         }
 
+        // ------------------------------------------------------------ armour during the scan
+        // Solid armour would hide the inside, so while scanning it is swapped for a see-through copy drawn over
+        // the body: you see what they wear and what is under it. A copy rather than a material swap, because
+        // armour makes its own damage material from whatever it is wearing when it is first hit.
+        static Material armourGhostMat;
+        readonly Dictionary<MeshRenderer, MeshRenderer> armourGhosts = new Dictionary<MeshRenderer, MeshRenderer>();
+        readonly HashSet<MeshRenderer> ghostSet = new HashSet<MeshRenderer>();
+        readonly List<MeshRenderer> deadGhosts = new List<MeshRenderer>();
+        static readonly Color ScanTint = new Color(0.6f, 0.82f, 1f);
+
+        readonly HashSet<MeshRenderer> visited = new HashSet<MeshRenderer>();
+
+        void ScanArmour(MeshRenderer r, bool scanning)
+        {
+            if (r == null || ghostSet.Contains(r)) return;
+            visited.Add(r);
+            r.enabled = !scanning;
+            armourGhosts.TryGetValue(r, out var g);
+            if (!scanning) { if (g) g.enabled = false; return; }
+            var srcMf = r.GetComponent<MeshFilter>();
+            if (srcMf == null || srcMf.sharedMesh == null) return;
+            if (g == null)
+            {
+                if (armourGhostMat == null) armourGhostMat = new Material(Mats.Find("Carl/XrayArmour")) { renderQueue = 3030 };
+                var go = new GameObject("XrayArmourGhost");
+                go.layer = r.gameObject.layer;
+                go.transform.SetParent(r.transform, false);
+                go.AddComponent<MeshFilter>();
+                g = go.AddComponent<MeshRenderer>();
+                g.sharedMaterial = armourGhostMat;
+                g.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                g.receiveShadows = false;
+                // the armour's own colour, pulled towards the scanner's blue so it reads as a layer, not as skin
+                var src = r.sharedMaterial;
+                Color c = src != null && src.HasProperty("_Color") ? src.GetColor("_Color") : new Color(0.5f, 0.55f, 0.5f);
+                var mpb = new MaterialPropertyBlock();
+                mpb.SetColor("_Color", Color.Lerp(c, ScanTint, 0.35f));
+                g.SetPropertyBlock(mpb);
+                armourGhosts[r] = g;
+                ghostSet.Add(g);
+            }
+            // dents and cuts replace the mesh: keep the copy in step
+            var mf = g.GetComponent<MeshFilter>();
+            if (mf.sharedMesh != srcMf.sharedMesh) mf.sharedMesh = srcMf.sharedMesh;
+            g.enabled = true;
+        }
+
         void LateUpdate()
         {
             foreach (var h in HumanBody.All) h.SetXray(on || h.forceXray);
-            // armour would hide the inside: hide it while scanning
+            visited.Clear();
             foreach (var a in ArmourSystem.All)
                 if (a != null && a.part != null && a.part.body != null)
                 {
-                    bool show = !(on || a.part.body.forceXray);
-                    foreach (var r in a.GetComponentsInChildren<MeshRenderer>()) r.enabled = show;
-                    foreach (Transform t in a.part.transform) if (t.GetComponent<ArmourPiece>() == null && (t.name == "Trim" || t.name == "Plume")) { var mr = t.GetComponent<MeshRenderer>(); if (mr) mr.enabled = show; }
+                    bool scanning = on || a.part.body.forceXray;
+                    foreach (var r in a.GetComponentsInChildren<MeshRenderer>()) ScanArmour(r, scanning);
+                    foreach (Transform t in a.part.transform)
+                        if (t.GetComponent<ArmourPiece>() == null && (t.name == "Trim" || t.name == "Plume")) ScanArmour(t.GetComponent<MeshRenderer>(), scanning);
                 }
+            deadGhosts.Clear();
+            foreach (var kv in armourGhosts)
+            {
+                if (kv.Key == null) { deadGhosts.Add(kv.Key); continue; }
+                // shot off and lying on the floor: no longer worn, so back to solid
+                if (!visited.Contains(kv.Key) && kv.Value != null && kv.Value.enabled) { kv.Value.enabled = false; kv.Key.enabled = true; }
+            }
+            foreach (var k in deadGhosts) { var g = armourGhosts[k]; armourGhosts.Remove(k); ghostSet.Remove(g); if (g) Destroy(g.gameObject); }
             hoverLabel = null;
             var game = SandboxGame.Instance;
             if (!on || game == null || game.cam == null) return;
@@ -62,6 +119,7 @@ namespace Carl
             for (int i = 0; i < n; i++)
             {
                 if (buf[i].collider is CharacterController) continue;
+                if (PlayerAvatar.Body != null && buf[i].collider.GetComponentInParent<HumanBody>() == PlayerAvatar.Body) continue;
                 if (buf[i].distance >= best) continue;
                 best = buf[i].distance;
                 part = buf[i].collider.GetComponent<BodyPart>();

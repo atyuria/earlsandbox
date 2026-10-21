@@ -23,6 +23,7 @@ namespace Carl
         // spawn options
         public readonly ArmourLoadout spawnArmour = new ArmourLoadout();
         public bool spawnAI = true;
+        public EarlWeapon spawnWeapon = EarlWeapon.None;
         public int spawnCount = 1;
         GameObject ghost;
         Vector3 ghostPos; float ghostYaw; bool ghostValid;
@@ -74,7 +75,7 @@ namespace Carl
                 else
                 {
                     var L = game.weapons.loadouts[gunTab];
-                    string key = gunTab + "|" + L.sight + "|" + L.grip;
+                    string key = gunTab + "|" + L.sight + "|" + L.grip + "|" + L.extMag + "|" + L.autoSwitch + "|" + L.suppressor + L.light + L.laser + L.magnifier;
                     if (key != shownGun) { shownGun = key; stage.ShowGun(game.weapons, gunTab); }
                 }
                 stage.Spin(Time.unscaledDeltaTime);
@@ -94,6 +95,7 @@ namespace Carl
                         if (h == null) break;
                         ArmourSystem.Equip(h, spawnArmour.Clone());
                         h.brain.aiEnabled = spawnAI;
+                        EarlGunner.Arm(h, spawnWeapon);
                     }
                     game.Toast(spawnCount > 1 ? $"{spawnCount} EARLS SPAWNED" : "EARL SPAWNED");
                 }
@@ -274,7 +276,8 @@ namespace Carl
 
         void DrawSettings()
         {
-            panel = new Rect(Screen.width / 2 - 250, Screen.height / 2 - 300, 500, 600);
+            float ph = Mathf.Min(720f, Screen.height - 20f);
+            panel = new Rect(Screen.width / 2 - 250, Screen.height / 2 - ph / 2f, 500, ph);
             panel2 = default;
             GUILayout.BeginArea(panel, card);
             GUILayout.Label("PAUSED", title);
@@ -286,9 +289,17 @@ namespace Carl
             GUILayout.Label("None ... realistic (middle) ... unlimited: wounds never run dry.", small);
             Section("GAME");
             GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
-            GameSettings.Volume = Slider("VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
             GUILayout.Space(4);
             Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
+            Section("AUDIO");
+            GameSettings.Volume = Slider("MASTER VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
+            Check("EARL VOICES", ref GameSettings.DummyVoices);
+            if (GameSettings.DummyVoices)
+            {
+                GameSettings.VoiceVolume = Slider("VOICE VOLUME", Mathf.RoundToInt(GameSettings.VoiceVolume * 100f) + "%", GameSettings.VoiceVolume, 0f, 1f);
+                GUILayout.Label("Screams, moans and begging. Quieter and duller the further away they are; silent past 40 m.", small);
+            }
+            else GUILayout.Label("The Earls make no sound at all.", small);
             Section("MAP");
             GUILayout.BeginHorizontal();
             for (int m = 0; m < MapBuilder.Names.Length; m++) if (Chip(MapBuilder.Names[m], game.mapIndex == m)) game.LoadMap(m);
@@ -335,6 +346,21 @@ namespace Carl
             GUILayout.BeginHorizontal();
             foreach (int n in new[] { 1, 3, 5 }) if (Chip($"x{n}", spawnCount == n)) spawnCount = n;
             GUILayout.EndHorizontal();
+
+            Section("ARMED WITH");
+            GUILayout.BeginHorizontal();
+            if (Chip("NOTHING", spawnWeapon == EarlWeapon.None)) spawnWeapon = EarlWeapon.None;
+            if (Chip("AK-47", spawnWeapon == EarlWeapon.AK47)) spawnWeapon = EarlWeapon.AK47;
+            if (Chip("AR-15", spawnWeapon == EarlWeapon.AR15)) spawnWeapon = EarlWeapon.AR15;
+            if (Chip("GLOCK", spawnWeapon == EarlWeapon.Pistol)) spawnWeapon = EarlWeapon.Pistol;
+            if (Chip("BERETTA", spawnWeapon == EarlWeapon.Beretta)) spawnWeapon = EarlWeapon.Beretta;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (Chip("MOSSBERG 590", spawnWeapon == EarlWeapon.Shotgun)) spawnWeapon = EarlWeapon.Shotgun;
+            if (Chip("KNIFE", spawnWeapon == EarlWeapon.Knife)) spawnWeapon = EarlWeapon.Knife;
+            if (Chip("SWORD", spawnWeapon == EarlWeapon.Sword)) spawnWeapon = EarlWeapon.Sword;
+            GUILayout.EndHorizontal();
+            if (spawnWeapon != EarlWeapon.None) GUILayout.Label(spawnAI ? "He will come for you. Shoot his arm and his aim goes; take one arm and he can't steady a rifle." : "Dummies hold it but never use it (turn AI on).", small);
 
             Section("BODY ARMOUR");
             GUILayout.BeginHorizontal();
@@ -398,27 +424,49 @@ namespace Carl
             GUILayout.Label("ARSENAL", title);
             GUILayout.Label("G closes", sub);
             for (int i = 0; i < w.defs.Count; i++)
-                if (GUILayout.Button((i + 1) + "   " + w.defs[i].name, gunTab == i ? bigOn : big, GUILayout.Height(40))) { gunTab = i; scroll = Vector2.zero; }
+                if (GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i ? bigOn : big, GUILayout.Height(i < 7 ? 40 : 34))) { gunTab = i; scroll = Vector2.zero; }
             GUILayout.EndArea();
 
             var d = w.defs[gunTab];
             var L = w.loadouts[gunTab];
             // showcase
             var showR = new Rect(listR.xMax + 14, panel.y + 16, panel.xMax - listR.xMax - 30, Mathf.Min(260f, panel.height * 0.42f));
-            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {d.magazine} RDS" : d.type == WeaponType.Knife ? "STAB · SLASH" : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
+            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {w.MagSize(gunTab)} RDS  ·  {(w.IsAuto(gunTab) ? "FULL AUTO" : "SEMI")}" :d.type == WeaponType.Knife ? "STAB · SLASH" : d.type == WeaponType.Tool ? "HOLD LMB GRAB · RMB THROW · SCROLL DISTANCE" : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
             Showcase(showR, d.name, detail);
 
             var optR = new Rect(showR.x, showR.yMax + 10, showR.width, panel.yMax - showR.yMax - 26);
             GUILayout.BeginArea(optR);
             scroll = GUILayout.BeginScrollView(scroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+            // you start with nothing: take what you want to carry
+            if (Chip(w.owned[gunTab] ? "✓  CARRYING  ·  PUT BACK" : "TAKE THIS WEAPON", !w.owned[gunTab], 0f, 36f)) w.Give(gunTab, !w.owned[gunTab]);
+            GUILayout.Space(4);
+            if (d.bulletMass > 0.5f && d.type == WeaponType.Knife)
+                GUILayout.Label(d.name == "HAMMER" ? "LEFT CLICK overhead smash · RIGHT CLICK side swing · hold ALT and move the mouse to swing it freely. Crushes bone." : "LEFT CLICK overhead cut · RIGHT CLICK slash · hold ALT and move the mouse to swing it freely: fast cuts take limbs off, armour turns it.", small);
             if (d.type == WeaponType.Gun)
             {
-                var am = w.loadouts[gunTab].ammo >= 0 && AmmoTable.For(d.name) != null ? AmmoTable.For(d.name)[Mathf.Clamp(L.ammo, 0, AmmoTable.For(d.name).Length - 1)] : null;
+                var am =w.loadouts[gunTab].ammo >= 0 && AmmoTable.For(d.name) != null ? AmmoTable.For(d.name)[Mathf.Clamp(L.ammo, 0, AmmoTable.For(d.name).Length - 1)] : null;
                 float energy = am != null ? am.Energy * am.pellets : d.Energy;
                 Stat("DAMAGE", Mathf.Sqrt(energy / 18000f), $"{energy:0} J");
                 Stat("PENETRATION", (am != null ? am.pen : 3f) / 9f, $"{(am != null ? am.pen : 3f):0.#}");
                 Stat("RECOIL", d.recoil / 8f, $"{d.recoil:0.#}");
-                Stat("FIRE RATE", d.rpm / 700f, $"{d.rpm:0} RPM");
+                Stat("FIRE RATE", w.Rpm(gunTab) / 1100f, $"{w.Rpm(gunTab):0} RPM  {(w.IsAuto(gunTab) ? "AUTO" : "SEMI")}");
+                Stat("MAGAZINE", w.MagSize(gunTab) / 33f, $"{w.MagSize(gunTab)} RDS");
+                float spreadDeg = am != null && am.pellets > 1 ? am.spread : d.spread;
+                Stat("ACCURACY", 1f - Mathf.Clamp01(spreadDeg / 5f), $"{spreadDeg:0.0#}°");
+                if (am != null && am.incendiary) GUILayout.Label("INCENDIARY: sets a 30 m jet of fire, sears whoever it hits.", small);
+            }
+            if (d.name == "GLOCK 17")
+            {
+                Section("MODIFICATIONS");
+                GUILayout.BeginHorizontal();
+                if (Chip("17 RD MAG", !L.extMag)) { L.extMag = false; w.RefreshAttachments(); }
+                if (Chip("33 RD EXTENDED MAG", L.extMag)) { L.extMag = true; w.RefreshAttachments(); }
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (Chip("SEMI-AUTO", !L.autoSwitch)) { L.autoSwitch = false; w.RefreshAttachments(); }
+                if (Chip("GLOCK SWITCH  FULL AUTO", L.autoSwitch)) { L.autoSwitch = true; w.RefreshAttachments(); }
+                GUILayout.EndHorizontal();
+                GUILayout.Label("The switch makes it fire about 1100 rounds a minute: an extended mag empties in under two seconds and the muzzle climbs fast.", small);
             }
             var ammo = AmmoTable.For(d.name);
             if (ammo != null)
@@ -448,6 +496,21 @@ namespace Carl
                 if (Chip("ANGLED  FASTER AIM", L.grip == GripKind.Angled)) { L.grip = GripKind.Angled; w.RefreshAttachments(); }
                 GUILayout.EndHorizontal();
             }
+            if (WeaponController.SuppressorFor(d) || WeaponController.LightFor(d) || WeaponController.LaserFor(d))
+            {
+                Section("MUZZLE AND RAILS");
+                GUILayout.BeginHorizontal();
+                if (WeaponController.SuppressorFor(d) && Check(WeaponController.IsPistol(d) ? "SUPPRESSOR  9MM CAN" : "SUPPRESSOR  QD CAN", ref L.suppressor)) w.RefreshAttachments();
+                if (WeaponController.LightFor(d) && Check("WEAPON LIGHT  X300", ref L.light)) w.RefreshAttachments();
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (WeaponController.LaserFor(d) && Check("LASER  PEQ-15", ref L.laser)) w.RefreshAttachments();
+                if (WeaponController.MagnifierFor(d) && (L.sight == SightKind.RedDot || L.sight == SightKind.Holo) && Check("3X MAGNIFIER  G33", ref L.magnifier)) w.RefreshAttachments();
+                GUILayout.EndHorizontal();
+                GUILayout.Label("Suppressed shots carry about a third as far and barely flash. The light lights what you point at; the laser dot sits where the barrel points.", small);
+            }
+            if (d.name == "TASER")
+                GUILayout.Label("Two barbed probes on 7.6 m wires. Both in the same man and far enough apart: five seconds of lock-up per trigger pull. Pull again while the wires are in him for another five. R swaps the cartridge.", small);
             if (d.type == WeaponType.Grenade)
             {
                 Section("FUSE");
@@ -457,7 +520,34 @@ namespace Carl
                 L.shrapnel = Mathf.RoundToInt(Slider("SHRAPNEL", $"{L.shrapnel} fragments", L.shrapnel, 80f, 700f) / 10f) * 10;
                 GUILayout.Label("More fragments: deadlier, but a heavier grenade you can't throw as far.", small);
             }
-            if (d.type == WeaponType.Knife) GUILayout.Label("LEFT CLICK stab  ·  RIGHT CLICK slash.  Blades skid off plate armour.  Hack at the same spot to cut deeper.", small);
+            // what you wear: the same armour the Earls wear, on your own body
+            Section("YOUR ARMOUR");
+            GUILayout.BeginHorizontal();
+            string[] presets = { "NONE", "6B45 VEST", "VEST + ALTYN", "OPERATOR", "KNIGHT" };
+            for (int i = 0; i < presets.Length; i++)
+                if (Chip(presets[i], PlayerAvatar.ArmourPreset == i))
+                {
+                    PlayerAvatar.ArmourPreset = i;
+                    var A = new ArmourLoadout { vest = VestKind.None, helmet = HelmetKind.None };
+                    if (i == 1 || i == 2 || i == 3) A.vest = VestKind.Russian6B45;
+                    if (i == 2) A.helmet = HelmetKind.Spetsnaz;
+                    if (i == 3) A.helmet = HelmetKind.Ratnik;
+                    if (i == 4) { A.vest = VestKind.KnightCuirass; A.helmet = HelmetKind.Knight; A.pauldrons = A.vambraces = A.gauntlets = A.tassets = A.cuisses = A.greaves = A.sabatons = true; }
+                    PlayerAvatar.Wear(A);
+                }
+            GUILayout.EndHorizontal();
+            GUILayout.Label("Worn on your own body: plates stop rounds and blades exactly as they do for an Earl.", small);
+            if (d.name == "KNIFE") GUILayout.Label("LEFT CLICK stab  ·  RIGHT CLICK slash.  Blades skid off plate armour.  Hack at the same spot to cut deeper.", small);
+            if (d.type == WeaponType.Gun)
+            {
+                GUILayout.Space(8);
+                if (Chip("RESET TO STOCK", false, 160f))
+                {
+                    L.ammo = 0; L.grip = GripKind.None; L.extMag = false; L.autoSwitch = false; L.suppressor = L.light = L.laser = L.magnifier = false;
+                    L.sight = d.scope ? SightKind.Scope8x : SightKind.Iron;
+                    w.RefreshAttachments();
+                }
+            }
             GUILayout.EndScrollView();
             GUILayout.EndArea();
         }

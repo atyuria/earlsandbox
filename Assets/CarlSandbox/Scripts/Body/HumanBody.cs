@@ -21,7 +21,7 @@ namespace Carl
         }
 
         public int number;
-        public string DisplayName => $"EARL #{number:00}";
+        public string DisplayName => this == PlayerAvatar.Body ? "YOU" : $"EARL #{number:00}";
         public readonly BodyPart[] parts = new BodyPart[17];
         public readonly List<BodyPart> partList = new List<BodyPart>();
         public readonly List<Organ> organs = new List<Organ>();
@@ -416,24 +416,54 @@ namespace Carl
             Mesh mesh;
             if (def.name == "RIBCAGE")
             {
-                mesh = RibcageMesh();
+                mesh = AnatomyMeshes.Ribcage();
             }
             else if (def.capsule)
             {
                 float len = Vector3.Distance(def.a, def.b);
-                float r = def.kind == TissueKind.Spine ? def.radii.x * 0.75f : def.radii.x;
-                mesh = def.kind == TissueKind.Bone ? AnatomyMeshes.LongBone(len * 0.5f, r) : ProcMesh.Capsule(r, r, len * 0.5f + r, 8, 2, 2);
+                float r = def.radii.x;
+                var rot = Quaternion.FromToRotation(Vector3.up, def.b - def.a);
+                int seed = def.name.Length * 7 + def.side * 3;
+                switch (def.kind)
+                {
+                    case TissueKind.Bone: mesh = AnatomyMeshes.LongBone(len * 0.5f, r); break;
+                    // the body's front, in the capsule's own space, so the vertebrae face the right way
+                    case TissueKind.Spine: mesh = AnatomyMeshes.Spine(len * 0.5f, r, Quaternion.Inverse(rot) * Vector3.forward); break;
+                    case TissueKind.Artery: case TissueKind.Vein: mesh = AnatomyMeshes.Vessel(len * 0.5f, r, seed); break;
+                    case TissueKind.Airway: mesh = AnatomyMeshes.Trachea(len * 0.5f, r); break;
+                    default: mesh = ProcMesh.Capsule(r, r, len * 0.5f + r, 8, 2, 2); break;
+                }
                 go.transform.localPosition = (def.a + def.b) * 0.5f;
-                go.transform.localRotation = Quaternion.FromToRotation(Vector3.up, def.b - def.a);
+                go.transform.localRotation = rot;
             }
             else
             {
                 var radii = def.shell ? def.radii * 0.95f : def.radii;
-                if (def.kind == TissueKind.Brain) mesh = AnatomyMeshes.Brain(radii, def.name.Contains("LOBE") || def.name.Contains("CORTEX"));
-                else if (def.kind == TissueKind.Organ && !def.shell) mesh = AnatomyMeshes.Organ(radii, def.name.Length * 3.7f);
-                else mesh = ProcMesh.Ellipsoid(radii, def.shell ? 24 : 14, def.shell ? 18 : 10);
+                int seed = Mathf.RoundToInt(def.name.Length * 3.7f);
+                switch (def.organ)
+                {
+                    case OrganId.SmallIntestine: mesh = AnatomyMeshes.Intestine(radii); break;
+                    case OrganId.Colon: mesh = AnatomyMeshes.Colon(radii); break;
+                    case OrganId.Stomach: mesh = AnatomyMeshes.Stomach(radii); break;
+                    case OrganId.Heart: mesh = AnatomyMeshes.Heart(radii); break;
+                    case OrganId.Lungs: mesh = AnatomyMeshes.Lung(radii, def.side, seed); break;
+                    case OrganId.Liver: mesh = AnatomyMeshes.Liver(radii); break;
+                    case OrganId.Kidney: mesh = AnatomyMeshes.Kidney(radii, def.side); break;
+                    case OrganId.Pancreas: mesh = AnatomyMeshes.Pancreas(radii); break;
+                    default:
+                        if (def.name == "SKULL") mesh = AnatomyMeshes.Skull(radii);
+                        else if (def.name == "PELVIC BONE") mesh = AnatomyMeshes.Pelvis(radii);
+                        else if (def.name == "JAW") mesh = AnatomyMeshes.Jaw(radii);
+                        else if (def.name.EndsWith("HAND BONES")) mesh = AnatomyMeshes.Hand(radii);
+                        else if (def.name.EndsWith("FOOT BONES")) mesh = AnatomyMeshes.Foot(radii, def.side);
+                        else if (def.kind == TissueKind.Brain) mesh = AnatomyMeshes.Brain(radii, def.name.Contains("LOBE") || def.name.Contains("CORTEX"));
+                        else if (def.kind == TissueKind.Organ && !def.shell) mesh = AnatomyMeshes.Organ(radii, def.name.Length * 3.7f);
+                        else mesh = ProcMesh.Ellipsoid(radii, def.shell ? 24 : 14, def.shell ? 18 : 10);
+                        break;
+                }
                 go.transform.localPosition = def.a;
             }
+            AnatomyMeshes.EnsureColors(mesh);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = def.alpha < 1f ? xrayClear : xrayOpaque;
@@ -444,32 +474,6 @@ namespace Carl
             mpb.SetColor("_Color", c);
             mr.SetPropertyBlock(mpb);
             return mr;
-        }
-
-        static Mesh ribs;
-        static Mesh RibcageMesh()
-        {
-            if (ribs) return ribs;
-            var combine = new List<CombineInstance>();
-            for (int k = 0; k < 9; k++)
-            {
-                float y = 0.11f - k * 0.025f;
-                float rx = 0.172f * Mathf.Sqrt(Mathf.Max(0.2f, 1f - (y / 0.16f) * (y / 0.16f) * 0.55f));
-                for (int s = -1; s <= 1; s += 2)
-                {
-                    var pts = new List<Vector3>();
-                    for (int i = 0; i <= 7; i++)
-                    {
-                        float t = i / 7f;
-                        float phi = Mathf.Lerp(0.12f, 0.88f, t) * Mathf.PI;
-                        pts.Add(new Vector3(s * rx * Mathf.Sin(phi), y - 0.035f * t, -0.105f * Mathf.Cos(phi)));
-                    }
-                    combine.Add(new CombineInstance { mesh = ProcMesh.Tube(pts, 0.0055f, 5), transform = Matrix4x4.identity });
-                }
-            }
-            ribs = new Mesh { name = "Ribcage" };
-            ribs.CombineMeshes(combine.ToArray(), true, true);
-            return ribs;
         }
 
         public bool XrayVisible => xrayShown;
@@ -679,6 +683,7 @@ namespace Carl
             {
                 float len = Vector3.Distance(p0, p1);
                 var mesh = ProcMesh.Capsule(r, r, len * 0.5f + r, 8, 2, 2);
+                AnatomyMeshes.EnsureColors(mesh);
                 var go = new GameObject(o.def.name + " (broken)");
                 go.transform.SetParent(parent, false);
                 go.transform.localPosition = (p0 + p1) * 0.5f;

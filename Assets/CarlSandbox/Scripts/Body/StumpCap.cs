@@ -22,8 +22,9 @@ namespace Carl
             Vector3 n = localOut.normalized;
             Vector3 u = Vector3.Cross(n, Mathf.Abs(n.y) < 0.9f ? Vector3.up : Vector3.right).normalized, v = Vector3.Cross(n, u);
             var verts = new List<Vector3>(); var cols = new List<Color>(); var tris = new List<int>();
-            Color meat = new Color(0.46f, 0.06f, 0.07f, 0.25f), dark = new Color(0.25f, 0.02f, 0.03f, 0.55f), fat = new Color(0.62f, 0.38f, 0.22f, 0.2f);
-            Color skin = new Color(0.82f, 0.62f, 0.5f, 0.05f), boneC = new Color(0.86f, 0.82f, 0.72f, 0.15f);
+            // alpha: how far "down" the shader treats it (more blood film); a stump face is right out in the open
+            Color meat = new Color(0.56f, 0.08f, 0.09f, 0.05f), dark = new Color(0.36f, 0.03f, 0.04f, 0.2f), fat = new Color(0.86f, 0.7f, 0.42f, 0.05f);
+            Color skin = new Color(0.82f, 0.62f, 0.5f, 0.0f), boneC = new Color(0.92f, 0.88f, 0.78f, 0.0f);
 
             // ---- lumpy meat face: smooth rings (low-frequency noise around the circle, never per-vertex saw teeth)
             const int Seg = 48, Rings = 6;
@@ -106,25 +107,48 @@ namespace Carl
                 Vector3 nearest = bc + bab * Mathf.Clamp01(Vector3.Dot(localCenter - bc, bab) / bab.sqrMagnitude);
                 Vector3 bpos = c0 + Vector3.ProjectOnPlane(nearest - c0, n);
                 float br = bone.def.radii.x * 0.9f, stick = radius * (0.4f + 0.6f * H(seed, 200));
-                const int BS = 10;
+                // a round shaft (several rings, so it shades like a bone, not a box) ending in a jagged break
+                const int BS = 18, BR = 4;
                 int b0 = verts.Count;
-                for (int k = 0; k <= 1; k++)
+                for (int k = 0; k <= BR; k++)
+                {
+                    float kt = k / (float)BR;
                     for (int s = 0; s < BS; s++)
                     {
                         float a = s / (float)BS * Mathf.PI * 2f;
-                        float h = k == 0 ? -0.01f : stick * (0.45f + 0.9f * H(seed, 210 + s));   // jagged, spiky end
-                        verts.Add(bpos + (u * Mathf.Cos(a) + v * Mathf.Sin(a)) * br * (k == 0 ? 1f : 0.8f + 0.25f * H(seed, 230 + s)) + n * h);
-                        cols.Add(k == 0 ? new Color(0.6f, 0.25f, 0.22f, 0.2f) : boneC);
+                        // the last ring is the broken edge: spikes of uneven height
+                        float jag = k == BR ? 0.45f + 0.9f * H(seed, 210 + s / 2) : 1f;
+                        float h = Mathf.Lerp(-0.01f, stick * 0.6f, kt) * (k == BR ? jag / 0.6f * 0.6f : 1f);
+                        float rr = br * (k == BR ? 0.85f + 0.2f * H(seed, 230 + s) : 1f + 0.04f * Mathf.Sin(a * 3f + seed));
+                        verts.Add(bpos + (u * Mathf.Cos(a) + v * Mathf.Sin(a)) * rr + n * h);
+                        // blood-stained where it leaves the meat, clean bone above
+                        cols.Add(k == 0 ? new Color(0.55f, 0.16f, 0.14f, 0.1f) : Color.Lerp(new Color(0.8f, 0.6f, 0.52f, 0.05f), boneC, kt));
                     }
+                }
+                for (int k = 0; k < BR; k++)
+                    for (int s = 0; s < BS; s++)
+                    {
+                        int s1 = (s + 1) % BS, a0 = b0 + k * BS + s, a1 = b0 + k * BS + s1;
+                        tris.AddRange(new[] { a0, a1, a0 + BS, a1, a1 + BS, a0 + BS });
+                    }
+                // the broken face: a ring of hard white cortex round a spongy dark-red marrow
+                int top = b0 + BR * BS;
+                int ring = verts.Count;
+                for (int s = 0; s < BS; s++)
+                {
+                    Vector3 p = verts[top + s];
+                    Vector3 toAxis = Vector3.ProjectOnPlane(bpos - p, n);
+                    verts.Add(p + toAxis * 0.4f - n * 0.002f);
+                    cols.Add(new Color(0.95f, 0.9f, 0.8f, 0f));
+                }
                 for (int s = 0; s < BS; s++)
                 {
                     int s1 = (s + 1) % BS;
-                    tris.AddRange(new[] { b0 + s, b0 + s1, b0 + BS + s, b0 + s1, b0 + BS + s1, b0 + BS + s });
+                    tris.AddRange(new[] { top + s, top + s1, ring + s, top + s1, ring + s1, ring + s });
                 }
-                // marrow: dark red centre of the broken end
                 int m0 = verts.Count;
-                verts.Add(bpos + n * stick * 0.45f); cols.Add(new Color(0.45f, 0.08f, 0.08f, 0.3f));
-                for (int s = 0; s < BS; s++) { int s1 = (s + 1) % BS; tris.AddRange(new[] { m0, b0 + BS + s1, b0 + BS + s }); }
+                verts.Add(bpos + n * stick * 0.5f); cols.Add(new Color(0.5f, 0.1f, 0.1f, 0.15f));
+                for (int s = 0; s < BS; s++) { int s1 = (s + 1) % BS; tris.AddRange(new[] { m0, ring + s1, ring + s }); }
             }
 
             var mesh = new Mesh { name = "Stump" };

@@ -62,7 +62,9 @@ Shader "Carl/Skin"
                     float4 sh = LOAD_TEXTURE2D(_NbrTex, int2(k, 2));
                     float3 d = pw - h.xyz;
                     float along = dot(d, ax.xyz);
-                    if (h.w > 0.035 || along < -0.004 || along > ax.w) continue;   // just along a small wound
+                    // anywhere along the wound, big or small: a blast crater left this part's skin standing inside
+                    // the next part's open belly as a solid ring
+                    if (along < -0.004 || along > ax.w) continue;
                     // only where this skin is INSIDE the wounded part's body - never its outer surface
                     float3 bc = LOAD_TEXTURE2D(_NbrTex, int2(k, 3)).xyz;
                     float3 bx = LOAD_TEXTURE2D(_NbrTex, int2(k, 4)).xyz;
@@ -223,12 +225,14 @@ Shader "Carl/Skin"
             half4 frag(V i) : SV_Target
             {
                 if (_HoleCount < 0.5) discard;
-                CARL_CLIP(i.posOS) clip(HoleCut(i.posOS) - 0.62);
+                // the far wall is always solid from inside, even where it has a hole of its own: otherwise a
+                // big wound or two overlapping ones let you look straight through the body
+                CARL_CLIP(i.posOS)
                 // the inside of the body: wet torn muscle, darker the further from the opening
                 float g = WoundNoise(i.posOS * float3(60.0, 150.0, 60.0)) * 0.6 + WoundNoise(i.posOS * 260.0) * 0.4;
-                half3 c = lerp(half3(0.2, 0.02, 0.03), half3(0.42, 0.06, 0.07), g);
+                half3 c = MeatAlbedo(i.posOS, lerp(half3(0.24, 0.025, 0.035), half3(0.46, 0.07, 0.08), g), 120.0);
                 float open = HoleCut(i.posOS);                 // 0.62 at the opening's edge
-                c *= lerp(1.0, 0.45, saturate((open - 0.62) / 2.5));
+                c *= lerp(1.0, 0.4, saturate((open - 0.62) / 2.5));
                 return half4(MixFog(c, i.fog), 1);
             }
             ENDHLSL

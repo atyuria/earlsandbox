@@ -608,6 +608,8 @@ namespace Carl
             if (part.id == PartId.Head) physio.AddConcussion(1f);
 
             BloodSystem.Instance?.Spray(worldHit, -worldIn + Random.insideUnitSphere * 0.4f, Mathf.RoundToInt(Mathf.Lerp(10f, 45f, k)), 2f, 7f, 0.9f, 0.008f, part);
+            // what the crater used to hold is thrown out of it
+            Gib.Burst(worldHit, -worldIn, Mathf.RoundToInt(Mathf.Lerp(3f, 16f, k)), Mathf.Lerp(0.015f, 0.04f, k), Mathf.Lerp(3f, 10f, k), part.organs.Exists(o => o.IsBone));
             part.bloodiness = Mathf.Min(1.5f, part.bloodiness + 0.8f);
             RecordHit(part, w, damaged);
 
@@ -632,11 +634,18 @@ namespace Carl
             return best;
         }
 
+        /// <summary>How far short of the joint a limb torn off there ends (m).</summary>
+        const float JointTear = 0.014f;
+
         public void Sever(BodyPart part, Vector3 dir, float force)
         {
             if (part.severed || part.id == PartId.Pelvis || part.joint == null) return;
             var parent = part.parent;
-            Vector3 stumpWorld = part.transform.TransformPoint(part.jointLocal);
+            // where the joint is on the parent (its rest position there): the limb itself may already have been
+            // shoved out of place by the blast that is taking it off, which put the stump in the middle of the arm
+            Vector3 stumpWorld = part.joint.connectedBody == parent.rb
+                ? parent.transform.TransformPoint(part.joint.connectedAnchor)
+                : part.transform.TransformPoint(part.jointLocal);
             Destroy(part.joint);
             part.joint = null;
             foreach (var d in body.Descendants(part)) d.severed = true;
@@ -657,12 +666,22 @@ namespace Carl
             w.desc = "TRAUMATIC AMPUTATION";
             parent.AddHole(parent.transform.InverseTransformPoint(stumpWorld), Mathf.Max(0.035f, part.uvRadius * 1.1f));
             part.AddHole(part.jointLocal, Mathf.Max(0.035f, part.uvRadius * 1.1f));
-            // torn, choppy ends: lumpy meat, splintered bone, ragged skin (never a clean cut)
+            // torn, choppy ends: lumpy meat, splintered bone, ragged skin (never a clean cut). Both sides are torn
+            // away just short of the joint, so the cap is the end of the limb rather than sitting inside its
+            // rounded end under closed layers of flesh. (The trunk is not cut back: a shoulder or hip socket
+            // stays a socket.)
             {
                 var cb = part.skin.GetComponent<MeshFilter>().sharedMesh.bounds.center;
-                StumpCap.Build(part, part.jointLocal, part.jointLocal - cb, part.uvRadius * 1.02f, NearestBone(part, part.jointLocal));
+                Vector3 nC = (part.jointLocal - cb).normalized;
+                Vector3 cutC = part.jointLocal - nC * JointTear;
+                LimbIntegrity.ClipAt(part, cutC, nC);
+                StumpCap.Build(part, cutC, nC, part.uvRadius * 1.02f, NearestBone(part, cutC));
                 var plp = parent.transform.InverseTransformPoint(stumpWorld);
-                StumpCap.Build(parent, plp, parent.transform.InverseTransformDirection(part.transform.position - stumpWorld), part.uvRadius * 1.02f, NearestBone(parent, plp));
+                Vector3 nP = parent.transform.InverseTransformDirection(part.transform.position - stumpWorld).normalized;
+                bool limbParent = !Anatomy.IsTorso(parent.id);
+                Vector3 cutP = limbParent ? plp - nP * JointTear : plp;
+                if (limbParent) LimbIntegrity.ClipAt(parent, cutP, nP);
+                StumpCap.Build(parent, cutP, nP, Mathf.Max(part.uvRadius, limbParent ? parent.uvRadius * 0.9f : 0f) * 1.02f, NearestBone(parent, cutP));
             }
             var lw = AddWound(part, stumpWorld, (stumpWorld - part.transform.position).normalized, WoundType.Amputation, stumpBleed * 0.4f, 0f, arterial);
             lw.desc = "SEVERED END";
@@ -678,6 +697,8 @@ namespace Carl
             physio.AddPain(1f, parent.id);
             physio.AddStress(1f);
             BloodSystem.Instance?.Spray(stumpWorld, dir, 45, 2f, 6f, 0.7f, 0.008f, parent);
+            // torn off, not cut: bits of the joint go flying (more the harder it was ripped away)
+            Gib.Burst(stumpWorld, dir, Mathf.Clamp(4 + Mathf.RoundToInt(force * 0.15f), 4, 14), Mathf.Clamp(part.uvRadius * 0.45f, 0.012f, 0.04f), Mathf.Clamp(2f + force * 0.08f, 2f, 9f));
             if (part.id == PartId.Neck || part.id == PartId.Head) physio.Kill("DECAPITATION", true);
             body.ragdoll.OnSevered(part);
             RecordText(parent, $"{part.Name} SEVERED / TRAUMATIC AMPUTATION");

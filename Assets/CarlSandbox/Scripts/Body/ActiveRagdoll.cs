@@ -28,6 +28,10 @@ namespace Carl
         [HideInInspector] public Vector3 crawlDir;
         [HideInInspector] public bool wantCrawl;
         [HideInInspector] public bool wantStand;
+        /// <summary>How hard to put down and keep down: 1 for an Earl, more for you (the main character).</summary>
+        [HideInInspector] public float grit = 1f;
+        /// <summary>Leaning round a corner: -1 left .. +1 right (the spine bends, the head goes out sideways).</summary>
+        [HideInInspector] public float lean;
         [HideInInspector] public Vector3? lookAt;
         [HideInInspector] public float crouch;
         [HideInInspector] public float panic;
@@ -73,7 +77,7 @@ namespace Carl
         {
             float k = Anatomy.IsLeg(part.id) ? 9f : part.id == PartId.Head ? 14f : 22f;
             // a hurt, bleeding, frightened person is knocked off balance far more easily
-            k *= Mathf.Lerp(0.45f, 1f, Steadiness);
+            k *= Mathf.Lerp(0.45f, 1f, Steadiness) * grit;
             balance -= impulse / k;
             float s = Mathf.Clamp01(impulse / 6f) * Random.Range(0.75f, 1.25f);
             var chestT = body.Chest.transform;
@@ -165,6 +169,79 @@ namespace Carl
             Set(s < 0 ? PartId.UpperArmL : PartId.UpperArmR, sh);
             Set(s < 0 ? PartId.ForearmL : PartId.ForearmR, Elbow(elbow));
             Set(s < 0 ? PartId.HandL : PartId.HandR, AX(wrist));
+        }
+
+        // =============================================================== holding a weapon
+        /// <summary>World direction the weapon should point (null: arms do whatever the pose says).</summary>
+        [HideInInspector] public Vector3? aimDir;
+        /// <summary>1 pistol / one hand, 2 rifle (both hands, left on the handguard), 3 blade.</summary>
+        [HideInInspector] public int aimHold;
+        /// <summary>Blade: 0 guard, then a swing from wind-up (-1) through the cut (+1).</summary>
+        [HideInInspector] public float swingPhase;
+
+        /// <summary>An arm pointing along a direction given in the chest's space (identity = hanging down).</summary>
+        static Quaternion Point(Vector3 d)
+        {
+            d.Normalize();
+            float flex = Mathf.Acos(Mathf.Clamp(-d.y, -1f, 1f)) * Mathf.Rad2Deg;
+            float yaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+            return AY(yaw) * AX(-flex);
+        }
+
+        /// <summary>
+        /// Arms that hold a weapon the way a person does: a rifle with the right hand at the grip, elbow down, and
+        /// the left arm reaching out under the handguard; a pistol pushed out in front; a blade held up in guard
+        /// and swung from a wind-up over the shoulder down and across. Weak or missing arms do what they can.
+        /// </summary>
+        /// <summary>
+        /// An arm with the upper arm along one direction and the forearm along another (both in the chest's
+        /// space): the upper arm is turned about its own length so the elbow bends the forearm the right way.
+        /// </summary>
+        void ArmTo(int s, Vector3 upper, Vector3 fore)
+        {
+            Quaternion q = Point(upper);
+            Vector3 fl = Quaternion.Inverse(q) * fore.normalized;
+            float bend = Vector3.Angle(Vector3.down, fl);
+            float twist = fl.x * fl.x + fl.z * fl.z > 1e-4f ? Mathf.Atan2(fl.x, fl.z) * Mathf.Rad2Deg : 0f;
+            Set(s < 0 ? PartId.UpperArmL : PartId.UpperArmR, q * AY(twist));
+            Set(s < 0 ? PartId.ForearmL : PartId.ForearmR, Elbow(Mathf.Clamp(bend, 0f, 145f)));
+        }
+
+        void AimArms()
+        {
+            if (!aimDir.HasValue || physio.dead || physio.consciousness < 0.3f || physio.posture != PostureType.None) return;
+            Vector3 d = body.Chest.transform.InverseTransformDirection(aimDir.Value);
+            // directions below are given as if aiming straight ahead (x right, y up, z along the line)
+            Quaternion a = Quaternion.LookRotation(d.normalized, Vector3.up);
+            bool right = physio.ArmUsable(1), left = physio.ArmUsable(-1);
+            if (aimHold == 3)
+            {
+                // guard: elbow low, blade hand up in front; a swing goes from high over the right shoulder down
+                // and across the body
+                float s = Mathf.Clamp(swingPhase, -1f, 1f);
+                Vector3 gu = new Vector3(0.3f, -0.7f, 0.4f), gf = new Vector3(-0.1f, 0.5f, 0.85f);
+                Vector3 wu = new Vector3(0.75f, 0.35f, -0.2f), wf = new Vector3(-0.2f, 0.9f, -0.3f);
+                Vector3 cu = new Vector3(-0.2f, -0.35f, 0.9f), cf = new Vector3(-0.6f, -0.3f, 0.75f);
+                Vector3 u = s < 0f ? Vector3.Slerp(gu, wu, -s) : Vector3.Slerp(gu, cu, s);
+                Vector3 f = s < 0f ? Vector3.Slerp(gf, wf, -s) : Vector3.Slerp(gf, cf, s);
+                if (right) ArmTo(1, a * u, a * f);
+                if (left) ArmTo(-1, a * new Vector3(-0.3f, -0.8f, 0.3f), a * new Vector3(0.2f, 0.1f, 1f));
+                return;
+            }
+            if (aimHold == 2 && right && left)
+            {
+                // rifle: right elbow down and out, forearm rising to the grip in front of the shoulder;
+                // left arm reaching nearly straight out under the handguard
+                ArmTo(1, a * new Vector3(0.35f, -0.75f, 0.35f), a * new Vector3(-0.5f, 0.55f, 0.65f));
+                ArmTo(-1, a * new Vector3(0.3f, -0.35f, 0.85f), a * new Vector3(0.4f, 0f, 0.9f));
+                Set(PartId.Neck, AX(10f));
+                return;
+            }
+            // pistol, or a rifle held in whichever arm is left: pushed out to the middle along the line
+            int s1 = right ? 1 : left ? -1 : 0;
+            if (s1 == 0) return;
+            ArmTo(s1, a * new Vector3(-0.3f * s1, -0.05f, 1f), a * new Vector3(-0.25f * s1, 0f, 1f));
+            if (aimHold == 1 && right && left) ArmTo(-1, a * new Vector3(0.35f, -0.1f, 1f), a * new Vector3(0.3f, 0f, 1f));
         }
 
         void SetLeg(int s, float hip, float knee, float ankle, float abduct = 0f)
@@ -325,13 +402,37 @@ namespace Carl
 
         // =============================================================== simulation
 
+        // last values written to each joint (see "drive muscles")
+        readonly float[] lastSpring = { -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f };
+        readonly Quaternion[] lastTarget = new Quaternion[17];
+        bool settledCheap;
+
+        public static readonly System.Diagnostics.Stopwatch ProfSw = System.Diagnostics.Stopwatch.StartNew();
+        public static readonly long[] Prof = new long[8];
+        static long profLast;
+        static void PROF(int k) { long t = ProfSw.ElapsedTicks; if (k > 0) Prof[k] += t - profLast; profLast = t; }
         void FixedUpdate()
         {
             if (body == null) return;
+            // the world is frozen (spawn menu open): everyone but you stands still
+            if (WorldFreeze.On && body != PlayerAvatar.Body) return;
             float dt = Time.fixedDeltaTime;
             var pelvis = body.Pelvis.rb;
             var chest = body.Chest.rb;
+            // a corpse that has stopped moving needs far less solver work (the same body, just cheaper to keep still)
+            if (physio.dead && !settledCheap && body.TimeSinceDeath > 4f && pelvis.linearVelocity.sqrMagnitude < 0.01f)
+            {
+                settledCheap = true;
+                foreach (var bp in body.partList) if (bp != null && bp.rb != null) { bp.rb.solverIterations = 6; bp.rb.solverVelocityIterations = 2; }
+            }
+            if (settledCheap && pelvis.linearVelocity.sqrMagnitude > 1f)
+            {
+                // knocked about again (shot, kicked, dragged): full quality while it moves
+                settledCheap = false;
+                foreach (var bp in body.partList) if (bp != null && bp.rb != null) { bp.rb.solverIterations = 14; bp.rb.solverVelocityIterations = 6; }
+            }
 
+            PROF(0);
             // ---- ground probe
             int n = Physics.RaycastNonAlloc(pelvis.position + Vector3.up * 0.1f, Vector3.down, rayBuf, 3f, ~0, QueryTriggerInteraction.Ignore);
             float groundY = pelvis.position.y - 5f;
@@ -346,6 +447,7 @@ namespace Carl
             }
             GroundHeight = pelvis.position.y - groundY;
 
+            PROF(1);
             // ---- decide mode transitions
             bool canStand = physio.CanStand;
             if (mode == BodyMode.Standing || mode == BodyMode.GettingUp)
@@ -382,6 +484,7 @@ namespace Carl
             else baseTone = Mathf.Lerp(0.55f, 1f, physio.consciousness);
             tone = Mathf.MoveTowards(tone, baseTone, dt * (baseTone < tone ? 3f : 1.2f));
 
+            PROF(2);
             // ---- pose
             PoseKind p = pose;
             if (physio.dead || physio.consciousness < 0.2f) p = PoseKind.Limp;
@@ -410,6 +513,7 @@ namespace Carl
             if (p == PoseKind.Writhe) AddNoise(6f + physio.EffectivePain * 12f, 0.55f);
             if (physio.posture == PostureType.Tremor) AddNoise(20f, 12f);
 
+            PROF(3);
             // ---- injury posture while upright: hunch over torso pain, guard a hurt arm
             if (mode != BodyMode.Down && !physio.dead && physio.posture == PostureType.None)
             {
@@ -469,13 +573,26 @@ namespace Carl
                 }
             }
 
+            AimArms();
+            if (Mathf.Abs(lean) > 0.01f && mode == BodyMode.Standing)
+            {
+                // leaning out: the bend is spread up the spine, the neck straightens the head back toward level,
+                // and the hips shift the other way so the weight stays over the feet
+                float l = Mathf.Clamp(lean, -1f, 1f);
+                target[(int)PartId.Abdomen] = target[(int)PartId.Abdomen] * AZ(-l * 14f);
+                target[(int)PartId.Chest] = target[(int)PartId.Chest] * AZ(-l * 20f);
+                target[(int)PartId.Neck] = target[(int)PartId.Neck] * AZ(l * 12f);
+                body.Pelvis.rb.AddForce(-body.Chest.transform.right * l * body.totalMass * 1.2f);
+            }
+
+            PROF(4);
             // ---- drive muscles
             for (int i = 1; i < 17; i++)
             {
                 var bp = body.parts[i];
                 if (bp.joint == null) continue;
                 // hanging off a torn limb: no muscle drives it any more
-                if (bp.severed) { bp.joint.slerpDrive = new JointDrive { positionSpring = 0f, positionDamper = 0.5f, maximumForce = float.MaxValue }; continue; }
+                if (bp.severed) { if (lastSpring[i] != -5f) { bp.joint.slerpDrive = new JointDrive { positionSpring = 0f, positionDamper = 0.5f, maximumForce = float.MaxValue }; lastSpring[i] = -5f; } continue; }
                 float motor = physio.MotorFactor(bp.id);
                 float t = tone * motor;
                 int side = Anatomy.Side(bp.id);
@@ -486,11 +603,18 @@ namespace Carl
                 // broken bones cannot hold load
                 foreach (var o in bp.organs) if (o.IsBone && o.Fractured && !o.def.shell) { t *= o.BadlyBroken ? 0.08f : 0.35f; break; }
                 float spring = HumanBody.SpringFor(bp.id) * t;
-                var drive = new JointDrive { positionSpring = spring, positionDamper = spring * 0.05f + 1.5f, maximumForce = float.MaxValue };
-                bp.joint.slerpDrive = drive;
-                bp.joint.targetRotation = Quaternion.Inverse(target[i]);
+                // writing a joint makes PhysX rebuild it: only when it has actually changed (a still or dead body
+                // re-sent the same 16 drives every step)
+                if (Mathf.Abs(spring - lastSpring[i]) > 0.004f * Mathf.Max(1f, lastSpring[i]) || lastSpring[i] < 0f)
+                {
+                    bp.joint.slerpDrive = new JointDrive { positionSpring = spring, positionDamper = spring * 0.05f + 1.5f, maximumForce = float.MaxValue };
+                    lastSpring[i] = spring;
+                }
+                var q = Quaternion.Inverse(target[i]);
+                if (Quaternion.Angle(q, lastTarget[i]) > 0.15f) { bp.joint.targetRotation = q; lastTarget[i] = q; }
             }
 
+            PROF(5);
             // ---- balance / locomotion
             bool getUpPhases = mode == BodyMode.GettingUp && UpdateGetUpPhases(dt, pelvis, chest);
             if (getUpPhases) { IsCrawling = false; }
@@ -539,7 +663,9 @@ namespace Carl
                 Vector3 vDes = moveDir * moveSpeed;
                 if (stumbleTimer > 0f) { stumbleTimer -= dt; vDes += stumbleVel; }
                 Vector3 vCur = Vector3.ProjectOnPlane(pelvis.linearVelocity, Vector3.up);
-                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * 5f, 950f) * upright * GaitTraction();
+                // (you respond to the keys more crisply than a wandering Earl does)
+                float driveK = grit > 1f ? 8f : 5f;
+                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * driveK, grit > 1f ? 1400f : 950f) * upright * GaitTraction();
                 pelvis.AddForce(fh * 0.6f);
                 chest.AddForce(fh * 0.4f);
                 StabilityForces(dt, pelvis, chest, M);
@@ -551,8 +677,11 @@ namespace Carl
                 float wobble = (1f - clumsy * 0.55f) * (stumbleTimer > 0f ? 0.55f : 1f) * Mathf.Lerp(1f, 0.6f, Unsteady)
                                * (balance < 0.45f ? Mathf.Lerp(0.45f, 1f, Mathf.Max(0f, balance) / 0.45f) : 1f);
                 float lean = pose == PoseKind.Cower ? 20f : pose == PoseKind.Crouch ? 15f : Mathf.InverseLerp(0.8f, 5f, moveSpeed) * 7f;
-                PD(pelvis, yaw * Quaternion.Euler(lean * 0.2f, 0f, 0f), 170f * upright * wobble, 20f * upright, M * 0.12f);
-                PD(chest, yaw * Quaternion.Euler(lean, 0f, 0f), 130f * upright * wobble, 16f * upright, M * 0.08f);
+                // you: held upright and square much more firmly (a steady first-person view), unless really hurt
+                float hold = 1f;
+                if (grit > 1f) { wobble = Mathf.Lerp(wobble, 1f, 0.65f); hold = 1.9f; }
+                PD(pelvis, yaw * Quaternion.Euler(lean * 0.2f, 0f, 0f), 170f * upright * wobble * hold, 20f * upright * Mathf.Sqrt(hold), M * 0.12f);
+                PD(chest, yaw * Quaternion.Euler(lean, 0f, 0f), 130f * upright * wobble * hold, 16f * upright * Mathf.Sqrt(hold), M * 0.08f);
 
                 // fall detection
                 float tilt = Vector3.Angle(pelvis.transform.up, Vector3.up);
@@ -567,6 +696,7 @@ namespace Carl
             {
                 UpdateDown(dt, pelvis, chest);
             }
+            PROF(6);
         }
 
         /// <summary>Set by the brain: try to push up off the ground (strength 0..1). Too hurt = a feeble attempt.</summary>

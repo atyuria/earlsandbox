@@ -20,6 +20,10 @@ namespace Carl
         public Activity activity = Activity.Idle;
         /// <summary>Off: a test dummy - no decisions, it just stands (and reacts physically when hurt).</summary>
         public bool aiEnabled = true;
+        /// <summary>Armed and fighting: an EarlGunner is in charge of him.</summary>
+        [HideInInspector] public bool hostile;
+        /// <summary>This body is the player's.</summary>
+        [HideInInspector] public bool playerControlled;
         public float fear;
         public float bravery;     // personality
         public float compliance;  // personality: how likely to put hands up
@@ -149,6 +153,7 @@ namespace Carl
         void Update()
         {
             if (body == null || rag == null || body.Pelvis == null || body.Head == null) return;
+            if (WorldFreeze.On && body != PlayerAvatar.Body) return;
             float dt = Time.deltaTime;
 
             if (physio.dead)
@@ -157,6 +162,9 @@ namespace Carl
                 rag.moveSpeed = 0f; rag.holdPart = null; rag.wantCrawl = false; rag.wantStand = false;
                 return;
             }
+
+            // the player's own body: driven by the player's input, never by this brain
+            if (playerControlled) { activity = rag.mode == BodyMode.Down ? Activity.Down : Activity.Alert; return; }
 
             if (!aiEnabled)
             {
@@ -173,6 +181,8 @@ namespace Carl
                 thinkTimer = 0.2f;
                 Perceive();
             }
+            // armed and fighting: EarlGunner decides where he goes and what he does (no hands up, no fleeing)
+            if (hostile) { fear = Mathf.Min(fear, 0.3f); return; }
 
             if (aimedAt) { fear = Mathf.Clamp01(fear + dt * 0.35f); lastThreatTime = Time.time; threatPos = PlayerEye; }
             else if (canSeePlayer && Time.time - lastThreatTime < 20f) threatPos = PlayerEye;

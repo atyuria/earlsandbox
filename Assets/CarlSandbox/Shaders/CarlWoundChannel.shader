@@ -55,6 +55,9 @@ Shader "Carl/WoundChannel"
             {
                 CARL_CLIP(i.positionOS)
                 float3 n = normalize(i.normalWS);
+                // muscle (red, not fat / bone / organ) gets the cut-meat surface: bundles, fascia, marbling
+                half meatK = saturate((i.color.r - i.color.g - i.color.b) * 3.0);
+                n = normalize(n - TransformObjectToWorldDir(MeatBump(i.positionOS, 100.0)) * meatK);
                 Light ml = GetMainLight(TransformWorldToShadowCoord(i.positionWS));
                 half atten = lerp(0.45, 1.0, ml.shadowAttenuation);
                 half3 vdir = normalize(GetWorldSpaceViewDir(i.positionWS));
@@ -66,16 +69,19 @@ Shader "Carl/WoundChannel"
                 // fibres and clots
                 float grain = WoundNoise(i.positionOS * float3(160, 260, 160)) * 0.6 + WoundNoise(i.positionOS * 420.0) * 0.4;
                 half3 tissue = i.color.rgb * (0.78 + 0.4 * grain);
+                tissue = lerp(tissue, MeatAlbedo(i.positionOS, i.color.rgb * 1.2, 100.0), meatK);
                 // a film of blood over everything, pooling deeper down
                 half3 bloodFilm = half3(0.22, 0.0, 0.015);
-                // bone, brain and organs stay readable through the blood; muscle soaks it up
+                // bone, brain and organs stay readable through the blood; muscle soaks it up, but its texture
+                // still shows through
                 half lum = dot(i.color.rgb, half3(0.3, 0.5, 0.2));
-                half film = saturate(0.25 + 0.5 * smoothstep(0.2, 1.0, t)) * (0.6 + 0.4 * grain) * (1.0 - saturate(lum * 1.1) * 0.75);
+                half film = saturate(0.15 + 0.45 * smoothstep(0.2, 1.0, t)) * (0.6 + 0.4 * grain) * (1.0 - saturate(lum * 1.1) * 0.75) * 0.65;
                 tissue = lerp(tissue, bloodFilm, film);
                 // less light reaches the bottom of the channel
-                half ao = lerp(0.85, 0.2, pow(t, 0.7));
+                half ao = lerp(0.9, 0.3, pow(t, 0.7));
                 ao = max(ao, lum * 0.55);   // organs and bone at the bottom still catch some light
-                half spec = pow(saturate(dot(n, h)), 55.0) * 0.22 * atten * (1.0 - t * 0.6);
+                // it is all wet
+                half spec = pow(saturate(dot(n, h)), 70.0) * 0.45 * atten * (1.0 - t * 0.5);
                 half3 col = tissue * light * ao + ml.color * spec;
                 col = MixFog(col, i.fog);
                 return half4(col, 1);

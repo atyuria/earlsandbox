@@ -77,7 +77,7 @@ namespace Carl
             phaseT += dt;
             float M = body.totalMass;
             // weak, hurt people do it slowly and may not make it
-            float strength = Mathf.Clamp01(physio.Effort + 0.25f) * Mathf.Lerp(0.55f, 1.05f, Steadiness);
+            float strength = Mathf.Clamp01(physio.Effort + 0.25f) * Mathf.Lerp(0.55f, 1.05f, Steadiness) * Mathf.Lerp(1f, 1.3f, grit - 1f);
             var ct = chest.transform;
             float hChest = HeightAboveGround(chest.position), hPelvis = HeightAboveGround(pelvis.position);
             UpdateWallBrace(dt);
@@ -147,6 +147,8 @@ namespace Carl
         {
             if (writheSeed < 0f) writheSeed = Random.Range(0f, 50f);
             float pain = physio.EffectivePain;
+            // you keep control of yourself on the floor (to crawl, aim and shoot back)
+            if (body.brain != null && body.brain.playerControlled) return;
             if (pain < 0.25f || physio.consciousness < 0.4f || physio.posture != PostureType.None || IsCrawling || struggle > 0.05f) return;
             float M = body.totalMass;
             float t = Time.time * Mathf.Lerp(0.5f, 0.9f, pain) + writheSeed;

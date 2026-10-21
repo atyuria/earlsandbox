@@ -47,7 +47,8 @@ Shader "Carl/FleshShell"
                 float radial = length(q - a * dot(q, a));
                 // a wound opens the layers in proportion to its size: a small hole narrows fast into a track,
                 // a big blast or exit wound stays wide much deeper
-                float rr = h.w * 0.86 * exp(-max(along, 0) / min(1.5 * max(h.w, 0.003), 0.03)) * (0.9 + 0.2 * WoundNoise(p * 22.0 + seed + _Inset * 120.0));   // gently uneven, no saw teeth
+                // fat is torn back nearly as far as the skin (a thin yellow band at the edge), muscle less so
+                float rr = h.w * lerp(0.7, 0.86, _Tissue) * exp(-max(along, 0) / min(1.5 * max(h.w, 0.003), 0.03 + max(h.w - 0.02, 0.0) * 2.0)) * (0.9 + 0.2 * WoundNoise(p * 22.0 + seed + _Inset * 120.0));   // gently uneven, no saw teeth
                 float d = radial / max(rr, 1e-4);
                 s += exp(-K * d);
                 hard = min(hard, d);
@@ -93,11 +94,13 @@ Shader "Carl/FleshShell"
                 float3 grad = float3(WoundNoise((P + e.xyy) * 160.0) - WoundNoise((P - e.xyy) * 160.0),
                                      WoundNoise((P + e.yxy) * 160.0) - WoundNoise((P - e.yxy) * 160.0),
                                      WoundNoise((P + e.yyx) * 160.0) - WoundNoise((P - e.yyx) * 160.0));
-                n = normalize(n - TransformObjectToWorldDir(grad) * 0.6);
-                half3 c = lerp(half3(0.3, 0.03, 0.04), half3(0.55, 0.09, 0.09), fib);
+                n = normalize(n - TransformObjectToWorldDir(grad) * 0.6 - TransformObjectToWorldDir(MeatBump(P, 105.0)) * _Tissue);
+                half3 c = MeatAlbedo(P, lerp(half3(0.42, 0.04, 0.05), half3(0.66, 0.09, 0.09), fib), 105.0);
                 // subcutaneous fat: lumpy, pale yellow, stained with blood
-                half3 fat = lerp(half3(0.78, 0.6, 0.34), half3(0.9, 0.76, 0.48), WoundNoise(P * 220.0));
-                fat = lerp(fat, half3(0.55, 0.12, 0.1), 0.35 * WoundNoise(P * 90.0 + 3.0));
+                // globules of fat (small cells), soaked through with blood
+                float3 glob = MeatCells(P * 420.0);
+                half3 fat = lerp(half3(0.72, 0.52, 0.28), half3(0.86, 0.68, 0.4), glob.z) * (0.85 + 0.15 * smoothstep(0.0, 0.25, glob.y));
+                fat = lerp(fat, half3(0.5, 0.08, 0.07), 0.25 + 0.4 * WoundNoise(P * 90.0 + 3.0));
                 c = lerp(fat, c, _Tissue);
                 c = lerp(c, half3(0.18, 0.0, 0.015), smoothstep(0.6, 0.85, WoundNoise(P * 110.0 + 7.0)) * 0.7);
                 c *= lerp(1.0, 0.5, _Depth01) * (front ? 1.0 : 0.6);
@@ -106,7 +109,7 @@ Shader "Carl/FleshShell"
                 half3 hv = normalize(ml.direction + vdir);
                 half wrap = saturate((dot(n, ml.direction) + 0.4) / 1.4);
                 half3 light = SampleSH(n) * 0.7 + ml.color * wrap * 0.6;
-                half spec = pow(saturate(dot(n, hv)), 50.0) * 0.35;
+                half spec = pow(saturate(dot(n, hv)), 70.0) * lerp(0.2, 0.5, _Tissue);
                 half3 col = c * light + ml.color * spec * (1.0 - _Depth01 * 0.6);
                 return half4(MixFog(col, i.fog), 1);
             }

@@ -49,7 +49,10 @@ namespace Carl
         {
             cc.enabled = false;
             transform.position = pos;
-            cc.enabled = !flying;
+            var av = GetComponent<PlayerAvatar>();
+            if (av != null) av.Spawn(pos, yawDeg);           // a fresh body there
+            else cc.enabled = !flying;
+            down = false;
             yaw = yawDeg; pitch = 0f;
             velocity = Vector3.zero;
         }
@@ -99,8 +102,25 @@ namespace Carl
 
             shake = Mathf.Max(0f, shake - dt * 1.5f);
             Vector3 shakeOff = shake > 0f ? Random.insideUnitSphere * shake * 1.2f : Vector3.zero;
+            var body = PlayerBody.I;
+            // a damaged cerebellum or a lot of lost blood: the world swims and the aim drifts
+            float wob = body != null ? body.Wobble : 0f;
+            float t = Time.unscaledTime;
+            if (wob > 0.01f && Cursor.lockState == CursorLockMode.Locked)
+            {
+                yaw += (Mathf.PerlinNoise(t * 0.7f, 1.3f) - 0.5f) * wob * 40f * dt;
+                pitch += (Mathf.PerlinNoise(2.1f, t * 0.6f) - 0.5f) * wob * 30f * dt;
+            }
+            float roll = (Mathf.PerlinNoise(t * 0.4f, 5f) - 0.5f) * wob * 25f + (down && PlayerAvatar.Body == null ? 14f : 0f);   // in a body the head lies how it lies
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x, shakeOff.y, shakeOff.z);
+            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x, shakeOff.y, shakeOff.z + roll);
+            var avatar = GetComponent<PlayerAvatar>();
+            bool hasBody = avatar != null && PlayerAvatar.Body != null;
+            // dead or out cold: no control at all
+            if (body != null && (body.dead || body.passedOut)) { if (hasBody) { avatar.Drive(Vector3.zero, false, kb, dt); return; } down = true; Settle(dt); return; }
+            // hold V: free camera (let go and you are back in your body)
+            bool wantFly = kb.vKey.isPressed && (body == null || !body.Paralysed);
+            if (wantFly != flying) { flying = wantFly; cc.enabled = !flying && !hasBody; velocity = Vector3.zero; }
 
             Vector3 input = Vector3.zero;
             if (kb.wKey.isPressed) input.z += 1f;
@@ -120,14 +140,34 @@ namespace Carl
                 return;
             }
 
-            float speed = sprint ? 7f : 4.3f;
-            Vector3 wish = transform.TransformDirection(input) * speed;
+            // your own Earl body walks, falls, crawls and gets up by itself (ActiveRagdoll) - the keys just steer it
+            if (hasBody && avatar.Drive(transform.TransformDirection(input), sprint, kb, dt)) return;
+
+            // ---- no body (fallback): Z to drop (and Z to try to get up), legs that can't carry you, a trip
+            bool canStand = body == null || body.CanStand;
+            if (kb.zKey.wasPressedThisFrame) { if (!down) GoDown(0.3f); else if (canStand) getUp = 1f; }
+            if (!canStand && !down) GoDown(0.6f);
+            if (down)
+            {
+                // hold space to get back up (if your legs and spine let you)
+                if (canStand && kb.spaceKey.isPressed) getUp += dt; else if (getUp < 1f) getUp = 0f;
+                if (getUp >= 0.8f) { down = false; getUp = 0f; }
+                // crawl on your elbows - not at all without arms or below a broken neck
+                float crawl = body == null ? 1f : body.Paralysed ? 0f : 0.35f + 0.65f * body.UsableArms / 2f;
+                input *= 0.9f * crawl;
+                sprint = false;
+            }
+            float speed = (sprint ? 7f : 4.3f) * (body != null ? body.MoveScale : 1f);
+            if (body != null && body.MoveScale < 0.6f) sprint = false;
+            Vector3 wish = transform.TransformDirection(input) * (down ? 1f : speed);
             float gdt = Time.deltaTime > 0f ? dt : 0f;
             if (cc.isGrounded)
             {
                 velocity.x = wish.x; velocity.z = wish.z;
                 velocity.y = -1f;
-                if (kb.spaceKey.wasPressedThisFrame) velocity.y = 5.2f;
+                if (kb.spaceKey.wasPressedThisFrame && !down) velocity.y = 5.2f;
+                // a bad leg gives way now and then
+                if (!down && body != null && Mathf.Min(body.legL, body.legR) < 0.5f && input.sqrMagnitude > 0.1f && Random.value < dt * (0.6f - Mathf.Min(body.legL, body.legR))) GoDown(0.4f);
             }
             else
             {
@@ -135,13 +175,51 @@ namespace Carl
                 velocity.z = Mathf.Lerp(velocity.z, wish.z, gdt * 3f);
                 velocity.y += Physics.gravity.y * gdt;
             }
-            float crouchH = kb.leftCtrlKey.isPressed ? 1.1f : 1.8f;
-            cc.height = Mathf.Lerp(cc.height, crouchH, dt * 10f);
+            lastSprint = sprint && input.z > 0.5f;
+            float crouchH = down ? 0.5f : kb.leftCtrlKey.isPressed ? 1.1f : 1.8f;
+            cc.height = Mathf.Lerp(cc.height, crouchH, dt * (down ? 6f : 10f));
             cc.center = new Vector3(0, cc.height * 0.5f, 0);
             cam.transform.localPosition = new Vector3(0, cc.height - 0.15f, 0);
             // the player moves in real time so slow-mo feels like bullet time
             cc.Move(velocity * dt);
             if (transform.position.y < -60f) Teleport(SandboxGame.Instance.SpawnPoint, yaw);
+        }
+
+        // ------------------------------------------------------------ on the ground
+        /// <summary>Lying on the ground (Z, a trip, a leg that won't hold you). You can still look and shoot.</summary>
+        public bool down;
+        float getUp;
+        bool lastSprint;
+
+        public void GoDown(float jolt)
+        {
+            if (down) return;
+            down = true; getUp = 0f;
+            Shake(jolt);
+            recoilPitch -= 12f * jolt;          // the view drops as you go over
+            Sfx.Play("impact_flesh", transform.position, 0.5f, 0f);
+        }
+
+        /// <summary>Out cold / dead: slump to the floor and stay there.</summary>
+        void Settle(float dt)
+        {
+            if (flying) { flying = false; cc.enabled = true; }
+            cc.height = Mathf.Lerp(cc.height, 0.5f, dt * 4f);
+            cc.center = new Vector3(0, cc.height * 0.5f, 0);
+            cam.transform.localPosition = new Vector3(0, cc.height - 0.15f, 0);
+            velocity.x = velocity.z = 0f;
+            velocity.y = cc.isGrounded ? -1f : velocity.y + Physics.gravity.y * dt;
+            cc.Move(velocity * dt);
+        }
+
+        // running into something low (a kerb, a crate, a body) at a sprint trips you over
+        void OnControllerColliderHit(ControllerColliderHit hit)
+        {
+            if (down || !lastSprint || hit.normal.y > 0.4f) return;
+            float h = hit.point.y - transform.position.y;
+            if (h < 0.08f || h > 0.5f) return;
+            if (Physics.Raycast(transform.position + Vector3.up * 0.7f, transform.forward, 0.8f, ~0, QueryTriggerInteraction.Ignore)) return;   // a wall, not a trip
+            if (Random.value < 0.35f) GoDown(0.7f);
         }
     }
 }

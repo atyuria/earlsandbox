@@ -45,6 +45,7 @@ namespace Carl
         public readonly List<Vector4> dents = new List<Vector4>();  // xyz local, w depth (m)
         public readonly List<Vector4> breaks = new List<Vector4>(); // xyz local, w radius of the cracked-open area
         public float strapHealth = 100f;     // cut / shot straps let it hang looser
+        public bool rides;                   // pouches: sewn onto the piece they sit on, so they move with it
         public bool fallen;
         float destroyed;                     // area shot / cracked away (m^2)
 
@@ -88,7 +89,6 @@ namespace Carl
 
         void AddDamageMark(Vector3 local, float radius, bool through)
         {
-            if (glass) return;
             var mr = GetComponent<MeshRenderer>();
             if (mr == null) return;
             if (ownMat == null) { ownMat = new Material(mr.sharedMaterial); mr.sharedMaterial = ownMat; ownMat.SetFloat("_PlateUnder", plateUnder ? 1f : 0f); }
@@ -173,6 +173,56 @@ namespace Carl
         /// <summary>Blast / shrapnel: shreds the cloth and loosens it, never strips it off in one go.</summary>
         public void Blasted(float power) { strapHealth = Mathf.Max(0f, strapHealth - power); }
 
+        /// <summary>
+        /// A blast right next to it: the side facing the explosion is peppered with fragment holes and scorched
+        /// tears, plates under it are slammed in, and close enough the cloth is ripped wide open and what is left
+        /// can be torn off the body. strength 0..1 (1 = against it).
+        /// </summary>
+        public void BlastDamage(Vector3 blastWorld, float strength)
+        {
+            if (fallen || strength <= 0.02f || v == null || v.Length == 0) return;
+            Vector3 b = transform.InverseTransformPoint(blastWorld);
+            var nrm = mesh.normals;
+            bool hard = steel || plateUnder || glass;
+            // the nearest point of the piece to the blast takes the worst of it
+            int near = 0; float nd = float.MaxValue;
+            for (int i = 0; i < v.Length; i++) { float d = (v[i] - b).sqrMagnitude; if (d < nd) { nd = d; near = i; } }
+            float nearDist = Mathf.Sqrt(nd);
+            // fragment holes and small tears scattered over the side facing it
+            int tries = Mathf.RoundToInt(Mathf.Lerp(6f, 40f, strength));
+            for (int k = 0; k < tries; k++)
+            {
+                int i = UnityEngine.Random.Range(0, v.Length);
+                Vector3 to = b - v[i];
+                float d = to.magnitude;
+                if (nrm != null && i < nrm.Length && Vector3.Dot(nrm[i], to) <= 0f) continue;      // facing away
+                float w = strength * Mathf.Clamp01(1f - (d - nearDist) / 0.6f);
+                if (UnityEngine.Random.value > w) continue;
+                bool through = !hard || UnityEngine.Random.value < w * 0.35f;
+                AddDamageMark(v[i], Mathf.Lerp(0.004f, 0.016f, w * UnityEngine.Random.value), through);
+            }
+            if (hard)
+            {
+                // the plate takes the overpressure as one big push
+                Vector3 inward = nrm != null && near < nrm.Length ? -nrm[near] : (v[near] - b).normalized;
+                Dent(v[near], inward, Mathf.Lerp(0.04f, 0.09f, strength), Mathf.Lerp(0.002f, 0.012f, strength));
+            }
+            if (strength > 0.55f)
+            {
+                // against it: the cloth is ripped open in a ragged tear around the nearest point
+                int rips = Mathf.RoundToInt(Mathf.Lerp(3f, 9f, (strength - 0.55f) / 0.45f));
+                for (int k = 0; k < rips; k++)
+                {
+                    Vector3 off = UnityEngine.Random.insideUnitSphere * Mathf.Lerp(0.03f, 0.08f, strength);
+                    AddDamageMark(v[near] + off, Mathf.Lerp(0.02f, 0.045f, strength) * UnityEngine.Random.Range(0.6f, 1f), true);
+                }
+                strapHealth = Mathf.Max(0f, strapHealth - 60f * strength);
+                // torn to rags and nothing holding it on: blown off
+                if (strength > 0.85f && (!hard || area > 0f && destroyed > area * 0.2f)) FallOff(v[near] - b == Vector3.zero ? Vector3.up : transform.TransformDirection(v[near] - b));
+            }
+            if (area > 0f && destroyed > area * 0.3f) FallOff(transform.TransformDirection(v[near] - b));
+        }
+
         // ------------------------------------------------------------ worn, not glued on
         Vector3 restPos; Quaternion restRot; bool restSet;
         Vector3 lastPartVel, swayOff, swayVel, swayRot, swayRotVel, accSmooth;
@@ -183,7 +233,7 @@ namespace Carl
 
         void LateUpdate()
         {
-            if (fallen || visor || part == null || part.rb == null) return;
+            if (fallen || visor || rides || part == null || part.rb == null) return;
             if (!restSet) { restPos = transform.localPosition; restRot = transform.localRotation; restSet = true; }
             float dt = Time.deltaTime;
             if (dt <= 0f) return;
@@ -224,6 +274,9 @@ namespace Carl
             if (fallen) return;
             fallen = true;
             ArmourSystem.All.Remove(this);
+            // pouches and flaps sewn onto it come off with it
+            foreach (var c in GetComponentsInChildren<ArmourPiece>())
+                if (c != this && !c.fallen) { c.fallen = true; ArmourSystem.All.Remove(c); }
             var body = part != null ? part.body : null;
             transform.SetParent(null, true);
             var col = gameObject.AddComponent<BoxCollider>();
@@ -296,26 +349,44 @@ namespace Carl
         static void ResetStatics() { All.Clear(); camo = null; }
 
         /// <summary>Nearest armour piece along a ray (world space).</summary>
-        public static ArmourPiece Raycast(Vector3 origin, Vector3 dir, float maxDist, out float dist, out Vector3 local, HumanBody only = null)
+        public static ArmourPiece Raycast(Vector3 origin, Vector3 dir, float maxDist, out float dist, out Vector3 local, HumanBody only = null, HumanBody exclude = null)
         {
             ArmourPiece best = null; dist = maxDist; local = default;
             foreach (var p in All)
             {
                 if (p == null || p.fallen || p.part == null) continue;
                 if (only != null && p.part.body != only) continue;
+                if (exclude != null && p.part.body == exclude) continue;
                 if (p.Raycast(origin, dir, dist, out float d, out Vector3 l) && d < dist) { dist = d; local = l; best = p; }
             }
             return best;
         }
 
-        /// <summary>Blast: loosens straps and shreds cloth around it.</summary>
+        /// <summary>Takes everything off a body (armour, trim, pouches, plumes), so something else can be put on.</summary>
+        public static void Remove(HumanBody b)
+        {
+            if (b == null) return;
+            foreach (var bp in b.partList)
+            {
+                var gone = new List<GameObject>();
+                foreach (Transform t in bp.transform)
+                    if (t.GetComponent<ArmourPiece>() != null || t.name == "Trim" || t.name == "Plume") gone.Add(t.gameObject);
+                foreach (var g in gone) { foreach (var ap in g.GetComponentsInChildren<ArmourPiece>()) All.Remove(ap); UnityEngine.Object.Destroy(g); }
+            }
+        }
+
+        /// <summary>Blast: loosens straps, and shreds and rips open whatever is close to it.</summary>
         public static void Blast(Vector3 pos, float radius, float power)
         {
             foreach (var p in All.ToArray())
             {
                 if (p == null || p.fallen) continue;
-                float d = Vector3.Distance(p.transform.position, pos);
-                if (d < radius) p.Blasted(power * (1f - d / radius));
+                // distance to the piece itself, not its pivot (a vest's pivot is the middle of the chest)
+                Vector3 closest = p.transform.TransformPoint(p.bounds.ClosestPoint(p.transform.InverseTransformPoint(pos)));
+                float d = Vector3.Distance(closest, pos);
+                if (d >= radius) continue;
+                p.Blasted(power * (1f - d / radius));
+                p.BlastDamage(pos, Mathf.Pow(Mathf.Clamp01(1f - d / 1.2f), 1.5f));
             }
         }
 
@@ -353,12 +424,24 @@ namespace Carl
             foreach (var bp in b.partList)
             {
                 ArmourPiece main = null;
-                foreach (Transform t in bp.transform) { var ap = t.GetComponent<ArmourPiece>(); if (ap != null && !ap.visor && !ap.glass && ap.swingHang <= 0f) { main = ap; break; } }
+                foreach (Transform t in bp.transform) { var ap = t.GetComponent<ArmourPiece>(); if (ap != null && !ap.visor && !ap.glass && !ap.rides && ap.swingHang <= 0f) { main = ap; break; } }
                 if (main == null) continue;
                 var trims = new List<Transform>();
-                foreach (Transform t in bp.transform) if ((t.name == "Trim" || t.name == "Plume") && t.GetComponent<ArmourPiece>() == null) trims.Add(t);
+                foreach (Transform t in bp.transform) { var tp = t.GetComponent<ArmourPiece>(); if (((t.name == "Trim" || t.name == "Plume") && tp == null) || (tp != null && tp.rides)) trims.Add(t); }
                 foreach (var t in trims) t.SetParent(main.transform, true);
             }
+        }
+
+        /// <summary>Cordura with magazines in it: slows a round a little, stops nothing.</summary>
+        const float PouchClass = 1.2f;
+
+        /// <summary>A pouch is its own piece (so rounds rip it and can shoot it off) but rides on the vest.</summary>
+        static ArmourPiece Pouch(ArmourPiece p)
+        {
+            if (p == null) return null;
+            p.rides = true;
+            p.looseness = 0f;
+            return p;
         }
 
         static float Smooth(float e0, float e1, float x) { float t = Mathf.Clamp01((x - e0) / (e1 - e0)); return t * t * (3f - 2f * t); }
@@ -404,7 +487,7 @@ namespace Carl
                         Build(p, null, 0f, buckle, 0.045f, 0.012f, (u, n) => n.z > 0.3f && Mathf.Abs(Mathf.Abs(u.x) - 0.44f) < 0.07f && u.y > 0.5f && u.y < 0.66f);
                         if (L.pouches)
                             // admin pouch high on the chest
-                            Build(p, null, 0f, camo, 0.055f, 0.03f, (u, n) => n.z > 0.6f && Mathf.Abs(u.x) < 0.32f && u.y > -0.25f && u.y < 0.3f, false, false, (u, n) => Bulge(u));
+                            Pouch(Build(p, "ADMIN POUCH", PouchClass, camo, 0.055f, 0.03f, (u, n) => n.z > 0.6f && Mathf.Abs(u.x) < 0.32f && u.y > -0.25f && u.y < 0.3f, false, false, (u, n) => Bulge(u)));
                     }
                     else
                     {
@@ -416,10 +499,12 @@ namespace Carl
                             for (int i = -1; i <= 1; i++)
                             {
                                 float cx = i * 0.33f;
-                                Build(p, null, 0f, camo, 0.075f, 0.055f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.13f && u.y > -0.62f && u.y < 0.12f, false, false, (u, n) => Bulge(u));
-                                Build(p, null, 0f, webbing, 0.082f, 0.01f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.135f && u.y > 0.0f && u.y < 0.2f, false, false, (u, n) => Bulge(u));
+                                var pouch = Pouch(Build(p, "MAG POUCH", PouchClass, camo, 0.075f, 0.055f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.13f && u.y > -0.62f && u.y < 0.12f, false, false, (u, n) => Bulge(u)));
+                                // the flap over its top is sewn to the pouch: shot off, they go together
+                                var flap = Pouch(Build(p, "POUCH FLAP", PouchClass * 0.5f, webbing, 0.082f, 0.01f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.135f && u.y > 0.0f && u.y < 0.2f, false, false, (u, n) => Bulge(u)));
+                                if (pouch != null && flap != null) flap.transform.SetParent(pouch.transform, true);
                             }
-                            Build(p, null, 0f, camo, 0.065f, 0.045f, (u, n) => n.z < -0.55f && Mathf.Abs(u.x) < 0.42f && u.y > -0.6f && u.y < 0.5f, false, false, (u, n) => Bulge(u));
+                            Pouch(Build(p, "BACK POUCH", PouchClass, camo, 0.065f, 0.045f, (u, n) => n.z < -0.55f && Mathf.Abs(u.x) < 0.42f && u.y > -0.6f && u.y < 0.5f, false, false, (u, n) => Bulge(u)));
                         }
                     }
                 }

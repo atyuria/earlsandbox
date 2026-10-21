@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "unityMCP": {
-      "command": "C:/Users/riaan/.local/bin/uvx.exe",
+      "command": "C:/Users/Binky/.local/bin/uvx.exe",
       "args": ["--from", "mcpforunityserver", "mcp-for-unity", "--transport", "stdio"]
     }
   }

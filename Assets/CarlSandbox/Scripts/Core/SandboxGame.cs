@@ -60,6 +60,8 @@ namespace Carl
             Fx.Create();
             Sfx.Create();
             player = PlayerController.Create(Vector3.zero, 0f);
+            PlayerBody.Attach(player.gameObject);
+            PlayerAvatar.Attach(player);
             cam = player.cam;
             weapons = player.gameObject.AddComponent<WeaponController>();
             weapons.Setup(player);
@@ -97,6 +99,7 @@ namespace Carl
 
         public void LoadMap(int index)
         {
+            WorldFreeze.Set(false);
             ClearAll();
             if (mapRoot != null) Destroy(mapRoot.gameObject);
             mapIndex = index;
@@ -142,13 +145,14 @@ namespace Carl
         {
             medical?.Select(null);
             if (medical != null && medical.selected != null) medical.Select(medical.selected);
-            foreach (var h in HumanBody.All.ToArray()) if (h) Destroy(h.gameObject);
-            HumanBody.All.Clear();
+            foreach (var h in HumanBody.All.ToArray()) if (h && h != PlayerAvatar.Body) Destroy(h.gameObject);
+            HumanBody.All.RemoveAll(h => h != PlayerAvatar.Body);
             foreach (var g in FindObjectsByType<Grenade>()) Destroy(g.gameObject);
             // torn-off limbs, the strands they hung by, and armour that came off
             foreach (var c in FindObjectsByType<LimbChunk>()) Destroy(c.gameObject);
             foreach (var t in FindObjectsByType<SkinThread>()) Destroy(t.gameObject);
             foreach (var a in FindObjectsByType<ArmourPiece>()) if (a.fallen) Destroy(a.gameObject);
+            foreach (var gb in FindObjectsByType<Gib>()) Destroy(gb.gameObject);
             BloodSystem.Instance?.ClearAll();
             Ballistics.Instance?.ClearAll();
         }
@@ -176,14 +180,17 @@ namespace Carl
                 else menus.Toggle(MenuKind.Settings);
             }
             if (kb.fKey.wasPressedThisFrame && menus.open != MenuKind.Settings) menus.Toggle(MenuKind.Spawn);
+            // the spawn menu stops the world (you can still walk about and place things)
+            WorldFreeze.Set(menus.open == MenuKind.Spawn);
+            WorldFreeze.Tick();
             if (kb.gKey.wasPressedThisFrame && menus.open != MenuKind.Settings) menus.Toggle(MenuKind.Gun);
             if (!menus.IsOpen)
             {
                 if (Cursor.lockState != CursorLockMode.Locked && mouse.leftButton.wasPressedThisFrame && medical.selected == null) LockCursor(true);
                 if (Cursor.lockState != CursorLockMode.Locked && mouse.leftButton.wasPressedThisFrame && mouse.position.ReadValue().x > 520f) LockCursor(true);
             }
-            if (kb.vKey.wasPressedThisFrame) { player.ToggleFly(); Toast(player.flying ? "FLY ON" : "FLY OFF"); }
-            if (kb.qKey.wasPressedThisFrame)
+            // V (held) is the free camera: PlayerController
+            if (kb.tKey.wasPressedThisFrame)
             {
                 slowMo = !slowMo;
                 Time.timeScale = slowMo ? 0.2f : 1f;
@@ -191,14 +198,17 @@ namespace Carl
                 Toast(slowMo ? "SLOW-MO 0.2x" : "TIME 1.0x");
             }
             if (kb.xKey.wasPressedThisFrame) { xray.Toggle(); Toast(xray.on ? "X-RAY ON" : "X-RAY OFF"); }
-            if (kb.hKey.wasPressedThisFrame) showHelp = !showHelp;
+            if (kb.tabKey.wasPressedThisFrame) showHelp = !showHelp;
+            // H: your own injuries - the same medical monitor as for an Earl
+            if (kb.hKey.wasPressedThisFrame && PlayerAvatar.Body != null) medical.Select(medical.selected == PlayerAvatar.Body ? null : PlayerAvatar.Body);
             if (kb.cKey.wasPressedThisFrame) { ClearAll(); Toast("CLEARED"); }
             if (kb.f1Key.wasPressedThisFrame) LoadMap(0);
             if (kb.f2Key.wasPressedThisFrame) LoadMap(1);
             if (kb.f3Key.wasPressedThisFrame) LoadMap(2);
-            if (kb.kKey.wasPressedThisFrame)
+            if (kb.f4Key.wasPressedThisFrame && !kb.leftShiftKey.isPressed) LoadMap(3);
+            if (kb.kKey.wasPressedThisFrame && kb.leftShiftKey.isPressed)
             {
-                foreach (var h in HumanBody.All) if (!h.Dead) h.physio.Kill("ADMIN KILL", true);
+                foreach (var h in HumanBody.All) if (!h.Dead && h != PlayerAvatar.Body) h.physio.Kill("ADMIN KILL", true);
             }
             if (mouse.middleButton.wasPressedThisFrame) SelectUnderCrosshair();
             // debug: snap aim to the nearest Carl (F9 chest, F10 head, F11 thigh)
@@ -276,6 +286,7 @@ namespace Carl
             HumanBody best = null; float bd = float.MaxValue;
             foreach (var h in HumanBody.All)
             {
+                if (h == PlayerAvatar.Body) continue;
                 float d = Vector3.Angle(cam.transform.forward, h.Center - cam.transform.position) + Vector3.Distance(h.Center, cam.transform.position) * 0.2f;
                 if (d < bd) { bd = d; best = h; }
             }
@@ -334,6 +345,7 @@ namespace Carl
             foreach (var hit in hits)
             {
                 if (hit.collider is CharacterController || hit.distance >= best) continue;
+                if (PlayerAvatar.Body != null && hit.collider.GetComponentInParent<HumanBody>() == PlayerAvatar.Body) continue;   // your own head
                 best = hit.distance;
                 var bp = hit.collider.GetComponent<BodyPart>();
                 h = bp != null ? bp.body : null;
@@ -408,15 +420,22 @@ namespace Carl
                 float aimFade = weapons != null && weapons.Current.type == WeaponType.Gun ? Mathf.Clamp01(1f - weapons.AimAmount * 2.5f) : 1f;
                 GUI.color = new Color(1, 1, 1, 0.85f * aimFade);
                 float c = 5f;
-                GUI.DrawTexture(new Rect(W / 2 - 1, H / 2 - c - 4, 2, c), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(W / 2 - 1, H / 2 + 4, 2, c), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(W / 2 - c - 4, H / 2 - 1, c, 2), Texture2D.whiteTexture);
-                GUI.DrawTexture(new Rect(W / 2 + 4, H / 2 - 1, c, 2), Texture2D.whiteTexture);
+                // the crosshair sits where the gun actually points: it wanders as your arms sway, shake and drag
+                Vector2 cp = new Vector2(W / 2, H / 2);
+                if (weapons != null && weapons.Armed && cam != null)
+                {
+                    Vector3 sp = cam.WorldToScreenPoint(weapons.AimPoint);
+                    if (sp.z > 0f) cp = new Vector2(sp.x, H - sp.y);
+                }
+                GUI.DrawTexture(new Rect(cp.x - 1, cp.y - c - 4, 2, c), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(cp.x - 1, cp.y + 4, 2, c), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(cp.x - c - 4, cp.y - 1, c, 2), Texture2D.whiteTexture);
+                GUI.DrawTexture(new Rect(cp.x + 4, cp.y - 1, c, 2), Texture2D.whiteTexture);
                 GUI.color = Color.white;
             }
 
             // top bar
-            GUI.Label(new Rect(W / 2 - 80, 8, 160, 20), $"EARLS  {HumanBody.All.Count:00} / {MaxCarls}", hudCenter);
+            GUI.Label(new Rect(W / 2 - 80, 8, 160, 20), $"EARLS  {HumanBody.All.Count - (PlayerAvatar.Body != null ? 1 : 0):00} / {MaxCarls}", hudCenter);
             fpsSmooth = Mathf.Lerp(fpsSmooth, 1f / Mathf.Max(0.0001f, Time.unscaledDeltaTime), 0.05f);
             GUI.Label(new Rect(W - 120, 8, 110, 20), $"TIME  {Time.timeScale:0.0}x", hudSmall);
             GUI.Label(new Rect(W - 260, 8, 120, 20), $"{fpsSmooth:0} FPS", hudSmall);
@@ -458,28 +477,30 @@ namespace Carl
             float bx = 16f, by = H - bh - 14f;
             if (medical.selected == null && (menus == null || !menus.IsOpen))
             {
+                int shown = 0;
                 for (int i = 0; i < weapons.defs.Count; i++)
-                    GUI.Label(new Rect(bx + i * (bw + 4), by, bw, bh), $"{i + 1}  {weapons.defs[i].name}", i == weapons.current ? hudBarSel : hudBar);
-                GUI.Label(new Rect(bx, by - 40, 600, 20), weapons.Grabbing ? "GRABBING — RELEASE E · LEFT CLICK THROW · SCROLL DISTANCE" : "E GRAB", hudSmall);
+                    if (weapons.owned[i]) GUI.Label(new Rect(bx + shown++ * (bw + 4), by, bw, bh), $"{i + 1}  {weapons.defs[i].name}", i == weapons.current ? hudBarSel : hudBar);
+                if (shown == 0) GUI.Label(new Rect(bx, by, 300, bh), "NO WEAPONS  ·  G: take some from the arsenal", hudBar);
+                GUI.Label(new Rect(bx, by - 40, 600, 20), weapons.Grabbing ? "GRABBING — RELEASE LEFT CLICK · RIGHT CLICK THROW · SCROLL DISTANCE" : "Q / E LEAN", hudSmall);
             }
             GUI.Box(new Rect(W - 230, H - 96, 214, 82), GUIContent.none, hudCard);
             GUI.Label(new Rect(W - 330, H - 64, 300, 50), weapons.AmmoText, hudBig);
-            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Current.name, new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } });
+            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Armed ? weapons.Current.name : "", new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } });
 
             if (showHelp && medical.selected == null && (menus == null || !menus.IsOpen))
             {
                 string help =
                     "<b><color=#F58F29>CONTROLS</color></b>\n" +
-                    "WASD move · SHIFT sprint · SPACE jump · CTRL crouch\n" +
-                    "LMB fire / stab / throw · RMB aim / slash / short toss · R reload\n" +
-                    "1-7 or wheel: weapons\n" +
-                    "F spawn menu  ·  G gun menu  ·  V fly  ·  Q slow-mo\n" +
+                    "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Z drop down\n" +
+                    "LMB fire / stab / swing · RMB aim / slash · R reload · ALT hold: point aim (guns) / swing blade\n" +
+                    "1-9 or wheel: weapons (take them in the G menu)\n" +
+                    "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
                     "X real-time x-ray  ·  MIDDLE CLICK medical panel\n" +
-                    "E hold to grab/drag bodies (rub them on walls)\n" +
-                    "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  C clear  ·  K kill all\n" +
-                    "H hide help  ·  ESC free mouse";
-                GUI.Box(new Rect(12, 12, 470, 166), GUIContent.none, hudCard);
-                GUI.Label(new Rect(26, 22, 450, 150), help, new GUIStyle(hudSmall) { richText = true, fontSize = 12 });
+                    "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
+                    "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
+                    "H your injuries  ·  TAB hide help  ·  ESC free mouse";
+                GUI.Box(new Rect(12, 12, 560, 166), GUIContent.none, hudCard);
+                GUI.Label(new Rect(26, 22, 540, 150), help, new GUIStyle(hudSmall) { richText = true, fontSize = 12 });
             }
         }
     }

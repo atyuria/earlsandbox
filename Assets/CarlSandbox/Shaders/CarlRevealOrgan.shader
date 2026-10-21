@@ -81,8 +81,8 @@ Shader "Carl/RevealOrgan"
             #pragma multi_compile_fog
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
-            struct A { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
-            struct V { float4 positionCS : SV_POSITION; float3 positionWS : TEXCOORD0; float3 normalWS : TEXCOORD1; half fog : TEXCOORD2; float3 positionOS : TEXCOORD3; };
+            struct A { float4 positionOS : POSITION; float3 normalOS : NORMAL; half4 color : COLOR; };
+            struct V { float4 positionCS : SV_POSITION; float3 positionWS : TEXCOORD0; float3 normalWS : TEXCOORD1; half fog : TEXCOORD2; float3 positionOS : TEXCOORD3; half4 color : COLOR; };
 
             V vert(A v)
             {
@@ -92,6 +92,7 @@ Shader "Carl/RevealOrgan"
                 o.normalWS = TransformObjectToWorldNormal(v.normalOS);
                 o.fog = ComputeFogFactor(p.positionCS.z);
                 o.positionOS = v.positionOS.xyz;
+                o.color = v.color;
                 return o;
             }
 
@@ -114,6 +115,8 @@ Shader "Carl/RevealOrgan"
                     crease = 1.0 - smoothstep(0.02, 0.09, abs(frac(v * 3.0) - 0.5));
                     bumpAmt = 0.5;
                 }
+                bool bone = _Pattern > 1.5 && _Pattern < 2.5;
+                if (bone) bumpAmt = 0.06;                               // bone is smooth and hard, not a sponge
                 // bumpy normal from the detail noise
                 float3 e = float3(0.002, 0, 0);
                 float hc = WoundNoise(P * 90.0) - crease * 0.6;
@@ -128,10 +131,25 @@ Shader "Carl/RevealOrgan"
                 // inside the body: little direct light, some fill, wet sheen
                 half3 light = SampleSH(n) * 0.8 + ml.color * wrap * 0.75;
                 float g = WoundNoise(i.positionOS * 220.0) * 0.6 + WoundNoise(i.positionOS * 60.0) * 0.4;
-                half3 c = _Color.rgb * (0.85 + 0.3 * g);
+                // the anatomy meshes carry detail in vertex colour (as for the x-ray): alpha 0 shades this
+                // structure's own colour, alpha 1 is a structure of its own - mapped from x-ray colours to real ones
+                half4 vc = i.color;
+                half3 own = vc.rgb;
+                if (vc.b > vc.r + 0.2 && vc.g < 0.6) own = half3(0.3, 0.06, 0.13);                       // veins: dark purple-red
+                else if (vc.r < 0.5 && vc.g > 0.7 && vc.b > 0.7) own = half3(0.93, 0.88, 0.78);           // spinal cord / nerves: white
+                else if (vc.b > vc.r && vc.g > 0.7) own = half3(0.86, 0.87, 0.88);                        // cartilage: pearly
+                else if (vc.r > 0.85 && vc.g < 0.2) own = half3(0.62, 0.05, 0.07);                        // arteries
+                half3 base = lerp(_Color.rgb * vc.rgb, own, saturate(vc.a));
+                half3 c = base * (0.85 + 0.3 * g);
                 c *= 1.0 - crease * 0.55;                              // dark folds between coils / gyri
-                c = lerp(c, half3(0.3, 0.0, 0.02), 0.15 * g);          // smeared blood
-                half wetness = _Pattern > 1.5 && _Pattern < 2.5 ? 0.12 : 0.6;
+                if (bone)
+                {
+                    // ivory with a pinkish skin of periosteum and streaks of blood, not speckles
+                    c = lerp(base, base * half3(1.0, 0.86, 0.82), WoundNoise(P * 40.0));
+                    c = lerp(c, half3(0.45, 0.03, 0.04), smoothstep(0.55, 0.8, WoundNoise(P * float3(25, 70, 25) + 3.0)) * 0.6);
+                }
+                else c = lerp(c, half3(0.3, 0.0, 0.02), 0.15 * g);    // smeared blood
+                half wetness = bone ? 0.35 : 0.6;
                 half spec = pow(saturate(dot(n, h)), 60.0) * wetness;
                 half3 col = c * light + ml.color * spec;
                 return half4(MixFog(col, i.fog), 1);

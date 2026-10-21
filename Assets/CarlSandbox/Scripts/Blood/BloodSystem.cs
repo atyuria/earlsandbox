@@ -363,6 +363,15 @@ namespace Carl
                 Vector3 d = (dir + Random.insideUnitSphere * spread).normalized;
                 Add(pos, d * Random.Range(speedMin, speedMax), size * Random.Range(0.5f, 1.6f), Random.Range(0.2f, 0.8f), source ? source.body : null, false);
             }
+            SpraySound(pos, count);
+        }
+
+        /// <summary>A wet spatter / hiss when blood sprays out (not every spray, and never loud).</summary>
+        void SpraySound(Vector3 pos, int count)
+        {
+            if (count < 6 || Time.time < nextSpraySound) return;
+            nextSpraySound = Time.time + Random.Range(0.18f, 0.35f);
+            Sfx.Play("blood_spray", pos, Mathf.Clamp(0.08f + count * 0.004f, 0.08f, 0.22f), 1f, 0.8f, 0.12f, 14f);
         }
 
         public void Mist(Vector3 pos, Vector3 dir, int count)
@@ -463,10 +472,11 @@ namespace Carl
                 if (GameSettings.NoBlood) continue;
                 if (GameSettings.UnlimitedBlood) volF = 1f;   // wounds never run dry
 
+                bool own = h == PlayerAvatar.Body;
                 foreach (var bp in h.partList)
                 {
                     // blood carried on the skin runs to the lowest point and drips off
-                    if (bp.bloodiness > 0.3f && Random.value < dt * bp.bloodiness * 1.2f)
+                    if (bp.bloodiness > 0.3f && Random.value < dt * bp.bloodiness * (own ? 0.4f : 1.2f))
                     {
                         Vector3 low = bp.col.ClosestPoint(bp.transform.position + Vector3.down * 2f);
                         Add(low + Vector3.down * 0.005f, bp.rb.GetPointVelocity(low) + Random.insideUnitSphere * 0.05f, Random.Range(0.006f, 0.011f), 0.25f, h, false);
@@ -523,10 +533,13 @@ namespace Carl
                             Vector3 low = bp.col.ClosestPoint(bp.transform.position + Vector3.down * 2f);
                             if (Random.value < 0.6f) { wp = low; wn = Vector3.down; }
                         }
+                        // your own body: a third of the drops (you rarely see them, and each one is simulated)
+                        if (own) perSec *= 0.35f;
                         w.emitAcc += perSec * dt;
                         int n = (int)w.emitAcc;
                         w.emitAcc -= n;
                         float vol = n > 0 ? rate * dt / n * 1.5f : 0f;
+                        if (w.arterial && n >= 3) SpraySound(wp, n * 3);     // the spurt of a cut artery
                         for (int i = 0; i < n; i++)
                         {
                             Vector3 d = (wn + Random.insideUnitSphere * spread).normalized;
@@ -556,7 +569,7 @@ namespace Carl
 
         void Update()
         {
-            float dt = Time.deltaTime;
+            float dt = WorldFreeze.On ? 0f : Time.deltaTime;   // frozen world (spawn menu): the blood stops too
             // blood quality changed: start the world blood again at the new resolution
             if (TileRes != GameSettings.WorldBloodRes)
             {
@@ -597,7 +610,13 @@ namespace Carl
             {
                 var p = bloodyParts[i];
                 if (p == null) { bloodyParts.RemoveAt(i); continue; }
-                p.StepBlood(dt);
+                // the blood running on your own skin: a third as often (it's mostly out of view)
+                if (p.body != null && p.body == PlayerAvatar.Body)
+                {
+                    if ((Time.frameCount + i) % 3 != 0) continue;
+                    p.StepBlood(Mathf.Min(0.1f, dt * 3f));
+                }
+                else p.StepBlood(dt);
             }
             marks.Render();
             RenderDrops();
@@ -714,7 +733,14 @@ namespace Carl
             float spatter = d.mist ? 0f : Mathf.Clamp01((speed - 2f) / 6f);
             StampSurface(hit.point, hit.normal, radius, amount, d.vel, 0, spatter);
             if (!d.mist && hit.normal.y < 0.7f && hit.normal.y > -0.3f) OnWallBlood(hit.point, hit.normal, amount);
+            // a proper drop hitting the floor: a soft plip (a few a second at most, quiet)
+            if (!d.mist && d.size > 0.006f && Time.time > nextDripSound)
+            {
+                nextDripSound = Time.time + Random.Range(0.09f, 0.22f);
+                Sfx.Play("blood_drip", hit.point, Mathf.Clamp(0.08f + d.vol * 0.1f + speed * 0.01f, 0.08f, 0.2f), 1f, 0.6f, 0.15f, 10f);
+            }
         }
+        float nextDripSound, nextSpraySound;
 
         void RenderDrops()
         {

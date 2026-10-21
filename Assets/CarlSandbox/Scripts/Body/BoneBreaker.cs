@@ -91,6 +91,7 @@ namespace Carl
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             var mf = o.reveal.GetComponent<MeshFilter>();
+            AnatomyMeshes.EnsureColors(mesh);
             mf.sharedMesh = mesh;
             // the broken mesh is built in part space
             o.reveal.transform.localPosition = Vector3.zero;
