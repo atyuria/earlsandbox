@@ -1,0 +1,94 @@
+using UnityEngine;
+
+namespace Carl
+{
+    /// <summary>Global x-ray toggle (X) and the label for whatever structure is under the crosshair.</summary>
+    public class XrayController : MonoBehaviour
+    {
+        public bool on;
+        public string hoverLabel;
+        public Color hoverColor;
+        readonly RaycastHit[] buf = new RaycastHit[16];
+
+        public void Toggle() => on = !on;
+        static Material lineMat;
+
+        /// <summary>Wound tracks glow through the body on the x-ray: bright red for bleeding, dull for clotted.</summary>
+        void OnRenderObject()
+        {
+            if (Camera.current == null) return;
+            if (lineMat == null) { var ls = Shader.Find("Hidden/Carl/Lines"); if (ls == null) return; lineMat = new Material(ls); }
+            lineMat.SetPass(0);
+            GL.Begin(GL.LINES);
+            float pulse = 0.6f + 0.4f * Mathf.Sin(Time.time * 8f);
+            foreach (var h in HumanBody.All)
+            {
+                if (h == null || !(on || h.forceXray)) continue;
+                foreach (var bp in h.partList)
+                    foreach (var w in bp.wounds)
+                    {
+                        if (w.type == WoundType.Internal) continue;
+                        Vector3 p = bp.transform.TransformPoint(w.localPos);
+                        Vector3 n = bp.transform.TransformDirection(w.localNormal);
+                        float bleed = Mathf.Clamp01(w.extRate / 4f);
+                        GL.Color(new Color(1f, 0.15f, 0.1f, (0.35f + 0.65f * bleed) * (w.arterial ? pulse : 1f)));
+                        GL.Vertex(p + n * 0.01f); GL.Vertex(p - n * 0.09f);
+                        float r = 0.012f + bleed * 0.01f;
+                        Vector3 a = Vector3.Cross(n, Vector3.up).normalized * r, b = Vector3.Cross(n, a).normalized * r;
+                        GL.Vertex(p - a); GL.Vertex(p + a); GL.Vertex(p - b); GL.Vertex(p + b);
+                    }
+            }
+            GL.End();
+        }
+
+        void LateUpdate()
+        {
+            foreach (var h in HumanBody.All) h.SetXray(on || h.forceXray);
+            // armour would hide the inside: hide it while scanning
+            foreach (var a in ArmourSystem.All)
+                if (a != null && a.part != null && a.part.body != null)
+                {
+                    bool show = !(on || a.part.body.forceXray);
+                    foreach (var r in a.GetComponentsInChildren<MeshRenderer>()) r.enabled = show;
+                    foreach (Transform t in a.part.transform) if (t.GetComponent<ArmourPiece>() == null && (t.name == "Trim" || t.name == "Plume")) { var mr = t.GetComponent<MeshRenderer>(); if (mr) mr.enabled = show; }
+                }
+            hoverLabel = null;
+            var game = SandboxGame.Instance;
+            if (!on || game == null || game.cam == null) return;
+
+            var cam = game.cam.transform;
+            int n = Physics.RaycastNonAlloc(cam.position, cam.forward, buf, 150f, ~0, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue; BodyPart part = null; Vector3 point = default;
+            for (int i = 0; i < n; i++)
+            {
+                if (buf[i].collider is CharacterController) continue;
+                if (buf[i].distance >= best) continue;
+                best = buf[i].distance;
+                part = buf[i].collider.GetComponent<BodyPart>();
+                point = buf[i].point;
+            }
+            if (part == null) return;
+
+            Vector3 p0 = part.transform.InverseTransformPoint(point);
+            Vector3 p1 = part.transform.InverseTransformPoint(point + cam.forward * 1f);
+            Organ pick = null, shell = null; float bt = float.MaxValue, st = float.MaxValue;
+            foreach (var o in part.organs)
+            {
+                if (!o.def.Intersect(p0, p1, 0.004f, out float t0, out _)) continue;
+                if (o.def.shell) { if (t0 < st) { st = t0; shell = o; } }
+                else if (t0 < bt) { bt = t0; pick = o; }
+            }
+            var org = pick ?? shell;
+            if (org != null)
+            {
+                hoverLabel = $"{org.def.name}  —  {org.StatusText()}";
+                hoverColor = org.def.color;
+            }
+            else
+            {
+                hoverLabel = $"{part.Name}  —  SOFT TISSUE {(1f - part.tissueDamage) * 100f:0}%";
+                hoverColor = new Color(0.86f, 0.71f, 0.58f);
+            }
+        }
+    }
+}

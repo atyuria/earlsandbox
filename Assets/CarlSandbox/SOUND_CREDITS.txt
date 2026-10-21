@@ -1,0 +1,4 @@
+Sound credits
+Gunshots: The Free Firearm Sound Library - Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney (CC0) - opengameart.org/content/the-free-firearm-sound-library
+Bone breaks: "Fleshy Bone Break/Snap SFX" by Zane Little Music (CC0)
+Voices: Windows speech synthesis, processed.
