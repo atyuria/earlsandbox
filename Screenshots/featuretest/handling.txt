@@ -1,0 +1,8 @@
+== handling  (19:38:29)
+PASS  Z: you go down
+PASS  lying there: both hands on the gun (R True, L True)
+PASS  getting up: gun in one hand, the other hand free for the floor (carried True, left free True)
+PASS  carried gun stays in the hand (worst gap 0.095 m over 548 frames)
+PASS  back up: both hands on it again (down False)
+PASS  never a third arm (an arm both drawn and shown: 0 of 1436 frames)
+falling frames with hands out: 92

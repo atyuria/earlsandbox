@@ -1,0 +1,4 @@
+== giveup  (19:04:43)
+PASS  passed out after 3.5 s
+PASS  ENTER (GiveUp) kills you: GAVE UP (SUCCUMBED TO INJURIES)
+PASS  respawned alive

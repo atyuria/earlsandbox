@@ -67,6 +67,9 @@ namespace Carl
             weapons.Setup(player);
             xray = gameObject.AddComponent<XrayController>();
             medical = gameObject.AddComponent<MedicalPanel>();
+            gameObject.AddComponent<VisorView>();
+            gameObject.AddComponent<MiniEarl>();
+            MedKit.Attach(gameObject);
             menus = gameObject.AddComponent<Menus>();
             menus.Init(this);
             LoadMap(0);
@@ -107,6 +110,13 @@ namespace Carl
             SpawnPoint = spawn;
             player.Teleport(spawn, playerYaw);
             foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
+            TrenchSquad.Clear();
+            if (MapBuilder.Names[index] == "TRENCHES")
+            {
+                Physics.SyncTransforms();
+                int n = TrenchSquad.Populate(spawn);
+                Toast($"{n} HOSTILE EARLS IN THE TRENCHES");
+            }
             Toast("MAP: " + MapBuilder.Names[index]);
         }
 
@@ -147,6 +157,7 @@ namespace Carl
             if (medical != null && medical.selected != null) medical.Select(medical.selected);
             foreach (var h in HumanBody.All.ToArray()) if (h && h != PlayerAvatar.Body) Destroy(h.gameObject);
             HumanBody.All.RemoveAll(h => h != PlayerAvatar.Body);
+            TrenchSquad.Clear();
             foreach (var g in FindObjectsByType<Grenade>()) Destroy(g.gameObject);
             // torn-off limbs, the strands they hung by, and armour that came off
             foreach (var c in FindObjectsByType<LimbChunk>()) Destroy(c.gameObject);
@@ -201,6 +212,18 @@ namespace Carl
             if (kb.tabKey.wasPressedThisFrame) showHelp = !showHelp;
             // H: your own injuries - the same medical monitor as for an Earl
             if (kb.hKey.wasPressedThisFrame && PlayerAvatar.Body != null) medical.Select(medical.selected == PlayerAvatar.Body ? null : PlayerAvatar.Body);
+            // N: flip your own helmet's visor up or down
+            if (kb.nKey.wasPressedThisFrame && !menus.IsOpen && PlayerAvatar.Body != null)
+            {
+                var vis = ArmourSystem.VisorOf(PlayerAvatar.Body, out _);
+                if (vis != null && kb.leftShiftKey.isPressed)
+                {
+                    // SHIFT+N: rip the visor off the helmet (a smashed one you can't see through)
+                    vis.FallOff(cam.transform.forward + Vector3.down * 0.5f);
+                    Toast("VISOR TORN OFF"); Sfx.Play("impact_metal", cam.transform.position, 0.4f, 0f, 1f, 0.1f);
+                }
+                else if (vis != null) { vis.ToggleVisor(); Toast(vis.isUp ? "VISOR UP" : "VISOR DOWN"); Sfx.Play("impact_metal", cam.transform.position, 0.25f, 0f, 1f, 0.1f); }
+            }
             if (kb.cKey.wasPressedThisFrame) { ClearAll(); Toast("CLEARED"); }
             if (kb.f1Key.wasPressedThisFrame) LoadMap(0);
             if (kb.f2Key.wasPressedThisFrame) LoadMap(1);
@@ -477,9 +500,16 @@ namespace Carl
             float bx = 16f, by = H - bh - 14f;
             if (medical.selected == null && (menus == null || !menus.IsOpen))
             {
-                int shown = 0;
+                int shown = 0; float x = bx;
                 for (int i = 0; i < weapons.defs.Count; i++)
-                    if (weapons.owned[i]) GUI.Label(new Rect(bx + shown++ * (bw + 4), by, bw, bh), $"{i + 1}  {weapons.defs[i].name}", i == weapons.current ? hudBarSel : hudBar);
+                {
+                    if (!weapons.owned[i]) continue;
+                    // each slot as wide as its name needs
+                    var text = new GUIContent($"{i + 1}  {weapons.defs[i].name}");
+                    float wdt = Mathf.Max(bw, hudBar.CalcSize(text).x + 18f);
+                    GUI.Label(new Rect(x, by, wdt, bh), text, i == weapons.current ? hudBarSel : hudBar);
+                    x += wdt + 4f; shown++;
+                }
                 if (shown == 0) GUI.Label(new Rect(bx, by, 300, bh), "NO WEAPONS  ·  G: take some from the arsenal", hudBar);
                 GUI.Label(new Rect(bx, by - 40, 600, 20), weapons.Grabbing ? "GRABBING — RELEASE LEFT CLICK · RIGHT CLICK THROW · SCROLL DISTANCE" : "Q / E LEAN", hudSmall);
             }
@@ -492,13 +522,13 @@ namespace Carl
                 string help =
                     "<b><color=#F58F29>CONTROLS</color></b>\n" +
                     "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Z drop down\n" +
-                    "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off · ALT hold: swing blade\n" +
-                    "1-9 or wheel: weapons (take them in the G menu)\n" +
+                    "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
+                    "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
                     "X real-time x-ray  ·  MIDDLE CLICK medical panel\n" +
                     "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
-                    "H your injuries  ·  TAB hide help  ·  ESC free mouse";
+                    "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse";
                 GUI.Box(new Rect(12, 12, 560, 166), GUIContent.none, hudCard);
                 GUI.Label(new Rect(26, 22, 540, 150), help, new GUIStyle(hudSmall) { richText = true, fontSize = 12 });
             }

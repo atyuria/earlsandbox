@@ -14,6 +14,7 @@ namespace Carl
         public VestKind vest;
         public int plateClass = 4;           // GOST Br class of the 6B45 plates (2..6)
         public bool sideArmour = true, groinFlap = true, collar = true, pouches = true;
+        public bool armGuards;               // 6B45 upper-arm protectors: soft armour down from the shoulder
         public HelmetKind helmet;
         public bool visor = true, visorDown = true;          // spetsnaz / knight visor
         public bool aventail = true, plume = true;           // knight helmet extras
@@ -117,6 +118,8 @@ namespace Carl
         public bool Impact(Vector3 local, Vector3 dirWorld, float energy, float diameter, bool through)
         {
             if (fallen) return false;
+            // a round on the helmet on your own head: it rings in your skull
+            if (part != null && part.body != null && part.body == PlayerAvatar.Body && part.id == PartId.Head) PlayerBody.I?.HelmetHit(energy, through);
             Vector3 dl = transform.InverseTransformDirection(dirWorld).normalized;
             bool hard = steel || plateUnder || glass;
             bool cracked = false;
@@ -328,6 +331,9 @@ namespace Carl
             targetAngle = isUp ? -105f : 0f;
         }
 
+        /// <summary>0 fully down over the face .. 1 fully up (it swings, so this moves smoothly).</summary>
+        public float VisorOpen => visor ? Mathf.Clamp01(angle / -105f) : 1f;
+
         void Update()
         {
             if (!visor || Mathf.Approximately(angle, targetAngle) || transform.parent == null) return;
@@ -360,6 +366,21 @@ namespace Carl
                 if (p.Raycast(origin, dir, dist, out float d, out Vector3 l) && d < dist) { dist = d; local = l; best = p; }
             }
             return best;
+        }
+
+        /// <summary>The hinged visor on a body's helmet (and its glass, if it has one), or null.</summary>
+        public static ArmourPiece VisorOf(HumanBody b, out ArmourPiece glass)
+        {
+            glass = null;
+            if (b == null || b.Head == null) return null;
+            ArmourPiece vis = null;
+            foreach (var ap in b.Head.GetComponentsInChildren<ArmourPiece>())
+            {
+                if (ap.fallen) continue;
+                if (ap.visor && vis == null) vis = ap;
+                if (ap.glass && glass == null) glass = ap;
+            }
+            return vis;
         }
 
         /// <summary>Takes everything off a body (armour, trim, pouches, plumes), so something else can be put on.</summary>
@@ -518,6 +539,18 @@ namespace Carl
                     var g = Build(b.Pelvis, "6B45 GROIN FLAP", soft, camo, 0.03f, 0.02f, (u, n) => n.z > 0.25f && Mathf.Abs(u.x) < 0.42f && u.y < 0.45f);
                     if (g != null) g.SetHang(new Vector3(g.mesh.bounds.center.x, g.mesh.bounds.max.y, g.mesh.bounds.max.z - 0.01f), 1f);
                 }
+                if (L.armGuards)
+                    for (int s = -1; s <= 1; s += 2)
+                    {
+                        // the shoulder protectors that clip to the carrier: a padded aramid sleeve over the top of
+                        // the shoulder and down the outside of the upper arm, open on the inside under the armpit
+                        var arm = b[s < 0 ? PartId.UpperArmL : PartId.UpperArmR];
+                        // (Br2 aramid: stops 9 mm ball and fragments; armour piercing and rifle rounds go through)
+                        var ag = Build(arm, "6B45 ARM GUARD", 3.1f, camo, 0.016f, 0.012f, (u, n) => u.y > -0.45f && Vector3.Dot(n, new Vector3(-s, 0f, 0f)) < 0.45f, true);
+                        if (ag) ag.looseness = 1.15f;
+                        // its strap round the arm
+                        Build(arm, null, 0f, webbing, 0.03f, 0.008f, (u, n) => u.y > -0.52f && u.y < -0.4f, true);
+                    }
             }
             else if (L.vest == VestKind.KnightCuirass)
             {

@@ -1,0 +1,10 @@
+== adrenaline  (20:42:40)
+PASS  rounds past your head: adrenaline 0.05 -> 0.88
+PASS  hands shake with it: tremor 0.00 -> 0.75
+PASS  visor down: hearing muffled (ear cover 1.00)
+PASS  a round on the helmet: it rings (ring volume 0.16)
+PASS  helmet off: hearing back
+PASS  slow bleed-out: half gone, the screen is fading (0.43)
+PASS  passed out: fully black (0.95)
+PASS  out cold: no ringing (0.00)
+PASS  back up: the screen is clear again

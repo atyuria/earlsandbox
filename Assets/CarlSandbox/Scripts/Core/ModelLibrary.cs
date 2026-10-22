@@ -101,6 +101,8 @@ namespace Carl
                 case "Brass": return Mats.Lit(new Color(0.78f, 0.6f, 0.26f), 0.7f, 0.9f);
                 case "Lens": return Mats.Lit(new Color(0.75f, 0.8f, 0.85f), 0.95f, 0.3f);         // torch lens, laser window
                 case "Anod": return Mats.Lit(new Color(0.11f, 0.11f, 0.12f), 0.55f, 0.7f);        // anodised aluminium
+                case "Gauze": return Mats.Lit(new Color(0.93f, 0.92f, 0.88f), 0.05f);             // bandage
+                case "Red": return Mats.Lit(new Color(0.75f, 0.07f, 0.06f), 0.25f);               // red cross
                 case "Glass":
                     if (glass == null) { glass = new Material(Mats.Find("Carl/Glass")); }
                     return glass;

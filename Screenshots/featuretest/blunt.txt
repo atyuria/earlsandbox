@@ -1,0 +1,6 @@
+== blunt  (18:50:00)
+PASS  walk into wall: no new wounds (0)
+PASS  walk into wall: pain stays low (+0.000)
+PASS  Earl walking into a wall for 6 s: pain stays low (+0.000, wounds 0)
+PASS  0.8 m drop: unhurt (pain +0.000, wounds +0)
+PASS  7 m fall: hurt (pain 0.39, wounds 0)

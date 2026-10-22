@@ -227,6 +227,22 @@ namespace Carl
         }
 
         static Mesh quad;
+        static readonly System.Collections.Generic.Dictionary<Vector2, Mesh> rects = new System.Collections.Generic.Dictionary<Vector2, Mesh>();
+
+        /// <summary>A w x h rectangle in the XY plane (facing z), uv 0..1 over it.</summary>
+        public static Mesh Rect(float w, float h)
+        {
+            var k = new Vector2(w, h);
+            if (rects.TryGetValue(k, out var m) && m != null) return m;
+            m = new Mesh { name = "CarlRect" };
+            m.vertices = new[] { new Vector3(-w / 2, -h / 2, 0), new Vector3(w / 2, -h / 2, 0), new Vector3(w / 2, h / 2, 0), new Vector3(-w / 2, h / 2, 0) };
+            m.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
+            m.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            m.RecalculateNormals(); m.RecalculateBounds();
+            rects[k] = m;
+            return m;
+        }
+
         public static Mesh Quad
         {
             get

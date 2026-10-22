@@ -1,0 +1,12 @@
+== trench  (19:35:32)
+hostiles: 9 in 3 squads
+PASS  at least six armed Earls in the trenches
+PASS  none spawn near you (nearest 44 m)
+PASS  none in your sight at the start (0 visible)
+kit: suppressed 3, optics 7, Altyn 1, 6B47 7, side plates 5, arm guards 4; holders 1, can lean 7
+PASS  mostly 6B47 helmets, Altyns rare
+PASS  no orange crates on the map (0)
+PASS  trench floor reaches the enemy line from yours (furthest z 24.5, enemy line at ~24)
+PASS  never bunched on top of each other (closest pair 1.10 m)
+PASS  not all leaning at once (0/3825 frames)
+PASS  holders stay where they are (drift 1.0 m)

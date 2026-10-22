@@ -7,7 +7,8 @@
 import bpy, bmesh, math, random, struct, os
 import numpy as np
 
-ROOT = r"C:\Users\Binky\OneDrive\Documents\GitHub\earlsandbox\Assets\CarlSandbox\Resources"
+# the project's Resources folder, wherever the project is checked out (this script lives in BlenderTools/)
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Assets", "CarlSandbox", "Resources"))
 rng = random.Random(7)
 
 # ------------------------------------------------------------------ layout
@@ -47,6 +48,25 @@ for side, z0, kind in ((1.0, -22.0, 0), (-1.0, 24.0, 1)):
     for k in range(2, len(rear) - 1, 3):
         px, pz = rear[k]; e = (px, pz - side * 1.8)
         lines.append((3, [(px, pz), e], 0.45)); cells.append((1, e[0], e[1], 1.3))
+
+# communication trenches across the field joining the two front lines, so you can work your way over to the
+# other line below ground instead of going over the top: each leaves the nearest corner of one main line and
+# zig-zags (traverses every few metres, so nothing can fire straight down it) to the nearest corner of the other.
+# Fixed points, no random numbers: the rest of the layout stays as it was.
+fr_main = [l for l in lines if l[0] == 0][0][1]
+en_main = [l for l in lines if l[0] == 1][0][1]
+for xs, jog in ((-9.0, 2.2), (19.0, -2.4)):
+    a = min(fr_main, key=lambda p: abs(p[0] - xs))
+    b = min(en_main, key=lambda p: abs(p[0] - xs))
+    n = 9
+    pts = [a]
+    for k in range(1, n):
+        t = k / n
+        x = a[0] + (b[0] - a[0]) * t + (jog if k % 2 else -jog) * (0.6 + 0.4 * math.sin(k * 1.7))
+        z = a[1] + (b[1] - a[1]) * t
+        pts.append((x, z))
+    pts.append(b)
+    lines.append((2, pts, 0.45))
 
 segA, segB, segW = [], [], []
 for kind, pts, hw in lines:
@@ -164,3 +184,4 @@ for x, z, r in craters: blob += struct.pack("<fff", x, z, r)
 os.makedirs(ROOT + r"\Models", exist_ok=True)
 with open(ROOT + r"\Models\Trench.bytes", "wb") as f: f.write(blob)
 result = {"verts": len(me2.vertices), "tris": len(T), "subs": stats, "bytes": len(blob), "lines": len(lines), "cells": len(cells)}
+print("TRENCH_BUILD", result, ROOT)

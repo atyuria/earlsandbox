@@ -29,6 +29,7 @@ namespace Carl
             public HumanBody owner;                          // whoever fired it: it can never hit them
             public ArmourPiece ignoreArmour;
             public int walls;
+            public bool flewBy;                              // has gone past your head (you heard it)
         }
 
         readonly List<Proj> live = new List<Proj>();
@@ -119,6 +120,14 @@ namespace Carl
             Vector3 move = p.vel * dt;
             float remaining = move.magnitude;
             Vector3 dir = move / remaining;
+            // a round going past your head (not yours): you hear its crack or whine as it passes
+            if (!p.flewBy && p.kind == HitKind.Bullet && p.owner != PlayerAvatar.Body)
+            {
+                Vector3 ears = Sfx.Ears, a = p.pos;
+                float t = Mathf.Clamp01(Vector3.Dot(ears - a, move) / Mathf.Max(1e-6f, move.sqrMagnitude));
+                Vector3 closest = a + move * t;
+                if (t > 0f && t < 1f && Vector3.Distance(closest, ears) < 3f && p.traveled + t * remaining > 4f) { p.flewBy = true; Sfx.FlyBy(closest, speed); }
+            }
             int guard = 0;
             while (remaining > 0f && p.alive && guard++ < 10)
             {
@@ -238,7 +247,7 @@ namespace Carl
                         p.traveled = 0f;
                     }
                     HumanBrain.BroadcastNoise(hit.point, 15f, 0.3f);
-                    if (p.kind == HitKind.Bullet) Sfx.Play("ricochet", hit.point, 0.8f, 1f, 3f, 0.12f);
+                    if (p.kind == HitKind.Bullet) Sfx.Ricochet(hit.point);
                     continue;
                 }
                 if (BloodSystem.Instance != null && hit.rigidbody == null)

@@ -1,0 +1,11 @@
+== armour  (19:57:18)
+on you: Pelvis:6B45 GROIN FLAP, Abdomen:6B45 FRONT, Abdomen:MAG POUCH, Abdomen:MAG POUCH, Abdomen:MAG POUCH, Abdomen:BACK POUCH, Abdomen:6B45 BACK, Abdomen:6B45 SIDE, Chest:6B45 FRONT, Chest:ADMIN POUCH, Chest:6B45 BACK, Chest:6B45 SIDE, Neck:6B45 COLLAR, Head:ALTYN HELMET, Head:ALTYN VISOR, Head:VISOR GLASS, UpperArmL:6B45 ARM GUARD, UpperArmR:6B45 ARM GUARD
+PASS  arm guards on both upper arms
+PASS  Altyn visor and glass on
+PASS  visor down covers the view (Down=1.00)
+PASS  Earl gets arm guards too
+PASS  9 mm into the arm guard (x3) is stopped (penetrating wounds 0; all: )
+PASS  visor up clears the view (Down=0.00)
+PASS  rounds hit the visor glass (dents 5, breaks 0), you alive: True
+PASS  smashed glass: you can't see through it (frost 0.67)
+PASS  SHIFT+N tears the visor off and the view is clear

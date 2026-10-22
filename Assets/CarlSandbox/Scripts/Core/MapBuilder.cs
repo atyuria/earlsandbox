@@ -317,7 +317,9 @@ namespace Carl
                     float x = Rand(-47f, 47f), z = zc + Rand(-w, w);
                     if (!Open(x, z) || !Open(x + 0.4f, z) || !Open(x - 0.4f, z) || !Open(x, z + 0.4f) || !Open(x, z - 0.4f)) continue;
                     Tree(G(x, z));
-                    if (rng.NextDouble() < 0.12) Blob(r, "Scrub", G(x + Rand(-1.5f, 1.5f), z + Rand(-1.5f, 1.5f)) + Vector3.up * 0.2f, new Vector3(Rand(0.8f, 1.8f), Rand(0.5f, 1f), Rand(0.8f, 1.8f)), shrub, Rand(0f, 180f), false);
+                    // (the round scrub blobs that used to go here looked like stray spheres: gone; the numbers are
+                    // still drawn so the trees stay where they were)
+                    if (rng.NextDouble() < 0.12) { Rand(-1.5f, 1.5f); Rand(-1.5f, 1.5f); Rand(0.8f, 1.8f); Rand(0.5f, 1f); Rand(0.8f, 1.8f); Rand(0f, 180f); }
                 }
             for (int k = 0; k < 8; k++) { float x = Rand(-44f, 44f), z = Rand(-12f, 12f); if (Open(x, z)) Tree(G(x, z)); }
 
@@ -332,8 +334,7 @@ namespace Carl
                 for (float zz = -rad - 0.2f; zz <= rad + 0.2f; zz += 0.23f)
                     Pole(r, "RoofLog", new Vector3(c.x - rad - 0.7f, y + Rand(-0.03f, 0.03f), c.y + zz), new Vector3(c.x + rad + 0.7f, y + Rand(-0.03f, 0.03f), c.y + zz + Rand(-0.1f, 0.1f)), Rand(0.09f, 0.12f), logMat, true);
                 Blob(r, "RoofEarth", new Vector3(c.x, y + 0.12f, c.y), new Vector3(rad * 2f + 1f, 0.55f, rad * 2f + 0.6f), roofEarth, Rand(-10f, 10f), true);
-                // spare boxes and a bag by the entrance
-                Crate(r, new Vector3(c.x + Rand(-0.4f, 0.4f), 0.3f, c.y + Rand(-0.4f, 0.4f)), 0.42f, 14f);
+                Rand(-0.4f, 0.4f); Rand(-0.4f, 0.4f);   // (where the crate used to go: keeps the rest of the layout the same)
             }
             // camouflage netting draped over most of the fighting positions, sagging into the hole
             var net = Tex("trench_net", 0.05f, Color.white);
@@ -388,7 +389,8 @@ namespace Carl
                 var line = data.lines[k % 2].pts;
                 var p = Point(line);
                 float z = p.y + (k % 2 == 0 ? -1f : 1f) * Rand(3f, 6f);
-                if (Open(p.x, z)) Blob(r, "BulkBag", G(p.x, z) + Vector3.up * 0.3f, new Vector3(Rand(0.9f, 1.3f), Rand(0.6f, 0.9f), Rand(0.9f, 1.3f)), bulkBag, Rand(0f, 180f), true);
+                // (the white bulk bags read as stray spheres all over the map: gone, numbers still drawn)
+                if (Open(p.x, z)) { Rand(0.9f, 1.3f); Rand(0.6f, 0.9f); Rand(0.9f, 1.3f); Rand(0f, 180f); }
             }
 
             // you start in your own front line, the Earls in theirs and in their fighting positions
@@ -397,12 +399,26 @@ namespace Carl
             Vector2 sp = Vector2.Lerp(friendly[friendly.Length / 2], friendly[friendly.Length / 2 + 1], 0.5f);
             spawn = new Vector3(sp.x, H(sp.x, sp.y) + 0.1f, sp.y);
             yaw = 0f;
-            var spots = new System.Collections.Generic.List<Vector3>();
-            foreach (var (kind, c, rad) in data.cells) if (kind == 0 && c.y > 0f) spots.Add(new Vector3(c.x, H(c.x, c.y) + 0.05f, c.y));
-            for (int i = 0; i < enemy.Length - 1; i += 2) { var p = Vector2.Lerp(enemy[i], enemy[i + 1], 0.5f); spots.Add(new Vector3(p.x, H(p.x, p.y) + 0.05f, p.y)); }
-            carls = new Vector3[6];
-            for (int k = 0; k < 6; k++) carls[k] = spots[(k * 5 + 2) % spots.Count];
+            // the trench system is held by armed Earls (TrenchSquad): every spot along every trench floor, every
+            // fighting position and dugout, is somewhere one of them could be
+            TrenchSpots.Clear();
+            foreach (var (kind, pts) in data.lines)
+                for (int i = 0; i < pts.Length - 1; i++)
+                {
+                    float len = Vector2.Distance(pts[i], pts[i + 1]);
+                    for (float s = 0.5f; s < len; s += 2.5f)
+                    {
+                        var p = Vector2.Lerp(pts[i], pts[i + 1], s / len);
+                        float y = H(p.x, p.y);
+                        if (y < 0.5f) TrenchSpots.Add(new Vector3(p.x, y + 0.05f, p.y));
+                    }
+                }
+            foreach (var (kind, c, rad) in data.cells) { float y = H(c.x, c.y); if (y < 0.5f) TrenchSpots.Add(new Vector3(c.x, y + 0.05f, c.y)); }
+            carls = new Vector3[0];
         }
+
+        /// <summary>Points on the trench floors of the TRENCHES map (filled when it is built).</summary>
+        public static readonly System.Collections.Generic.List<Vector3> TrenchSpots = new System.Collections.Generic.List<Vector3>();
 
         // ================================================================ THE LAB
 

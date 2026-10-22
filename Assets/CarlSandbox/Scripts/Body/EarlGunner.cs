@@ -39,11 +39,24 @@ namespace Carl
         Vector3 lastTip, lastHilt;
         bool tipValid, struck;
 
-        public static EarlGunner Arm(HumanBody h, EarlWeapon w)
+        /// <summary>What is fitted to his gun (optic, grip, suppressor, light), or null for a bare gun.</summary>
+        public WeaponLoadout kit;
+        public bool Suppressed => kit != null && kit.suppressor;
+
+        // squad (TrenchSquad): his place in it, whether he is one to lean out round corners, where he holds
+        public TrenchSquad squad;
+        public SquadRole role = SquadRole.Point;
+        public bool leans = true;
+        public Vector3 holdPoint;
+        float holdUntil = -1f;
+        /// <summary>Still in the fight: alive, conscious, gun in hand.</summary>
+        public bool Fighting => body != null && weapon != null && !dropped && !body.physio.dead && body.physio.consciousness > 0.35f;
+
+        public static EarlGunner Arm(HumanBody h, EarlWeapon w, WeaponLoadout kit = null)
         {
             if (h == null || w == EarlWeapon.None) return null;
             var g = h.gameObject.AddComponent<EarlGunner>();
-            g.kind = w; g.body = h; g.seed = Random.Range(0f, 500f);
+            g.kind = w; g.body = h; g.seed = Random.Range(0f, 500f); g.kit = kit;
             g.Build();
             return g;
         }
@@ -76,6 +89,8 @@ namespace Carl
             muzzle = new GameObject("Muzzle").transform;
             muzzle.SetParent(weapon.transform, false);
             muzzle.localPosition = tipLocal;
+            // his attachments: the muzzle moves out to the end of a suppressor
+            if (Gun && kit != null) muzzle.localPosition = GunKit.Fit(weapon.transform, model, kit, weapon.layer);
             var col = weapon.AddComponent<BoxCollider>();
             col.center = m.mesh.bounds.center; col.size = m.mesh.bounds.size;
             // while held it is placed every step, so a solid box would ram whatever it overlaps (you, at 10 m/s);
@@ -228,6 +243,92 @@ namespace Carl
 
             if (Gun) GunBehaviour(see, target, dist, legs);
             else BladeBehaviour(see, target, dist, legs);
+            KeepSpacing();
+        }
+
+        /// <summary>
+        /// Never walk into (or over) a mate: someone close in the way means wait for him to move on, and anyone
+        /// right next to you is stepped away from. Two coming at each other: one stands aside.
+        /// </summary>
+        void KeepSpacing()
+        {
+            var rag = body.ragdoll;
+            if (rag.IsDown || body.Pelvis == null) return;
+            Vector3 me = body.Pelvis.transform.position;
+            Vector3 push = Vector3.zero; bool wait = false, sidestep = false;
+            foreach (var o in HumanBody.All)
+            {
+                if (o == null || o == body || o.Dead || o == PlayerAvatar.Body || o.Pelvis == null) continue;
+                Vector3 d = Vector3.ProjectOnPlane(o.Pelvis.transform.position - me, Vector3.up);
+                float dist = d.magnitude;
+                if (dist > 3f || Mathf.Abs(o.Pelvis.transform.position.y - me.y) > 1.2f) continue;
+                Vector3 dn = dist > 1e-3f ? d / dist : transform.right;
+                if (dist < 1.3f) push -= dn * (1.3f - dist);
+                if (rag.moveSpeed > 0.05f && dist < 2.4f && Vector3.Dot(dn, rag.moveDir) > 0.55f)
+                {
+                    // he is in the way: is he coming this way too?
+                    var om = o.ragdoll;
+                    bool headOn = om != null && om.moveSpeed > 0.05f && Vector3.Dot(om.moveDir, -dn) > 0.55f;
+                    if (headOn && body.number < o.number) sidestep = true; else wait = true;
+                }
+            }
+            if (sidestep) { rag.moveDir = Quaternion.AngleAxis(75f, Vector3.up) * rag.moveDir; rag.moveSpeed = Mathf.Min(rag.moveSpeed, 0.9f); }
+            else if (wait) rag.moveSpeed = 0f;
+            if (push.sqrMagnitude > 1e-4f)
+            {
+                Vector3 m = rag.moveDir * Mathf.Max(rag.moveSpeed, 0.01f) + push * 2.5f;
+                rag.moveDir = m.normalized;
+                rag.moveSpeed = Mathf.Max(rag.moveSpeed, Mathf.Min(0.8f, push.magnitude * 2f));
+            }
+        }
+
+        /// <summary>Holding a spot and letting you come to him: on the spot, gun up where you'll come from, leaning
+        /// out round the corner if he is one to and that's where you would be. After a while he moves up.</summary>
+        void HoldBehaviour(bool see, Vector3 target, float legs)
+        {
+            var rag = body.ragdoll;
+            if (holdUntil < 0f) holdUntil = Time.time + Random.Range(35f, 80f);
+            // left on his own, or waited long enough: move up behind the others
+            int others = 0;
+            if (squad != null) foreach (var m in squad.members) if (m != this && TrenchSquad.Active(m)) others++;
+            if (Time.time > holdUntil || others == 0) { role = SquadRole.Follow; squad?.Promote(); return; }
+            Vector3 g = Vector3.ProjectOnPlane(holdPoint - body.Pelvis.transform.position, Vector3.up);
+            rag.moveDir = g.sqrMagnitude > 1e-4f ? g.normalized : rag.faceDir;
+            rag.moveSpeed = g.magnitude > 1f ? 1.4f * legs : 0f;
+            Vector3 watch = lastSeen > 0f ? lastSeenPos : target;
+            if (!see)
+            {
+                Vector3 chest = body.Chest.transform.position;
+                Vector3 look = watch + Vector3.up * 1.2f;
+                rag.faceDir = Vector3.ProjectOnPlane(look - chest, Vector3.up).normalized;
+                rag.aimDir = (look - (chest + Vector3.up * 0.15f)).normalized;
+            }
+            rag.crouch = 0f;
+            rag.lean = Mathf.MoveTowards(rag.lean, leans && !see ? PeekSide(watch) : 0f, Time.deltaTime * 3f);
+            if (see) Shoot(target);
+        }
+
+        /// <summary>In file behind the man ahead: keep a few metres back, stop when he stops, look where he looks.</summary>
+        bool FollowBehaviour(Vector3 target, float legs)
+        {
+            var ahead = squad != null ? squad.Ahead(this) : null;
+            if (ahead == null) return false;
+            var rag = body.ragdoll;
+            Vector3 me = body.Pelvis.transform.position, him = ahead.body.Pelvis.transform.position;
+            Vector3 g = Vector3.ProjectOnPlane(him - me, Vector3.up);
+            float d = g.magnitude;
+            const float spacing = 3.5f;
+            rag.moveDir = d > 1e-3f ? g / d : rag.faceDir;
+            rag.moveSpeed = d > spacing + 0.4f ? (d > 9f ? 3f : 1.5f) * legs : 0f;
+            rag.crouch = 0f;
+            rag.lean = Mathf.MoveTowards(rag.lean, 0f, Time.deltaTime * 3f);
+            // weapon at the low ready over his shoulder, on where he is going
+            Vector3 chest = body.Chest.transform.position;
+            Vector3 look = (ahead.lastSeen > 0f ? ahead.lastSeenPos : target) + Vector3.up * 1.2f;
+            rag.faceDir = Vector3.ProjectOnPlane(d > spacing + 0.4f ? g : look - chest, Vector3.up).normalized;
+            rag.aimDir = ((look - (chest + Vector3.up * 0.15f)).normalized + Vector3.down * 0.35f).normalized;
+            rag.lookAt = look;
+            return true;
         }
 
         /// <summary>His aim: at you, plus a wandering error that grows with every injury.</summary>
@@ -243,14 +344,19 @@ namespace Carl
         {
             var rag = body.ragdoll;
             bool reloading = Time.time < reloadUntil;
+            squad?.Promote();
+            // some hold where they are and let you come to them
+            if (role == SquadRole.Hold && !rag.IsDown) { HoldBehaviour(see, target, legs); return; }
             // cover: somewhere he can duck behind and still shoot over
             if (Time.time > coverCheck && !rag.IsDown)
             {
                 coverCheck = Time.time + 3f;
-                if (cover == null || !Clear(cover.Value + Vector3.up * 1.5f, target, body)) cover = FindCover(target);
+                if (cover == null || !Clear(cover.Value + Vector3.up * 1.5f, target, body)) { cover = FindCover(target); TrenchSquad.Claim(this, cover); }
             }
             Vector3 pos = body.Pelvis.transform.position; pos.y = 0f;
             if (see) { searchPoint = null; searchCount = 0; searched.Clear(); }
+            // lost you: the point man goes looking; the others follow him in file
+            if (!see && role == SquadRole.Follow && !rag.IsDown && FollowBehaviour(target, legs)) return;
             // hiding too long: go and clear the place you were, carefully, corner by corner
             if (!see && Time.time - lastSeen > 4f && !rag.IsDown) { Hunt(target, legs); return; }
             Vector3? goal = null;
@@ -270,8 +376,8 @@ namespace Carl
             if (inCover && (reloading || Time.time < nextCrouch)) { rag.crouch = 1f; rag.pose = PoseKind.Crouch; }
             else rag.crouch = 0f;
             if (inCover && !reloading && Time.time > nextCrouch + 4f) nextCrouch = Time.time + Random.Range(1f, 2.2f);
-            // behind a corner and lost you: lean out to look (and shoot) round it
-            rag.lean = Mathf.MoveTowards(rag.lean, !see && rag.crouch < 0.5f ? PeekSide(lastSeenPos) : 0f, Time.deltaTime * 3f);
+            // behind a corner and lost you: lean out to look (and shoot) round it (not everyone does)
+            rag.lean = Mathf.MoveTowards(rag.lean, leans && !see && rag.crouch < 0.5f ? PeekSide(lastSeenPos) : 0f, Time.deltaTime * 3f);
             if (see && rag.crouch < 0.5f) Shoot(target);
         }
 
@@ -318,7 +424,8 @@ namespace Carl
             Vector3 focus = searchPoint ?? (lastSeen > 0f ? lastSeenPos : target);
             Vector3 chest = body.Chest.transform.position;
             Vector3 g = Vector3.ProjectOnPlane(focus - body.Pelvis.transform.position, Vector3.up);
-            int side = PeekSide(focus);
+            int side = leans ? PeekSide(focus) : 0;
+            if (!leans) peekHold = 0f;
             rag.lean = Mathf.MoveTowards(rag.lean, side, Time.deltaTime * 3f);
             bool holding = Time.time < peekHold;
             rag.crouch = 0f;
@@ -373,6 +480,7 @@ namespace Carl
                 bool hiddenLow = !Clear(feet + Vector3.up * 0.8f, target, body);
                 bool clearHigh = Clear(feet + Vector3.up * 1.55f, target, body);
                 if (!hiddenLow || !clearHigh) continue;
+                if (TrenchSquad.Taken(this, feet)) continue;   // a mate is already there
                 float score = Vector3.Distance(feet, me) + Mathf.Abs(Vector3.Distance(feet, target) - 15f) * 0.2f;
                 if (score < bestScore) { bestScore = score; best = feet; }
             }
@@ -396,16 +504,16 @@ namespace Carl
             }
             Ballistics.FiringBody = null;
             rounds--;
-            Sfx.Gun(WeaponName, muzzle.position);
-            Fx.Muzzle(muzzle.position, weapon.transform.forward, kind == EarlWeapon.Shotgun ? 1.6f : 1f);
+            Sfx.Gun(WeaponName, muzzle.position, Suppressed);
+            Fx.Muzzle(muzzle.position, weapon.transform.forward, (kind == EarlWeapon.Shotgun ? 1.6f : 1f) * (Suppressed ? 0.25f : 1f));
             {
                 // the empty case out of the right side, a little behind the muzzle line
                 var wt = weapon.transform;
                 var ck = kind == EarlWeapon.AK47 ? CaseKind.SevenSixTwo : kind == EarlWeapon.AR15 ? CaseKind.FiveFiveSix : kind == EarlWeapon.Shotgun ? CaseKind.TwelveGauge : (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta) ? CaseKind.Nine : CaseKind.None;
                 Casing.Eject(ck, muzzle.position - wt.forward * (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta ? 0.12f : 0.45f) + wt.up * 0.02f, wt.right, wt.up, -wt.forward, Vector3.zero);
             }
-            Fx.BlastDust(muzzle.position, weapon.transform.forward, kind == EarlWeapon.Shotgun ? 1.6f : 1f);
-            HumanBrain.BroadcastNoise(muzzle.position, 60f, 0.4f);
+            Fx.BlastDust(muzzle.position, weapon.transform.forward, (kind == EarlWeapon.Shotgun ? 1.6f : 1f) * (Suppressed ? 0.4f : 1f));
+            HumanBrain.BroadcastNoise(muzzle.position, Suppressed ? 22f : 60f, 0.4f);
             var hand = body[PartId.HandR];
             float oneHand = TwoHanded && ArmHealth(-1) <= 0.3f ? 2.2f : 1f;
             float kick = (kind == EarlWeapon.Shotgun ? 9f : kind == EarlWeapon.AK47 ? 3.5f : kind == EarlWeapon.AR15 ? 2.5f : 2f) * oneHand;

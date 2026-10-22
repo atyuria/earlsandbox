@@ -88,13 +88,17 @@ namespace Carl
         /// running back to you); your body's own arms still hold and move it, everyone else sees those. Empty-handed
         /// you see your body's forearms and hands. The upper arms never: they sit right by the eyes.
         /// </summary>
-        void ArmsVisible(bool holding)
+        void ArmsVisible(bool drawnR, bool drawnL)
         {
-            int want = holding ? 1 : 0;
+            int want = (drawnR ? 1 : 0) | (drawnL ? 2 : 0);
             // (also redone whenever something else has put a hand back on its own layer - x-ray, gore, getting
             // up - or your own hand shows as a stub between the forearm and the hand on the gun)
-            var hl = Body[PartId.HandL] != null && !Body[PartId.HandL].severed ? Body[PartId.HandL] : Body[PartId.HandR];
-            bool handsRight = hl == null || hl.severed || (hl.gameObject.layer == OwnLayer) == holding;
+            bool handsRight = true;
+            foreach (var (id, drawn) in new[] { (PartId.HandL, drawnL), (PartId.HandR, drawnR) })
+            {
+                var h = Body[id];
+                if (h != null && !h.severed && (h.gameObject.layer == OwnLayer) != drawn) handsRight = false;
+            }
             // (and anything grown on them since - a wound, blood - goes the same way)
             int kids = 0;
             foreach (var id in new[] { PartId.HandL, PartId.HandR, PartId.ForearmL, PartId.ForearmR }) if (Body[id] != null) kids += Body[id].transform.childCount;
@@ -104,12 +108,14 @@ namespace Carl
             int normal = Body.Pelvis.gameObject.layer;
             foreach (var id in new[] { PartId.UpperArmL, PartId.UpperArmR })
                 if (Body[id] != null && !Body[id].severed) SetLayer(Body[id], OwnLayer);
-            // while you hold something the arms you see are drawn on to the hands on it (WeaponController.DrawArms,
-            // riding on these): your physical forearms and hands go out of your own view, still there to hit things
-            foreach (var id in new[] { PartId.ForearmL, PartId.ForearmR })
-                if (Body[id] != null && !Body[id].severed) SetLayer(Body[id], holding ? OwnLayer : normal);
-            foreach (var id in new[] { PartId.HandL, PartId.HandR })
-                if (Body[id] != null && !Body[id].severed) SetLayer(Body[id], holding ? OwnLayer : normal);
+            // an arm drawn on to the gun (WeaponController.DrawArms, riding on these) takes the place of that
+            // physical forearm and hand in your own view - only that side: the other arm, busy with the floor or
+            // hanging free, is your own as it is. Never both for the same arm, so never a third one.
+            foreach (var (fa, hd, drawn) in new[] { (PartId.ForearmL, PartId.HandL, drawnL), (PartId.ForearmR, PartId.HandR, drawnR) })
+            {
+                if (Body[fa] != null && !Body[fa].severed) SetLayer(Body[fa], drawn ? OwnLayer : normal);
+                if (Body[hd] != null && !Body[hd].severed) SetLayer(Body[hd], drawn ? OwnLayer : normal);
+            }
         }
 
         /// <summary>Anything cut off you is no longer yours to hide: you should see your arm on the floor.</summary>
@@ -142,14 +148,15 @@ namespace Carl
             rag.holdPart = null;
             // what your hands are doing
             var w = SandboxGame.Instance != null ? SandboxGame.Instance.weapons : null;
-            if (w != null && w.Armed && w.Current.type != WeaponType.Grenade)
+            // (carried in one hand off the floor or going over: the arms are busy with that, not aiming)
+            if (w != null && w.Armed && w.Current.type != WeaponType.Grenade && w.Current.type != WeaponType.Medical && !w.Carrying)
             {
                 rag.aimDir = look;
                 rag.aimHold = w.Current.type == WeaponType.Knife ? 3 : (WeaponController.IsPistol(w.Current) ? 1 : 2);
                 rag.swingPhase = 0f;
             }
             else rag.aimDir = null;
-            ArmsVisible(w != null && w.Armed && w.ArmsDrawn);
+            ArmsVisible(w != null && w.Armed && w.ArmDrawnR, w != null && w.Armed && w.ArmDrawnL);
             // Q / E: lean out round a corner (the camera rides on the head as the spine bends)
             float leanWant = (kb.eKey.isPressed ? 1f : 0f) - (kb.qKey.isPressed ? 1f : 0f);
             if (Cursor.lockState != CursorLockMode.Locked || Menus.Blocking || !keys) leanWant = 0f;

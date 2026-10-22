@@ -173,6 +173,43 @@ namespace Carl
             Set(s < 0 ? PartId.HandL : PartId.HandR, AX(wrist));
         }
 
+        // =============================================================== falling: hands out
+        /// <summary>Which arms throw themselves out to catch a fall: 1 left, 2 right (the hand holding a gun keeps it).</summary>
+        [HideInInspector] public int braceArms = 3;
+        /// <summary>The arm that isn't bracing holds what it carries tucked in against the chest.</summary>
+        [HideInInspector] public bool tuckCarry;
+        Vector3 fallDir;
+
+        /// <summary>Going over: down, still well off the floor and dropping, and awake enough to react.</summary>
+        public bool Falling => mode == BodyMode.Down && downTime < 1.1f && GroundHeight > 0.32f && !physio.dead && physio.consciousness > 0.45f;
+
+        /// <summary>
+        /// Arms out in front of where you are going to land, palms down, nearly straight - the way anyone puts
+        /// their hands out going over - and strong enough to take the landing.
+        /// </summary>
+        void BraceForFall()
+        {
+            var chest = body.Chest.rb;
+            Vector3 v = Vector3.ProjectOnPlane(chest.linearVelocity, Vector3.up);
+            // where you're going over to: the way you're moving, or failing that the way your chest is tipping
+            Vector3 tip = Vector3.ProjectOnPlane(body.Chest.transform.up, Vector3.up);
+            Vector3 dir = v.magnitude > 0.4f ? v.normalized : tip.sqrMagnitude > 0.01f ? tip.normalized : body.Chest.transform.forward;
+            fallDir = Vector3.Slerp(fallDir.sqrMagnitude > 0.5f ? fallDir : dir, dir, 0.25f).normalized;
+            Vector3 reach = (fallDir * 0.75f + Vector3.down * 0.65f).normalized;
+            for (int s = -1; s <= 1; s += 2)
+            {
+                bool free = (braceArms & (s < 0 ? 1 : 2)) != 0;
+                if (!physio.ArmUsable(s)) continue;
+                if (free)
+                {
+                    Vector3 r = body.Chest.transform.InverseTransformDirection(reach + body.Chest.transform.right * (s * 0.18f));
+                    ArmTo(s, r, r);
+                    Set(s < 0 ? PartId.HandL : PartId.HandR, AX(-35f));   // wrists cocked back, palms to the floor
+                }
+                else if (tuckCarry) SetArm(s, Shoulder(s, 40f, 12f), 105f);
+            }
+        }
+
         // =============================================================== holding a weapon
         /// <summary>World direction the weapon should point (null: arms do whatever the pose says).</summary>
         [HideInInspector] public Vector3? aimDir;
@@ -425,7 +462,7 @@ namespace Carl
 
         void FixedUpdate()
         {
-            if (body == null) return;
+            if (body == null || body.Pelvis == null || body.Chest == null) return;
             // the world is frozen (spawn menu open): everyone but you stands still
             if (WorldFreeze.On && body != PlayerAvatar.Body) return;
             float dt = Time.fixedDeltaTime;
@@ -581,6 +618,8 @@ namespace Carl
             }
 
             AimArms();
+            bool bracing = Falling;
+            if (bracing) BraceForFall();
             if (Mathf.Abs(lean) > 0.01f && mode == BodyMode.Standing)
             {
                 // leaning out: the bend is spread up the spine, the neck straightens the head back toward level,
@@ -608,6 +647,8 @@ namespace Carl
                 if (Anatomy.IsLeg(bp.id) && side != 0) t *= 1f - legBuckle[side < 0 ? 0 : 1] * 0.75f;
                 // hands on a held gun: the arm muscles give way to it (they keep their shape, they don't fight it)
                 if (Anatomy.IsArm(bp.id)) t *= armCompliance;
+                // going over: the arms thrown out to catch it are tensed, not limp like the rest
+                if (bracing && Anatomy.IsArm(bp.id)) t = Mathf.Max(t, 0.75f * motor);
                 // broken bones cannot hold load
                 foreach (var o in bp.organs) if (o.IsBone && o.Fractured && !o.def.shell) { t *= o.BadlyBroken ? 0.08f : 0.35f; break; }
                 float spring = HumanBody.SpringFor(bp.id) * t;

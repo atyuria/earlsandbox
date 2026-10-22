@@ -29,6 +29,9 @@ namespace Carl
         readonly Transform[,] seg = new Transform[4, 3];
         readonly Transform[] thumb = new Transform[3];
         static Mesh capsule, ball;
+        /// <summary>The sculpted pieces (BlenderTools/hand_build.py -> Resources/Models/Hand_*) are in use; if they
+        /// are missing the hand falls back to capsules.</summary>
+        bool modelled;
 
         public static PoseHand Build(Transform parent, int side, Material skin, string name)
         {
@@ -38,11 +41,21 @@ namespace Carl
             h.side = side;
             if (capsule == null) { var tmp = GameObject.CreatePrimitive(PrimitiveType.Capsule); capsule = tmp.GetComponent<MeshFilter>().sharedMesh; Object.Destroy(tmp); }   // radius 0.5, total height 2
             if (ball == null) ball = ProcMesh.Ellipsoid(Vector3.one * 0.5f, 14, 10);
-            h.palm = h.Piece("Palm", ball, skin);
+            h.modelled = ModelLibrary.Get("Hand_Palm") != null && ModelLibrary.Get("Hand_F12") != null;
+            var nail = NailMat(skin);
+            h.palm = h.modelled ? h.Model("Palm", "Hand_Palm", skin, nail) : h.Piece("Palm", ball, skin);
             h.wrist = h.Piece("Wrist", capsule, skin);
-            for (int f = 0; f < 4; f++) for (int k = 0; k < 3; k++) h.seg[f, k] = h.Piece("Finger", capsule, skin);
-            for (int k = 0; k < 3; k++) h.thumb[k] = h.Piece("Thumb", k == 0 ? ball : capsule, skin);
+            for (int f = 0; f < 4; f++) for (int k = 0; k < 3; k++) h.seg[f, k] = h.modelled ? h.Model("Finger", $"Hand_F{f}{k}", skin, nail) : h.Piece("Finger", capsule, skin);
+            for (int k = 0; k < 3; k++) h.thumb[k] = h.modelled ? h.Model("Thumb", k == 0 ? "Hand_ThumbBase" : "Hand_T" + k, skin, nail) : h.Piece("Thumb", k == 0 ? ball : capsule, skin);
             return h;
+        }
+
+        static Material nailMat; static Color nailFor;
+        static Material NailMat(Material skin)
+        {
+            Color c = skin != null && skin.HasProperty("_BaseColor") ? skin.GetColor("_BaseColor") : new Color(0.86f, 0.71f, 0.58f);
+            if (nailMat == null || nailFor != c) { nailFor = c; nailMat = Mats.Lit(Color.Lerp(c, new Color(1f, 0.86f, 0.84f), 0.45f), 0.6f); }
+            return nailMat;
         }
 
         Transform Piece(string n, Mesh m, Material mat)
@@ -54,6 +67,27 @@ namespace Carl
             r.sharedMaterial = mat;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             return g.transform;
+        }
+
+        Transform Model(string n, string model, Material skin, Material nail)
+        {
+            var g = ModelLibrary.Spawn(model, transform, sub => sub == "Nail" ? nail : skin, false);
+            g.name = n;
+            return g.transform;
+        }
+
+        /// <summary>A sculpted bone from joint a to joint b (parent space), its nail side turned to `back`.</summary>
+        void Bone(Transform t, Vector3 a, Vector3 b, float rad, float nominalLen, Vector3 back)
+        {
+            if (!modelled) { Bar(t, a, b, rad); return; }
+            Vector3 d = b - a; float len = d.magnitude;
+            if (len < 1e-6f) return;
+            d /= len;
+            Vector3 up = Vector3.ProjectOnPlane(back, d);
+            if (up.sqrMagnitude < 1e-8f) up = Vector3.ProjectOnPlane(Vector3.forward, d);
+            t.localPosition = a;
+            t.localRotation = Quaternion.LookRotation(up.normalized, d);
+            t.localScale = new Vector3(1f, len / Mathf.Max(1e-4f, nominalLen), 1f);
         }
 
         /// <summary>A rounded bar from a to b (parent space) of radius rad.</summary>
@@ -118,7 +152,7 @@ namespace Carl
             }
             palm.localPosition = p;
             palm.localRotation = Quaternion.LookRotation(z, t);
-            palm.localScale = new Vector3(PalmThick, PalmWidth, PalmLen);
+            palm.localScale = modelled ? new Vector3(side, 1f, 1f) : new Vector3(PalmThick, PalmWidth, PalmLen);
             Vector3 w = p - z * (PalmLen * 0.5f);
             WristLocal = w;
             ForearmLocal = forearm.normalized;
@@ -149,7 +183,7 @@ namespace Carl
                     th = Mathf.Min(th + dth, maxWrap);                                // fingertips stop where they meet the thumb
                     Vector3 b = centre + across + (u * Mathf.Cos(th) + v * Mathf.Sin(th)) * R;
                     if (trigger && f == 0) b = a + (b - a).normalized * L;          // a straighter trigger finger keeps its length
-                    Bar(seg[f, k], a, b, FingerR * (k == 2 ? 0.9f : 1f));
+                    Bone(seg[f, k], a, b, FingerR * (k == 2 ? 0.9f : 1f), Fingers[f][k], Vector3.Cross((b - a).normalized, curlAxis));
                     a = b;
                 }
             }
@@ -157,12 +191,12 @@ namespace Carl
             Vector3 tb = w + z * 0.03f + t * 0.03f;
             thumb[0].localPosition = tb;
             thumb[0].localRotation = Quaternion.LookRotation(z, t);
-            thumb[0].localScale = new Vector3(0.019f, 0.022f, 0.03f);
+            thumb[0].localScale = modelled ? new Vector3(side, 1f, 1f) : new Vector3(0.019f, 0.022f, 0.03f);
             Vector3 td = thumbDir.HasValue ? thumbDir.Value.normalized : (z * 0.8f + t * 0.15f + n * 0.55f).normalized;
             Vector3 t1 = tb + td * 0.038f;
-            Bar(thumb[1], tb, t1, ThumbR);
+            Bone(thumb[1], tb, t1, ThumbR, 0.038f, Vector3.Cross(td, Vector3.Cross(td, n)));
             Vector3 td2 = Quaternion.AngleAxis(28f, Vector3.Cross(td, n).normalized) * td;
-            Bar(thumb[2], t1, t1 + td2 * 0.03f, ThumbR * 0.9f);
+            Bone(thumb[2], t1, t1 + td2 * 0.03f, ThumbR * 0.9f, 0.03f, Vector3.Cross(td2, Vector3.Cross(td2, n)));
         }
 
         /// <summary>
@@ -184,9 +218,9 @@ namespace Carl
                 {
                     float L = Fingers[f][k], rad = FingerR * (k == 2 ? 0.9f : 1f);
                     float lim = trig ? (k == 0 ? 25f : 45f) : (k == 1 ? 100f : 85f);
-                    total += Bend(a, z, curl, total, L, rad, lim, lim * (0.45f + 0.5f * tight), blocked);
+                    total += Bend(a, z, curl, total, L, rad, lim, lim * (0.45f + 0.5f * tight), blocked, k == 0 ? 15f : 4f);
                     Vector3 b = a + Quaternion.AngleAxis(total, curl) * z * L;
-                    Bar(seg[f, k], a, b, rad);
+                    Bone(seg[f, k], a, b, rad, L, Vector3.Cross((b - a).normalized, curl));
                     Caps.Add((a, b, rad));
                     a = b;
                 }
@@ -195,7 +229,7 @@ namespace Carl
             Vector3 tb = w + z * 0.03f + t * 0.03f;
             thumb[0].localPosition = tb;
             thumb[0].localRotation = Quaternion.LookRotation(z, t);
-            thumb[0].localScale = new Vector3(0.019f, 0.022f, 0.03f);
+            thumb[0].localScale = modelled ? new Vector3(side, 1f, 1f) : new Vector3(0.019f, 0.022f, 0.03f);
             Vector3 td = thumbDir.HasValue ? thumbDir.Value.normalized : (z * 0.8f + t * 0.15f + n * 0.55f).normalized;
             Vector3 tc = Vector3.Cross(td, n);
             tc = tc.sqrMagnitude > 1e-4f ? tc.normalized : t;
@@ -203,9 +237,9 @@ namespace Carl
             for (int k = 0; k < 2; k++)
             {
                 float L = k == 0 ? 0.038f : 0.03f, rad = ThumbR * (k == 1 ? 0.9f : 1f);
-                tot += Bend(ta, td, tc, tot, L, rad, k == 0 ? 50f : 55f, k == 0 ? 30f : 40f, blocked);
+                tot += Bend(ta, td, tc, tot, L, rad, k == 0 ? 50f : 55f, k == 0 ? 30f : 40f, blocked, 10f);
                 Vector3 tb2 = ta + Quaternion.AngleAxis(tot, tc) * td * L;
-                Bar(thumb[k + 1], ta, tb2, rad);
+                Bone(thumb[k + 1], ta, tb2, rad, L, Vector3.Cross((tb2 - ta).normalized, tc));
                 Caps.Add((ta, tb2, rad));
                 ta = tb2;
             }
@@ -240,8 +274,9 @@ namespace Carl
             wrist.localScale = new Vector3(thick, (len + thick) * 0.5f, width);
         }
 
-        /// <summary>How far one joint bends (degrees, on top of `already`) before its segment touches.</summary>
-        static float Bend(Vector3 a, Vector3 dir0, Vector3 axis, float already, float len, float rad, float lim, float rest, Blocked blocked)
+        /// <summary>How far one joint bends (degrees, on top of `already`) before its segment touches. maxBack: how far
+        /// that joint can bend backwards (a knuckle a little, the middle joints hardly at all).</summary>
+        static float Bend(Vector3 a, Vector3 dir0, Vector3 axis, float already, float len, float rad, float lim, float rest, Blocked blocked, float maxBack = 10f)
         {
             bool Hit(float ph) => blocked(a, a + Quaternion.AngleAxis(already + ph, axis) * dir0 * len, rad + 0.0012f);
             float phi = 0f;
@@ -256,8 +291,10 @@ namespace Carl
                     while (tuck + 4f <= lim && !Hit(tuck + 4f)) tuck += 4f;
                     return tuck;
                 }
-                while (phi > -80f && Hit(phi)) phi -= 5f;
-                return phi;
+                // open it out only as far as the joint really goes; past that a finger can't bend back, so it stays
+                // in a natural curl resting on whatever is there instead of sticking out backwards
+                while (phi > -maxBack && Hit(phi)) phi -= 2f;
+                return Hit(phi) ? Mathf.Min(rest, lim) * 0.6f : phi;
             }
             while (phi + 4f <= lim)
             {

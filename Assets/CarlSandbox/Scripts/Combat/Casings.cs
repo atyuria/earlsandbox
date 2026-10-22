@@ -73,8 +73,10 @@ namespace Carl
             lastTink = Time.time;
             // brass and steel ring on a hard floor; a plastic shell just clacks; dirt and bodies deaden it
             bool soft = c.collider.GetComponentInParent<BodyPart>() != null || (c.collider.GetComponentInParent<Surface>() is Surface s && s.kind == SurfaceKind.Dirt);
-            float vol = Mathf.Clamp01(v / 4f) * (soft ? 0.12f : kind == CaseKind.TwelveGauge ? 0.3f : 0.45f) * (kind == CaseKind.Fifty ? 1.3f : 1f);
-            Sfx.Play("casing", transform.position, vol, 1f, 1f, kind == CaseKind.Fifty || kind == CaseKind.TwelveGauge ? 0.02f : 0.12f, 25f);
+            float vol = Mathf.Clamp01(v / 4f) * (soft ? 0.5f : kind == CaseKind.TwelveGauge ? 0.3f : 0.45f) * (kind == CaseKind.Fifty ? 1.3f : 1f);
+            // (a bigger case rings lower)
+            float pitch = kind == CaseKind.Nine ? 0.12f : kind == CaseKind.Fifty || kind == CaseKind.TwelveGauge ? 0.02f : 0.08f;
+            Sfx.Play(soft ? "casing_dirt" : "casing", transform.position, vol, 1f, 1f, pitch, 25f);
         }
 
         // ---- per cartridge

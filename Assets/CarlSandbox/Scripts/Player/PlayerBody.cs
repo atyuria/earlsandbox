@@ -56,8 +56,26 @@ namespace Carl
         public float Consciousness => dead ? 0f : passedOut ? 0f : Mathf.Clamp01(Mathf.InverseLerp(0.45f, 0.75f, blood / NormalBlood) - frontal * 0.2f);
         /// <summary>How much slower you move (legs hurt, blood loss).</summary>
         public float MoveScale => Mathf.Clamp01(Mathf.Min(legL, legR) * 0.7f + 0.3f) * (spine == 3 ? 0.5f : 1f) * Mathf.Lerp(0.5f, 1f, Consciousness);
-        /// <summary>Shaking hands: injured arms, pain, blood loss, a damaged cerebellum.</summary>
-        public float Tremor => Mathf.Clamp01((2f - armL - armR) * 0.35f + pain * 0.25f + (1f - blood / NormalBlood) * 1.2f + cerebellum * 0.8f);
+        /// <summary>Shaking hands: injured arms, pain, blood loss, a damaged cerebellum - and adrenaline: in a
+        /// fight (shooting at people, rounds cracking past, getting hit) the hands and arms shake with it.</summary>
+        public float Tremor => Mathf.Clamp01((2f - armL - armR) * 0.35f + pain * 0.25f + (1f - blood / NormalBlood) * 1.2f + cerebellum * 0.8f + Rush * 0.75f);
+        /// <summary>Adrenaline above calm (0 calm .. 1 flooded).</summary>
+        public float Rush => Mathf.Clamp01((adrenaline - 0.12f) / 0.7f);
+        public float adrenaline = 0.05f;
+        float dark, lastConsc = 1f, helmetRing;
+        public float Dark => dark;
+        public float RingVolume => ringing != null ? ringing.volume : 0f;
+
+        /// <summary>A round stopped by the helmet on your head: a loud metal ping inside it, and your ears ring.</summary>
+        public void HelmetHit(float energy, bool through)
+        {
+            if (dead) return;
+            float k = Mathf.Clamp01(energy / 1800f);
+            Sfx.Play("helmet_ping", transform.position + Vector3.up * 1.6f, Mathf.Lerp(0.7f, 1f, k), 0f, 1f, 0.06f, 30f, 22000f, 0f, true);
+            helmetRing = Mathf.Max(helmetRing, 0.45f + 0.55f * k);
+            hitFlash = Mathf.Max(hitFlash, 0.4f);
+            PlayerAvatar.Body?.physio.AddStress(0.25f + 0.3f * k);
+        }
         /// <summary>The world swims: cerebellum damage and blood loss.</summary>
         public float Wobble => Mathf.Clamp01(cerebellum + Mathf.InverseLerp(0.8f, 0.5f, blood / NormalBlood) * 0.6f);
         public bool Paralysed => spine == 1;
@@ -174,12 +192,23 @@ namespace Carl
             Note(why);
         }
 
+        /// <summary>Unconscious and done waiting: stop fighting it.</summary>
+        public void GiveUp()
+        {
+            if (dead) return;
+            const string why = "GAVE UP (SUCCUMBED TO INJURIES)";
+            var h = PlayerAvatar.Body;
+            if (h != null && h.physio != null && !h.physio.dead) h.physio.Kill(why, true);
+            Die(why);
+        }
+
         public void Revive()
         {
             blood = NormalBlood; pain = bleed = 0f; dead = passedOut = false; cause = "";
             blindL = blindR = false; frontal = occipital = temporal = cerebellum = motorL = motorR = 0f;
             armL = armR = legL = legR = 1f; armLostL = armLostR = legLostL = legLostR = false; spine = 0; lungHit = false;
             injuries.Clear(); hitFlash = whiteFlash = 0f;
+            dark = 0f; lastConsc = 1f; helmetRing = 0f; adrenaline = 0.05f;
             AudioListener.volume = 1f;
         }
 
@@ -199,6 +228,7 @@ namespace Carl
             pain = p.EffectivePain;
             if (p.dead && !dead) Die(string.IsNullOrEmpty(p.causeOfDeath) ? "DEAD" : p.causeOfDeath);
             passedOut = !dead && p.consciousness < 0.25f;
+            adrenaline = p.adrenaline;
             blindL = p.blindL; blindR = p.blindR;
             frontal = occipital = temporal = cerebellum = motorL = motorR = 0f;
             foreach (var o in h.Head.organs)
@@ -249,8 +279,21 @@ namespace Carl
             if (frontal > 0.15f && Time.time > nextFlash) { whiteFlash = Mathf.Max(whiteFlash, Mathf.Min(1f, frontal)); nextFlash = Time.time + Random.Range(2f, 8f) / Mathf.Max(0.3f, frontal); }
             // temporal lobe and the ears: muffled, ringing
             AudioListener.volume = GameSettings.Volume <= 0f ? 0f : Mathf.Lerp(1f, 0.25f, Mathf.Clamp01(temporal));
-            Ring(Mathf.Clamp01(frontal * 0.6f + temporal * 0.8f + whiteFlash * 0.5f));
-            if (dead && Time.time - deadTime > 1.5f && UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.enterKey.wasPressedThisFrame)
+            helmetRing = Mathf.Max(0f, helmetRing - dt / 6f);
+            // (out cold or dead, you hear nothing ringing any more)
+            Ring(dead || passedOut ? 0f : Mathf.Clamp01(Mathf.Max(frontal * 0.6f + temporal * 0.8f + whiteFlash * 0.5f, helmetRing)));
+            // going dark: a shot that puts you out does it at once; bleeding out, the world fades as you go, so it
+            // is fully black by the time you pass out or die
+            float c = PlayerAvatar.Body != null ? PlayerAvatar.Body.physio.consciousness : Consciousness;
+            float target = dead || passedOut ? 1f : Mathf.InverseLerp(0.62f, 0.25f, c) * 0.94f;
+            bool sudden = lastConsc - c > dt * 1.5f + 0.05f;     // consciousness fell off a cliff this frame
+            lastConsc = c;
+            if (target >= 1f && (sudden || dark < 0.5f)) dark = 1f;
+            else dark = Mathf.MoveTowards(dark, target, dt * (target > dark ? 0.8f : 0.35f));
+            var kbd = UnityEngine.InputSystem.Keyboard.current;
+            // out cold: ENTER gives up (you die where you lie, and can start again)
+            if (passedOut && !dead && kbd != null && kbd.enterKey.wasPressedThisFrame) { GiveUp(); return; }
+            if (dead && Time.time - deadTime > 1.5f && kbd != null && kbd.enterKey.wasPressedThisFrame)
             {
                 Revive();
                 var pc = SandboxGame.Instance != null ? SandboxGame.Instance.player : null;
@@ -335,20 +378,25 @@ namespace Carl
                 Fill(all, white, tint);
             }
             Fill(all, white, new Color(1f, 1f, 0.97f, whiteFlash * 0.85f));
-            // passing out / dead
-            if (passedOut || dead) Fill(all, white, new Color(0, 0, 0, dead ? Mathf.Clamp01((Time.time - deadTime) * 1.5f) * 0.92f : 0.97f));
+            // adrenaline: the world goes bright and sharp (pupils wide)
+            float rush = PlayerAvatar.Body != null ? Rush : 0f;
+            if (rush > 0.01f && !dead && !passedOut) Fill(all, white, new Color(1f, 0.99f, 0.95f, rush * 0.16f));
+            // going dark (passing out, dying): at once from a shot, slowly fading when you bleed out
+            if (dark > 0.005f) Fill(all, white, new Color(0, 0, 0, dark * (dead || passedOut ? 0.985f : 1f)));
             GUI.color = Color.white;
             var st = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, normal = { textColor = new Color(1f, 0.35f, 0.3f) } };
             // the health panel (H) lists them properly and sits where these would be
-            bool panelOpen = PlayerAvatar.Body != null && SandboxGame.Instance != null && SandboxGame.Instance.medical != null && SandboxGame.Instance.medical.selected == PlayerAvatar.Body;
+            // with a body, the little Earl in the corner shows all this at a glance (MiniEarl); the list is only
+            // for the old bodiless player
+            bool panelOpen = PlayerAvatar.Body != null;
             for (int i = 0; i < injuries.Count && !panelOpen; i++) GUI.Label(new Rect(18, H - 120 - (injuries.Count - i) * 18, 600, 20), injuries[i], st);
-            if (bleed > 1f) GUI.Label(new Rect(18, H - 116, 600, 20), $"BLEEDING {bleed:0} ML/S  ·  BLOOD {frac * 100f:0}%", st);
+            if (bleed > 1f && !panelOpen) GUI.Label(new Rect(18, H - 116, 600, 20), $"BLEEDING {bleed:0} ML/S  ·  BLOOD {frac * 100f:0}%", st);
             if (dead || passedOut)
             {
                 var big = new GUIStyle(GUI.skin.label) { fontSize = 34, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.8f, 0.1f, 0.1f) } };
                 GUI.Label(new Rect(0, H * 0.4f, W, 50), dead ? "YOU DIED" : "UNCONSCIOUS", big);
                 var sm = new GUIStyle(big) { fontSize = 15, normal = { textColor = new Color(0.8f, 0.8f, 0.8f) } };
-                GUI.Label(new Rect(0, H * 0.4f + 46, W, 30), dead ? $"{cause}  ·  ENTER to start again" : "you've lost too much blood", sm);
+                GUI.Label(new Rect(0, H * 0.4f + 46, W, 30), dead ? $"{cause}  ·  ENTER to start again" : "you may come round  ·  ENTER to give up", sm);
             }
         }
     }

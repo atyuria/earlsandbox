@@ -63,6 +63,7 @@ namespace Carl
         public float age;
         public float clotRate = 1f / 90f; // fraction of bleeding stopped per second
         public string desc;
+        public bool bandaged, sutured;   // treated (MedKit)
         public float emitAcc;
         public float pooled, poolTimer;   // blood run onto the floor under this wound while lying in it
 
@@ -112,24 +113,32 @@ namespace Carl
             return null;
         }
 
+        /// <summary>
+        /// The change of speed (m/s) a knock must cause before it does anything at all: about a 1.5 m fall. Slight
+        /// drops, stumbles and bumps are below it.
+        /// </summary>
+        public const float ImpactHurtSpeed = 5.5f;
+
         void OnCollisionEnter(Collision c)
         {
             if (body == null || body.Dead && body.TimeSinceDeath > 8f) return;
             var other = c.rigidbody ? c.rigidbody.GetComponent<BodyPart>() : null;
             if (other != null && other.body == body) return;
             float speed = c.relativeVelocity.magnitude;
-            if (body == PlayerAvatar.Body && rb != null)
+            if (rb != null)
             {
-                // your own body is driven hard by its muscles: a foot planted mid-stride, a hand brushing a wall, a
+                // every body is driven hard by its muscles: a foot planted mid-stride, a hand brushing a wall, a
                 // knee bumping a crate all show big contact speeds without anything much happening. What hurts is
                 // how much the knock actually changed this part's speed - the impulse it took - so only real falls,
                 // throws and hits count, and hands and feet (built to take knocks) need a harder one.
                 speed = Mathf.Min(speed, c.impulse.magnitude / rb.mass);
                 bool extremity = id == PartId.FootL || id == PartId.FootR || id == PartId.HandL || id == PartId.HandR || id == PartId.ShinL || id == PartId.ShinR || id == PartId.ForearmL || id == PartId.ForearmR;
                 if (other == null && extremity) speed -= 3f;
-                if (speed < 4.5f || Time.time - lastImpactTime < 0.15f) return;
+                // walking or standing into a wall is a bump, not an injury: only a body that is falling (or thrown)
+                // gets hurt by the world
+                if (other == null && body.ragdoll != null && body.ragdoll.mode != BodyMode.Down && speed < 7f) return;
             }
-            if (speed < 3.2f || Time.time - lastImpactTime < 0.15f) return;
+            if (speed < ImpactHurtSpeed || Time.time - lastImpactTime < 0.15f) return;
             lastImpactTime = Time.time;
             var cp = c.GetContact(0);
             body.damage.ApplyImpact(this, cp.point, cp.normal, speed, other != null);

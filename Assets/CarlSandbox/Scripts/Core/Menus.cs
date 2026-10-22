@@ -32,6 +32,12 @@ namespace Carl
         Vector2 scroll;
         Rect panel, panel2;
         int gunTab;
+        bool armourPage;                  // G menu: the ARMOUR tab instead of a weapon
+        int gunPage;                      // G menu: 0 guns, 1 melee, 2 misc (grenades, healing, the physics gun)
+        Vector2 listScroll;
+        static int PageOf(WeaponDef d) => d.type == WeaponType.Gun ? 0 : d.type == WeaponType.Knife ? 1 : 2;
+        static string PageName(int p) => p == 0 ? "GUNS" : p == 1 ? "MELEE" : "MISC";
+        ArmourLoadout wearEdit;           // what you are putting on (applied as you change it)
         float baseSens = -1f;
         PreviewStage stage;
         string shownLoadout = "", shownGun = "";
@@ -42,7 +48,7 @@ namespace Carl
         {
             open = open == k ? MenuKind.None : k;
             LastMenuFrame = Time.frameCount;
-            if (k == MenuKind.Gun) gunTab = game.weapons.current;
+            if (k == MenuKind.Gun) { gunTab = game.weapons.current; gunPage = PageOf(game.weapons.defs[gunTab]); wearEdit = PlayerAvatar.Armour.Clone(); }
             ApplyCursor();
             if (open != MenuKind.Spawn && ghost) ghost.SetActive(false);
             if (open == MenuKind.None) GameSettings.Save();
@@ -69,16 +75,17 @@ namespace Carl
             {
                 if (stage == null) stage = new PreviewStage(game);
                 stage.SetActive(true);
-                if (open == MenuKind.Spawn)
+                if (open == MenuKind.Spawn || armourPage && wearEdit != null)
                 {
-                    string key = JsonUtility.ToJson(spawnArmour);
-                    if (key != shownLoadout) { shownLoadout = key; stage.ShowEarl(spawnArmour); }
+                    var show = open == MenuKind.Spawn ? spawnArmour : wearEdit;
+                    string key = JsonUtility.ToJson(show);
+                    if (key != shownLoadout) { shownLoadout = key; shownGun = ""; stage.ShowEarl(show); }
                 }
                 else
                 {
                     var L = game.weapons.loadouts[gunTab];
                     string key = gunTab + "|" + L.sight + "|" + L.grip + "|" + L.extMag + "|" + L.autoSwitch + "|" + L.suppressor + L.light + L.laser + L.magnifier;
-                    if (key != shownGun) { shownGun = key; stage.ShowGun(game.weapons, gunTab); }
+                    if (key != shownGun) { shownGun = key; shownLoadout = ""; stage.ShowGun(game.weapons, gunTab); }
                 }
                 stage.Spin(Time.unscaledDeltaTime);
             }
@@ -315,10 +322,26 @@ namespace Carl
             GUILayout.EndArea();
         }
 
+        /// <summary>G menu, ARMOUR tab: a turning Earl in what you have on, and the editor for it.</summary>
+        void DrawArmourPage(Rect listR)
+        {
+            if (wearEdit == null) wearEdit = PlayerAvatar.Armour.Clone();
+            var showR = new Rect(listR.xMax + 14, panel.y + 16, panel.xMax - listR.xMax - 30, Mathf.Min(300f, panel.height * 0.46f));
+            Showcase(showR, "YOU", LoadoutName(wearEdit));
+            var optR = new Rect(showR.x, showR.yMax + 10, showR.width, panel.yMax - showR.yMax - 26);
+            GUILayout.BeginArea(optR);
+            scroll = GUILayout.BeginScrollView(scroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+            ArmourOptions(wearEdit, true);
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
+            // put on whatever changed
+            if (JsonUtility.ToJson(wearEdit) != JsonUtility.ToJson(PlayerAvatar.Armour)) PlayerAvatar.Wear(wearEdit);
+        }
+
         static string LoadoutName(ArmourLoadout L)
         {
             var parts = new List<string>();
-            if (L.vest == VestKind.Russian6B45) parts.Add($"6B45 · Br{L.plateClass}");
+            if (L.vest == VestKind.Russian6B45) parts.Add($"6B45 · Br{L.plateClass}" + (L.armGuards ? " + ARMS" : ""));
             else if (L.vest == VestKind.KnightCuirass) parts.Add("CUIRASS");
             if (L.helmet == HelmetKind.Spetsnaz) parts.Add("ALTYN");
             else if (L.helmet == HelmetKind.Ratnik) parts.Add("6B47");
@@ -364,6 +387,14 @@ namespace Carl
             GUILayout.EndHorizontal();
             if (spawnWeapon != EarlWeapon.None) GUILayout.Label(spawnAI ? "He will come for you. Shoot his arm and his aim goes; take one arm and he can't steady a rifle." : "Dummies hold it but never use it (turn AI on).", small);
 
+            ArmourOptions(L, false);
+            GUILayout.EndScrollView();
+            GUILayout.EndArea();
+        }
+
+        /// <summary>The armour editor: the same for an Earl you are about to spawn and for what you wear yourself.</summary>
+        void ArmourOptions(ArmourLoadout L, bool yours)
+        {
             Section("BODY ARMOUR");
             GUILayout.BeginHorizontal();
             if (Chip("NONE", L.vest == VestKind.None)) L.vest = VestKind.None;
@@ -379,6 +410,8 @@ namespace Carl
                 GUILayout.Label(L.plateClass <= 2 ? "Stops pistol rounds." : L.plateClass == 3 ? "Stops pistols, some buckshot." : L.plateClass == 4 ? "Stops 7.62x39 PS. AP and magnums go through." : L.plateClass == 5 ? "Stops rifle AP. .338 and .50 go through." : "Stops almost everything once. Wears out.", small);
                 GUILayout.BeginHorizontal(); Check("SIDES", ref L.sideArmour); Check("GROIN FLAP", ref L.groinFlap); GUILayout.EndHorizontal();
                 GUILayout.BeginHorizontal(); Check("COLLAR", ref L.collar); Check("POUCHES", ref L.pouches); GUILayout.EndHorizontal();
+                Check("ARM PROTECTION", ref L.armGuards);
+                if (L.armGuards) GUILayout.Label("Soft aramid shoulder guards down the upper arms: they stop fragments and pistol rounds, not rifle rounds.", small);
             }
 
             Section("HELMET");
@@ -391,7 +424,7 @@ namespace Carl
             if (L.helmet == HelmetKind.Spetsnaz || L.helmet == HelmetKind.Knight)
             {
                 GUILayout.BeginHorizontal(); Check("VISOR", ref L.visor); if (L.visor) Check("VISOR DOWN", ref L.visorDown); GUILayout.EndHorizontal();
-                if (L.visor) GUILayout.Label("Look at a visor and press E to flip it up or down.", small);
+                if (L.visor) GUILayout.Label(yours ? "N flips your visor up or down. Down, it covers your face and you look out through it." : "Look at a visor and press E to flip it up or down.", small);
                 if (L.helmet == HelmetKind.Knight) { GUILayout.BeginHorizontal(); Check("AVENTAIL", ref L.aventail); Check("PLUME", ref L.plume); GUILayout.EndHorizontal(); }
             }
 
@@ -404,10 +437,9 @@ namespace Carl
             GUILayout.BeginHorizontal();
             if (Chip("FULL KNIGHT", false)) { L.vest = VestKind.KnightCuirass; L.helmet = HelmetKind.Knight; L.pauldrons = L.vambraces = L.gauntlets = L.tassets = L.cuisses = L.greaves = L.sabatons = true; }
             if (Chip("OPERATOR", false)) { L.vest = VestKind.Russian6B45; L.plateClass = 4; L.helmet = HelmetKind.Ratnik; L.sideArmour = L.groinFlap = L.collar = L.pouches = true; }
-            if (Chip("STRIP", false)) { L.vest = VestKind.None; L.helmet = HelmetKind.None; L.pauldrons = L.vambraces = L.gauntlets = L.tassets = L.cuisses = L.greaves = L.sabatons = false; }
+            if (Chip("ASSAULT", false)) { L.vest = VestKind.Russian6B45; L.plateClass = 5; L.helmet = HelmetKind.Spetsnaz; L.visor = L.visorDown = true; L.sideArmour = L.groinFlap = L.collar = L.pouches = L.armGuards = true; }
+            if (Chip("STRIP", false)) { L.vest = VestKind.None; L.helmet = HelmetKind.None; L.armGuards = false; L.pauldrons = L.vambraces = L.gauntlets = L.tassets = L.cuisses = L.greaves = L.sabatons = false; }
             GUILayout.EndHorizontal();
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
         }
 
         static string SightName(SightKind s) => s == SightKind.RedDot ? "RED DOT" : s == SightKind.Holo ? "HOLO" : s == SightKind.Scope4x ? "4x SCOPE" : s == SightKind.Scope8x ? "8x SCOPE" : "IRONS";
@@ -420,20 +452,47 @@ namespace Carl
             panel2 = default;
             GUI.Box(panel, GUIContent.none, card);
 
-            // weapon list down the left
+            // weapon list down the left (and the tab for what you wear)
             var listR = new Rect(panel.x + 16, panel.y + 16, 200, panel.height - 32);
             GUILayout.BeginArea(listR);
-            GUILayout.Label("ARSENAL", title);
+            GUILayout.Label(armourPage ? "ARMOUR" : PageName(gunPage), title);
             GUILayout.Label("G closes", sub);
-            for (int i = 0; i < w.defs.Count; i++)
-                if (GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i ? bigOn : big, GUILayout.Height(i < 7 ? 40 : 34))) { gunTab = i; scroll = Vector2.zero; }
+            // tabs: guns, melee, everything else (grenades, healing, the physics gun), and what you wear
+            void Tab(string label, int page)
+            {
+                bool on = page < 0 ? armourPage : !armourPage && gunPage == page;
+                if (!Chip(label, on, 95f, 28f)) return;
+                scroll = Vector2.zero;
+                if (page < 0) { armourPage = true; if (wearEdit == null) wearEdit = PlayerAvatar.Armour.Clone(); return; }
+                armourPage = false; gunPage = page;
+                if (PageOf(w.defs[gunTab]) != page) { int first = w.defs.FindIndex(x => PageOf(x) == page); if (first >= 0) gunTab = first; }
+            }
+            GUILayout.BeginHorizontal(); Tab("GUNS", 0); Tab("MELEE", 1); GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal(); Tab("MISC", 2); Tab("ARMOUR", -1); GUILayout.EndHorizontal();
+            GUILayout.Space(6);
+            if (armourPage)
+            {
+                GUILayout.Label("What you wear. Plates, helmet and visor stop rounds and blades on you exactly as they do on an Earl. Changes go on as you make them.", small);
+                GUILayout.Space(8);
+                GUILayout.Label("WEARING", section);
+                GUILayout.Label(LoadoutName(wearEdit ?? PlayerAvatar.Armour), small);
+            }
+            else
+            {
+                listScroll = GUILayout.BeginScrollView(listScroll, false, false, GUIStyle.none, GUIStyle.none);
+                for (int i = 0; i < w.defs.Count; i++)
+                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i ? bigOn : big, GUILayout.Height(38))) { gunTab = i; scroll = Vector2.zero; }
+                GUILayout.EndScrollView();
+            }
             GUILayout.EndArea();
+
+            if (armourPage) { DrawArmourPage(listR); return; }
 
             var d = w.defs[gunTab];
             var L = w.loadouts[gunTab];
             // showcase
             var showR = new Rect(listR.xMax + 14, panel.y + 16, panel.xMax - listR.xMax - 30, Mathf.Min(260f, panel.height * 0.42f));
-            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {w.MagSize(gunTab)} RDS  ·  {(w.IsAuto(gunTab) ? "FULL AUTO" : "SEMI")}" :d.type == WeaponType.Knife ? "STAB · SLASH" : d.type == WeaponType.Tool ? "HOLD LMB GRAB · RMB THROW · SCROLL DISTANCE" : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
+            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {w.MagSize(gunTab)} RDS  ·  {(w.IsAuto(gunTab) ? "FULL AUTO" : "SEMI")}" :d.type == WeaponType.Knife ? "STAB · SLASH" : d.type == WeaponType.Tool ? "HOLD LMB GRAB · RMB THROW · SCROLL DISTANCE" : d.type == WeaponType.Medical ? (d.name == "BANDAGE" ? "3 S · SLOWS BLEEDING" : "12 S · SEWS DEEP WOUNDS SHUT") : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
             Showcase(showR, d.name, detail);
 
             var optR = new Rect(showR.x, showR.yMax + 10, showR.width, panel.yMax - showR.yMax - 26);
@@ -511,6 +570,8 @@ namespace Carl
                 GUILayout.EndHorizontal();
                 GUILayout.Label("Suppressed shots carry about a third as far and barely flash. The light lights what you point at; the laser dot sits where the barrel points.", small);
             }
+            if (d.type == WeaponType.Medical)
+                GUILayout.Label(d.name == "BANDAGE" ? "Hold it and LEFT CLICK: pick a wound and bandage it. Quick (3 s), slows the bleeding a lot but does not stop a deep wound or an artery." : "Hold it and LEFT CLICK: pick a deep wound and sew it shut. Slow (12 s), but it stops that wound bleeding outside. It can't reach bleeding inside the body.", small);
             if (d.name == "TASER")
                 GUILayout.Label("Two barbed probes on 7.6 m wires. Both in the same man and far enough apart: five seconds of lock-up per trigger pull. Pull again while the wires are in him for another five. R swaps the cartridge.", small);
             if (d.type == WeaponType.Grenade)
@@ -522,23 +583,6 @@ namespace Carl
                 L.shrapnel = Mathf.RoundToInt(Slider("SHRAPNEL", $"{L.shrapnel} fragments", L.shrapnel, 80f, 700f) / 10f) * 10;
                 GUILayout.Label("More fragments: deadlier, but a heavier grenade you can't throw as far.", small);
             }
-            // what you wear: the same armour the Earls wear, on your own body
-            Section("YOUR ARMOUR");
-            GUILayout.BeginHorizontal();
-            string[] presets = { "NONE", "6B45 VEST", "VEST + ALTYN", "OPERATOR", "KNIGHT" };
-            for (int i = 0; i < presets.Length; i++)
-                if (Chip(presets[i], PlayerAvatar.ArmourPreset == i))
-                {
-                    PlayerAvatar.ArmourPreset = i;
-                    var A = new ArmourLoadout { vest = VestKind.None, helmet = HelmetKind.None };
-                    if (i == 1 || i == 2 || i == 3) A.vest = VestKind.Russian6B45;
-                    if (i == 2) A.helmet = HelmetKind.Spetsnaz;
-                    if (i == 3) A.helmet = HelmetKind.Ratnik;
-                    if (i == 4) { A.vest = VestKind.KnightCuirass; A.helmet = HelmetKind.Knight; A.pauldrons = A.vambraces = A.gauntlets = A.tassets = A.cuisses = A.greaves = A.sabatons = true; }
-                    PlayerAvatar.Wear(A);
-                }
-            GUILayout.EndHorizontal();
-            GUILayout.Label("Worn on your own body: plates stop rounds and blades exactly as they do for an Earl.", small);
             if (d.name == "KNIFE") GUILayout.Label("LEFT CLICK stab  ·  RIGHT CLICK slash.  Blades skid off plate armour.  Hack at the same spot to cut deeper.", small);
             if (d.type == WeaponType.Gun)
             {

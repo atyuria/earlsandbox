@@ -438,19 +438,21 @@ namespace Carl
             if (part.severed && part.parent == null) return;
             // footsteps and knees knocking the floor while upright are not injuries
             if (Anatomy.IsLeg(part.id) && body.ragdoll.mode != BodyMode.Down && speed < 9f) return;
-            if (!fromBody && speed < 4.5f) return;
-            float s = Mathf.Clamp01((speed - 3.2f) / 7f);
+            if (speed < BodyPart.ImpactHurtSpeed) return;
+            // 0 at about a 1.5 m fall, 1 at about a 6 m fall (13.5 m/s)
+            float s = Mathf.Clamp01((speed - BodyPart.ImpactHurtSpeed) / 8f);
             var lp = part.transform.InverseTransformPoint(point);
             var ln = part.transform.InverseTransformDirection(-normal);
             part.flesh.Dent(lp, ln, 0.05f, 0.003f * s, 0.6f * s + 0.2f);
-            if (speed > 5.5f) part.flesh.Paint(lp, 0.03f + 0.02f * s, 1, 0.06f + 0.2f * s);
-            physio.AddPain(0.05f + 0.25f * s, part.id);
+            if (speed > 7f) part.flesh.Paint(lp, 0.03f + 0.02f * s, 1, 0.06f + 0.2f * s);
+            // a knock that only bruises hurts a little; it takes a real fall to make someone cry out
+            physio.AddPain(0.02f + 0.3f * s * s + 0.1f * s, part.id);
             if (body.Dead) return;
 
             if (part.id == PartId.Head)
             {
-                physio.AddConcussion(0.1f + s * 0.6f);
-                if (speed > 7f)
+                physio.AddConcussion(speed > 6.5f ? 0.05f + s * 0.6f : 0f);
+                if (speed > 8f)
                 {
                     var w = AddWound(part, point, normal, WoundType.Laceration, 1f + s * 2f, 0f, false);
                     w.desc = "SCALP LACERATION";
@@ -463,14 +465,14 @@ namespace Carl
                     physio.brainTrauma = Mathf.Clamp01(physio.brainTrauma + s * 0.15f);
                 }
             }
-            if (speed > 8.5f && !fromBody)
+            if (speed > 9f && !fromBody)
             {
                 var w = AddWound(part, point, normal, WoundType.Abrasion, 0.04f + s * 0.1f, 0f, false);
                 w.desc = "SCRAPES";
                 w.clotRate = 1f / 30f;
                 part.flesh.Paint(lp, 0.06f, 2, 0.6f);
             }
-            if (Anatomy.IsTorso(part.id) && speed > 6.5f)
+            if (Anatomy.IsTorso(part.id) && speed > 9.5f)
             {
                 // falls and hard knocks rupture solid organs
                 foreach (var o in part.organs)
@@ -485,7 +487,7 @@ namespace Carl
                     physio.OnOrganDamaged(o, d, 100f);
                 }
             }
-            if (speed > 8.5f)
+            if (speed > 10f)
             {
                 foreach (var o in part.organs)
                 {
@@ -496,7 +498,7 @@ namespace Carl
                     physio.AddPain(0.4f, part.id);
                 }
             }
-            if (speed > 7f) RecordText(part, $"{part.Name} / BLUNT IMPACT {speed:0.0} M/S");
+            if (speed > 8f) RecordText(part, $"{part.Name} / BLUNT IMPACT {speed:0.0} M/S");
         }
 
         public void ApplyBlast(BodyPart part, Vector3 origin, float intensity, float surfaceDist = 10f, bool mayLoseLimb = true)

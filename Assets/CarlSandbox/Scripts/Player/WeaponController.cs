@@ -4,7 +4,7 @@ using UnityEngine.InputSystem;
 
 namespace Carl
 {
-    public enum WeaponType { Gun, Knife, Grenade, Tool }
+    public enum WeaponType { Gun, Knife, Grenade, Tool, Medical }
 
     public class WeaponDef
     {
@@ -51,6 +51,9 @@ namespace Carl
             new WeaponDef { name = "TASER", type = WeaponType.Gun, auto = false, rpm = 60, muzzleVelocity = 55, bulletMass = 0.0015f, diameter = 0.002f, magazine = 1, reloadTime = 2.2f, recoil = 0.4f, spread = 0f, zoomFov = 62, loudness = 8, tracer = false },
             // always carried: grabs, drags and throws things (and bodies) on a beam
             new WeaponDef { name = "PHYSICS GUN", type = WeaponType.Tool },
+            // medical: hold it and click to treat one of your wounds (MedKit)
+            new WeaponDef { name = "BANDAGE", type = WeaponType.Medical },
+            new WeaponDef { name = "SURGERY KIT", type = WeaponType.Medical },
         };
 
         public int current;
@@ -91,7 +94,8 @@ namespace Carl
         GameObject flash;
         readonly List<MeshRenderer> flashParts = new List<MeshRenderer>();
         public float AimAmount => aimT;
-        public float pointT;     // point aim: canted, up by the eye
+        public float pointT;     // point aim: canted, held low
+        public float pointAimT;  // point aim with right mouse: canted, up at the eye
 
         /// <summary>A copy of weapon i as it is set up now (attachments on, no hands), for the gun menu's showcase.</summary>
         public GameObject PreviewModel(int i)
@@ -117,7 +121,12 @@ namespace Carl
 
         public WeaponDef Current => defs[current];
         public bool HasGunOut => Armed && Current.type == WeaponType.Gun;
-        public bool Scoped => IsScope && aimT > 0.92f;
+        /// <summary>Old full-screen scope view: gone - scopes are picture-in-picture now (ScopeView), so the gun and
+        /// the world round the scope stay in view.</summary>
+        public bool Scoped => false;
+        public GameObject CurrentModel => current < models.Count ? models[current] : null;
+        public Camera MainCam => cam;
+        public float NormalFov => pc != null ? pc.fovNormal : 70f;
 
         // ---- customisation (G menu)
         public WeaponLoadout[] loadouts;
@@ -138,10 +147,11 @@ namespace Carl
             {
                 switch (Loadout.sight)
                 {
-                    case SightKind.RedDot: return Loadout.magnifier && MagnifierFor(Current) ? 16f : 48f;
-                    case SightKind.Holo: return Loadout.magnifier && MagnifierFor(Current) ? 15f : 46f;
-                    case SightKind.Scope4x: return 16f;
-                    case SightKind.Scope8x: return 8.5f;
+                    case SightKind.RedDot: return Loadout.magnifier && MagnifierFor(Current) ? pc.fovNormal * 0.8f : 48f;
+                    case SightKind.Holo: return Loadout.magnifier && MagnifierFor(Current) ? pc.fovNormal * 0.8f : 46f;
+                    // (the magnification is in the scope's eyepiece; the eye itself zooms in only a little)
+                    case SightKind.Scope4x: return Current.zoomFov > 30f ? pc.fovNormal * 0.82f : pc.fovNormal * 0.78f;
+                    case SightKind.Scope8x: return pc.fovNormal * 0.75f;
                     default: return Current.zoomFov;
                 }
             }
@@ -171,6 +181,7 @@ namespace Carl
                 if (!Armed) return "UNARMED";
                 if (Current.type == WeaponType.Knife) return "—";
                 if (Current.type == WeaponType.Grenade || Current.type == WeaponType.Tool) return "∞";
+                if (Current.type == WeaponType.Medical) return MedKit.Busy ? "TREATING" : "LMB TREAT";
                 return reloading ? "RELOADING" : $"{ammo[current]:00} / {MagSize(current)}";
             }
         }
@@ -236,6 +247,7 @@ namespace Carl
             grabLine.sharedMaterial = Mats.Unlit(new Color(0.4f, 0.8f, 1f, 0.8f), true);
             grabLine.enabled = false;
 
+            ScopeView.Attach(this);
             current = 0;
             for (int k = 0; k < models.Count; k++) models[k].SetActive(false);
             // you start with only the physics gun: take the rest in the G menu
@@ -264,7 +276,7 @@ namespace Carl
         static GameObject Barrel(Transform p, Vector3 pos, float d, float len, Color c) =>
             Part(p, PrimitiveType.Cylinder, pos, new Vector3(d, len * 0.5f, d), c, new Vector3(90, 0, 0), 0.5f, 0.7f);
 
-        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun" };
+        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery" };
 
         readonly List<float> ironY = new List<float>(), scopeY = new List<float>();
 
@@ -346,7 +358,9 @@ namespace Carl
             ["Gun_Knife"] = (Vector3.zero, new Vector3(90f, 0f, 0f), default, default),      // handle runs forward
             ["Gun_Hammer"] = (Vector3.zero, new Vector3(90f, 0f, 0f), default, default),
             ["Gun_Sword"] = (Vector3.zero, new Vector3(90f, 0f, 0f), default, default),
-            ["Gun_Grenade"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),  // held in a fist
+            ["Gun_Grenade"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
+            ["Med_Bandage"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
+            ["Med_Surgery"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),  // held in a fist
         };
         static bool PistolModel(string weapon) => weapon == "Gun_Glock" || weapon == "Gun_Beretta" || weapon == "Gun_Taser";
         /// <summary>The left hand round a rifle's handguard: fist along the barrel, forearm back, down and to the left.</summary>
@@ -395,7 +409,7 @@ namespace Carl
         /// </summary>
         void AddSupportHand(Transform root, Vector3 grip, Vector3 fore, Vector3[] mv, Material skin, string weapon, int idx)
         {
-            if (weapon == "Gun_Knife" || weapon == "Gun_Grenade" || weapon == "Gun_Hammer" || weapon == "Gun_Sword" || weapon == "Gun_PhysGun") return;
+            if (weapon == "Gun_Knife" || weapon == "Gun_Grenade" || weapon == "Gun_Hammer" || weapon == "Gun_Sword" || weapon == "Gun_PhysGun" || weapon.StartsWith("Med_")) return;
             if (PistolModel(weapon))
             {
                 var ph = ModelLibrary.Spawn("View_Hand", root, sub => HandMat(sub, skin), false, true);
@@ -604,14 +618,14 @@ namespace Carl
                         {
                             g.transform.localPosition = top;
                             attach.Add(g);
-                            // the projected reticle on the glass, right on the sight line
+                            // the projected reticle on the glass, right on the sight line (drawn at infinity by
+                            // the shader, so the quad must be unscaled: its size is the window's)
                             if (L.sight == SightKind.RedDot || L.sight == SightKind.Holo)
                             {
                                 var ret = new GameObject("Reticle");
                                 ret.transform.SetParent(g.transform, false);
                                 ret.transform.localPosition = L.sight == SightKind.RedDot ? new Vector3(0f, 0.03f, 0.027f) : new Vector3(0f, 0.033f, 0.017f);
-                                ret.transform.localScale = Vector3.one * (L.sight == SightKind.RedDot ? 0.02f : 0.03f);
-                                ret.AddComponent<MeshFilter>().sharedMesh = ProcMesh.Quad;
+                                ret.AddComponent<MeshFilter>().sharedMesh = L.sight == SightKind.RedDot ? ProcMesh.Rect(0.021f, 0.021f) : ProcMesh.Rect(0.031f, 0.023f);
                                 var rm = new Material(Mats.Find("Carl/Reticle"));
                                 rm.SetFloat("_Shape", L.sight == SightKind.Holo ? 1f : 0f);
                                 var rr = ret.AddComponent<MeshRenderer>(); rr.sharedMaterial = rm; rr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
@@ -830,22 +844,31 @@ namespace Carl
             var body = PlayerBody.I;
             int arms = body != null ? body.UsableArms : 2;
             // out cold, dead, or no arm left that can hold it: nothing works
-            bool able = Armed && arms > 0 && (body == null || (!body.dead && !body.passedOut));
+            // (and not while it's carried in one hand off the floor)
+            bool able = Armed && arms > 0 && (body == null || (!body.dead && !body.passedOut)) && !carrying;
             if (!able) { meleeMode = 0; swingFree = false; suicideT = 0f; }
             // K: put the gun under your chin
             if (able && locked && d.type == WeaponType.Gun && kb.kKey.wasPressedThisFrame && !kb.leftShiftKey.isPressed && suicideT <= 0f) suicideT = 0.0001f;
             if (suicideT > 0f) { suicideT += dt; if (suicideT >= 1.1f) EndIt(d); }
-            bool aimHeld = locked && mouse.rightButton.isPressed && d.type == WeaponType.Gun && !reloading;
-            aimT = Mathf.MoveTowards(aimT, aimHeld ? 1f : 0f, dt * (IsScope ? 5f : Loadout.grip == GripKind.Angled ? 11f : 8f));
-            // point aim: B toggles it on and off (a gun only; aiming down the sights overrides it while held)
+            // point aim: B toggles it on and off (a gun only). Off, right mouse aims down the sights; on, the gun is
+            // held canted and low, and right mouse brings it up canted to the eye (a canted aim)
             if (locked && kb.bKey.wasPressedThisFrame && d.type == WeaponType.Gun) pointOn = !pointOn;
             if (d.type != WeaponType.Gun) pointOn = false;
-            bool pointHeld = pointOn && d.type == WeaponType.Gun && !aimHeld && !reloading;
+            bool rmbAim = locked && mouse.rightButton.isPressed && d.type == WeaponType.Gun && !reloading;
+            bool aimHeld = rmbAim && !pointOn;
+            aimT = Mathf.MoveTowards(aimT, aimHeld ? 1f : 0f, dt * (IsScope ? 5f : Loadout.grip == GripKind.Angled ? 11f : 8f));
+            bool pointHeld = pointOn && d.type == WeaponType.Gun && !reloading;
             pointT = Mathf.MoveTowards(pointT, pointHeld ? 1f : 0f, dt * 7f);
+            pointAimT = Mathf.MoveTowards(pointAimT, rmbAim && pointOn ? 1f : 0f, dt * 8f);
             float fov = Mathf.Lerp(pc.fovNormal, d.type == WeaponType.Gun ? ZoomFov : pc.fovNormal, Mathf.SmoothStep(0, 1, aimT));
             fov = Mathf.Lerp(fov, pc.fovNormal * 0.9f, pointT * (1f - aimT));
+            // point aim raised: a touch of zoom as you focus on the target (not down the sights)
+            fov = Mathf.Lerp(fov, pc.fovNormal * 0.85f, Mathf.SmoothStep(0f, 1f, pointAimT));
             cam.fieldOfView = fov;
             pc.sensitivityScale = fov / pc.fovNormal;
+            // through a magnified scope the mouse slows with the magnification (you are aiming the scope's picture)
+            float mag = ScopeView.Magnification(this);
+            if (mag > 1.5f) pc.sensitivityScale = Mathf.Lerp(pc.sensitivityScale, 1.4f / mag, Mathf.SmoothStep(0f, 1f, aimT));
 
             if (reloading && Time.unscaledTime >= reloadEnd) { reloading = false; ammo[current] = MagSize(current); }
             if (GameSettings.InfiniteAmmo && d.type == WeaponType.Gun) ammo[current] = MagSize(current);
@@ -1118,8 +1141,34 @@ namespace Carl
             if (rOk) { grip = me[PartId.HandR]; gripArm = Mathf.Max(0.15f, r); if (lOk) { support = me[PartId.HandL]; supportArm = Mathf.Max(0.15f, l); } }
             else if (lOk) { grip = me[PartId.HandL]; gripArm = Mathf.Max(0.15f, l); }
             var d = Current;
-            // only guns get the second hand (a pistol's wraps the first; blades and grenades are one-handed)
-            if (d.type != WeaponType.Gun) { support = null; supportArm = 0f; }
+            // only guns get the second hand (a pistol's wraps the first; blades and grenades are one-handed);
+            // getting up or going over, the other hand is busy with the floor
+            if (d.type != WeaponType.Gun || carrying) { support = null; supportArm = 0f; }
+        }
+
+        // ---- carried in one hand: getting up off the floor, or going over
+        // The gun is in your grip hand and goes wherever that hand goes (the hand pushes off the floor with it, or
+        // tucks it in as you fall); the other hand is free for the floor. Back up, both hands go on it again and
+        // it is brought back up to where it is held.
+        bool carrying;
+        float recoverT;
+        public bool Carrying => carrying;
+        bool armDrawnR, armDrawnL;
+        /// <summary>Which of your arms are drawn on to the gun this frame (the rest are your body's own, seen as they are).</summary>
+        public bool ArmDrawnR => armDrawnR;
+        public bool ArmDrawnL => armDrawnL;
+
+        Hold GripHold => jointR != null ? jointR : jointL;
+
+        /// <summary>Where the gun is with your grip hand where it is now.</summary>
+        bool CarriedPose(out Vector3 pos, out Quaternion rot)
+        {
+            pos = default; rot = Quaternion.identity;
+            var h = GripHold;
+            if (h == null || h.hand == null || h.hand.severed) return false;
+            rot = h.hand.transform.rotation * Quaternion.Inverse(h.relRot);
+            pos = h.hand.transform.TransformPoint(h.handLocal) - rot * h.gunLocal;
+            return true;
         }
 
         /// <summary>A barrel can't go through a wall: when it would, it is pulled back and tipped up out of the way.</summary>
@@ -1152,6 +1201,8 @@ namespace Carl
                 case ".50 CAL": return 13f;
                 case "KNIFE": return 0.3f;
                 case "GRENADE": return 0.4f;
+                case "BANDAGE": return 0.12f;
+                case "SURGERY KIT": return 0.6f;
                 case "PHYSICS GUN": return 1.8f;
                 default: return d.bulletMass > 0.5f ? d.bulletMass : 1f;
             }
@@ -1204,6 +1255,12 @@ namespace Carl
                 gun = new GripSpec { used = true, centre = g, r = 0.016f, n = new Vector3(-1f, 0f, 0f), z = Vector3.up, forearm = new Vector3(0.15f, -0.75f, -0.65f), tight = 0.2f };
                 return;
             }
+            if (d.type == WeaponType.Medical)
+            {
+                // the roll or the pouch held in a loose fist, like a grenade
+                gun = new GripSpec { used = true, centre = g + new Vector3(0.012f, -0.006f, 0f), r = d.name == "BANDAGE" ? 0.028f : 0.026f, n = new Vector3(-0.7f, 0.2f, 0.6f), z = new Vector3(0f, 1f, 0.3f), forearm = new Vector3(0.2f, -0.6f, -0.75f), tight = 0.1f };
+                return;
+            }
             if (d.type == WeaponType.Grenade)
             {
                 gun = new GripSpec { used = true, centre = g + new Vector3(0.01f, -0.01f, -0.005f), r = 0.03f, n = new Vector3(-0.6f, 0.3f, 0.7f), z = new Vector3(0f, 1f, 0.3f), forearm = new Vector3(0.2f, -0.6f, -0.75f), tight = 0.1f };
@@ -1218,15 +1275,17 @@ namespace Carl
             Vector3 high = IsPistol(d) || d.type != WeaponType.Gun ? Vector3.zero : axis * 0.018f;
             gun = new GripSpec { used = true, centre = g + high, r = gs.r, n = n, z = Vector3.Cross(n, axis), forearm = new Vector3(0.22f, -0.5f, -0.84f), trigger = d.type == WeaponType.Gun,
                 // a pistol is held high, the thumb riding forward along the left of the frame (thumbs-forward)
-                thumb = IsPistol(d) ? new Vector3(-0.3f, 0.25f, 1f) : (Vector3?)null };
+                thumb = IsPistol(d) ? new Vector3(-0.22f, 0.38f, 1f) : (Vector3?)null };
             if (d.type != WeaponType.Gun) return;
             if (IsPistol(d))
             {
-                // support hand wrapped over the shooting hand's fingers, thumbs forward
-                Vector3 sn = Vector3.ProjectOnPlane(new Vector3(1f, 0f, 0.15f), axis).normalized;
-                // (its thumb forward too, under the shooting thumb, along the frame)
-                // (the palm runs up the gap on the left of the grip, heel low and back, knuckles up and forward)
-                sup = new GripSpec { used = true, centre = g + new Vector3(-0.004f, -0.016f, 0.004f), r = gs.r + 0.017f, n = sn, z = (Vector3.Cross(axis, sn) - axis * 0.55f).normalized, forearm = new Vector3(-0.3f, -0.5f, -0.81f), tight = 0.1f, thumb = new Vector3(-0.15f, 0.05f, 1f) };
+                // thumbs-forward two-handed grip: the support palm low on the left of the grip, pressed against it
+                // and the shooting hand's fingertips; its fingers run forward and down under the trigger guard and
+                // wrap round over the shooting hand's fingers; its thumb lies forward along the frame under the
+                // shooting thumb; the support wrist canted forward and down
+                Vector3 sn = Vector3.ProjectOnPlane(new Vector3(1f, 0f, 0.1f), axis).normalized;
+                Vector3 sz = (Vector3.Cross(axis, sn) + axis * 0.25f).normalized;
+                sup = new GripSpec { used = true, centre = g + axis * 0.03f + new Vector3(-0.002f, 0f, 0.002f), r = gs.r + 0.016f, n = sn, z = sz, forearm = new Vector3(-0.35f, -0.45f, -0.82f), tight = 0.3f, thumb = new Vector3(-0.08f, 0.3f, 1f) };
                 return;
             }
             if (i >= mountUnder.Count) return;
@@ -1273,6 +1332,7 @@ namespace Carl
         static readonly Vector3 ProbeAt = new Vector3(0f, -800f, 0f);
         const int ProbeLayer = 30;
         System.Collections.Generic.List<(Vector3 a, Vector3 b, float r)> otherCaps;
+        float capsSoft = 1f;
 
         void BuildProbe()
         {
@@ -1303,7 +1363,8 @@ namespace Carl
         {
             if (probe != null && Physics.CheckCapsule(ProbeAt + a, ProbeAt + b, r, 1 << ProbeLayer, QueryTriggerInteraction.Ignore)) return true;
             if (otherCaps != null)
-                foreach (var c in otherCaps) if (SegDist(a, b, c.a, c.b) < r + c.r) return true;
+                // (the other hand is soft: fingers wrapped over it press into it a little rather than stopping dead on it)
+                foreach (var c in otherCaps) if (SegDist(a, b, c.a, c.b) < (r + c.r) * capsSoft) return true;
             return false;
         }
 
@@ -1361,6 +1422,7 @@ namespace Carl
             if (gh != null && gs.used) { var vis = gh.id == PartId.HandR ? visR : visL; var j = Attach(gh, gs, vis); if (gh.id == PartId.HandR) { jointR = j; jointedR = gh; } else { jointL = j; jointedL = gh; } }
             // the support hand closes round the gun and round the shooting hand where it overlaps it
             otherCaps = gh != null && gs.used ? (gh.id == PartId.HandR ? visR : visL).Caps : null;
+            capsSoft = IsPistol(d) ? 0.5f : 1f;   // a pistol support hand wraps right over the shooting hand fingers
             if (sh != null && ss.used) { jointL = Attach(sh, ss, visL); jointedL = sh; }
             otherCaps = null;
             rigKey = RigKey();
@@ -1372,7 +1434,7 @@ namespace Carl
             var L = current < loadouts.Length ? loadouts[current] : null;
             bool r = me.physio.ArmUsable(1) && me[PartId.HandR] != null && !me[PartId.HandR].severed;
             bool l = me.physio.ArmUsable(-1) && me[PartId.HandL] != null && !me[PartId.HandL].severed;
-            return current + "|" + r + l + "|" + (L != null ? L.grip.ToString() : "") + "|" + me.number + "_" + me.spawnTime;
+            return current + "|" + r + l + "|" + (L != null ? L.grip.ToString() : "") + "|" + me.number + "_" + me.spawnTime + "|" + carrying;
         }
 
         Hold Attach(BodyPart hand, GripSpec g, PoseHand vis)
@@ -1558,8 +1620,20 @@ namespace Carl
             Vector3 tpL = inv * (tp - eye);
             heldAt = tpL;
             Quaternion trL = inv * tr;
-            // a teleport, a respawn, a fall: straight back into the hands
-            if ((eye - lastEyeP).sqrMagnitude > 1f || Quaternion.Angle(offRot, trL) > 70f || (offPos - tpL).sqrMagnitude > 0.3f * 0.3f) { SnapGun(); rigKey = null; return; }
+            // carried in one hand (getting up, going over): it is where the hand is; nothing pulls it to the eye
+            if (carrying && CarriedPose(out var cp, out var cr))
+            {
+                simVel = (cp - lastSimPos) / dt; simAng = Vector3.zero;
+                simPos = cp; simRot = cr;
+                offPos = inv * (cp - eye); offRot = inv * cr; offVel = offAng = Vector3.zero;
+                lastSimPos = simPos; lastSimRot = simRot; lastEyeP = eye; lastHf = hf;
+                gunRb.MovePosition(simPos); gunRb.MoveRotation(simRot);
+                return;
+            }
+            bool recovering = recoverT > 0f;
+            if (recovering) recoverT -= dt;
+            // a teleport, a respawn, a fall: straight back into the hands (not while it is being brought back up)
+            if ((eye - lastEyeP).sqrMagnitude > 1f || !recovering && (Quaternion.Angle(offRot, trL) > 70f || (offPos - tpL).sqrMagnitude > 0.3f * 0.3f)) { SnapGun(); rigKey = null; return; }
 
             // carried with you: a little of this step's turn and walk is left behind as sway
             Quaternion turn = inv * lastHf;                                   // last step's frame, seen from this one
@@ -1578,7 +1652,7 @@ namespace Carl
             float kp = (melee ? 900f : 560f) * Mathf.Max(0.05f, hold) / heavy;
             float kr = (melee ? 900f : 460f) * Mathf.Max(0.05f, TwoHandedGun(d) ? ga * 0.5f + sa * 0.8f : ga) * awake / heavy;
             // aiming down the sights: cheek on the stock, the sights held on the eye - much stiffer, only the shakes
-            float ads = melee ? 0f : Mathf.SmoothStep(0f, 1f, Mathf.Max(aimT, pointT * 0.6f));
+            float ads = melee ? 0f : Mathf.SmoothStep(0f, 1f, Mathf.Max(Mathf.Max(aimT, pointT * 0.5f), pointAimT * 0.9f));
             kp *= 1f + 5f * ads; kr *= 1f + 6f * ads;
             kp = Mathf.Max(kp, 60f); kr = Mathf.Max(kr, 40f);              // (even limp arms keep it roughly up)
             float dp = 2f * Mathf.Sqrt(kp) * 0.85f, dr = 2f * Mathf.Sqrt(kr) * 0.85f;
@@ -1605,7 +1679,7 @@ namespace Carl
             offRot.Normalize();
             // never out of a small box round where it is held: not back into your chest, not off to the side
             // (a blade or a grenade goes wherever the swing takes it)
-            Vector3 dv = melee ? Vector3.zero : offPos - tpL;
+            Vector3 dv = melee || recovering ? Vector3.zero : offPos - tpL;
             Vector3 lo = new Vector3(-0.06f, -0.1f, -0.05f), hi = new Vector3(0.06f, 0.06f, 0.05f);
             Vector3 cl = new Vector3(Mathf.Clamp(dv.x, lo.x, hi.x), Mathf.Clamp(dv.y, lo.y, hi.y), Mathf.Clamp(dv.z, lo.z, hi.z));
             if (cl != dv)
@@ -1613,7 +1687,7 @@ namespace Carl
                 for (int k = 0; k < 3; k++) if (cl[k] != dv[k] && Mathf.Sign(offVel[k]) == Mathf.Sign(dv[k] - cl[k])) offVel[k] = 0f;
                 offPos = tpL + cl;
             }
-            if (!melee && Quaternion.Angle(offRot, trL) > 15f) offRot = Quaternion.RotateTowards(trL, offRot, 15f);
+            if (!melee && !recovering && Quaternion.Angle(offRot, trL) > 15f) offRot = Quaternion.RotateTowards(trL, offRot, 15f);
             KeepOutOfTorso(me, eye, hf, inv);
 
             // where that is in the world, and how fast it is going there (for the hands)
@@ -1707,7 +1781,12 @@ namespace Carl
             bool l = show && !gunHidden && DrawArm(me, visL, hL, 0);
             if (visR != null && !r) visR.Wrist(null);
             if (visL != null && !l) visL.Wrist(null);
+            // a hand shape not on the gun this time (one-handed: carried, a pistol held in the other hand) is hidden,
+            // so there is never a spare hand left floating where it was
+            if (visR != null && hR == null) SetHandShown(visR, false);
+            if (visL != null && hL == null) SetHandShown(visL, false);
             armsDrawn = show && (hR != null || hL != null);
+            armDrawnR = show && hR != null; armDrawnL = show && hL != null;
         }
 
         bool DrawArm(HumanBody me, PoseHand vis, BodyPart hand, int slot)
@@ -1887,31 +1966,43 @@ namespace Carl
             UpdatePendingCases();
             bool held = BodyHeld && Armed;
             var me = PlayerAvatar.Body;
-            // getting up off the floor takes your hands (they push on the ground); the gun just comes along
+            // getting up off the floor, or going over: the gun goes into one hand (which pushes off the floor with
+            // it, or keeps it tucked in) and the other hand is free to push or to catch you
             bool gettingUp = me != null && (me.ragdoll.mode == BodyMode.GettingUp || (me.ragdoll.IsDown && me.ragdoll.wantStand));
-            if (!held || gettingUp)
+            bool falling = me != null && me.ragdoll.Falling;
+            bool wasCarrying = carrying;
+            carrying = held && (gettingUp || falling);
+            if (wasCarrying && !carrying) recoverT = 0.7f;
+            if (!held)
             {
                 if (jointR != null || jointL != null || rigKey != null) ReleaseHands();
-                if (me != null) me.ragdoll.armCompliance = 1f;
-                if (!held && gunRb != null && gunCol.enabled)
+                if (me != null) { me.ragdoll.armCompliance = 1f; me.ragdoll.braceArms = 3; me.ragdoll.tuckCarry = false; }
+                if (gunRb != null && gunCol.enabled)
                 {
                     // dead: let it fall out of your hands; otherwise just put it away
                     if (me != null && me.physio.dead) { if (gunRb.isKinematic) { gunRb.isKinematic = false; gunRb.linearVelocity = simVel; } }
                     else { gunRb.isKinematic = true; gunCol.enabled = false; gInit = gunInit = false; }
                 }
-                if (!held) gInit = false;
+                gInit = false;
+                armDrawnR = armDrawnL = false;
                 UpdateRailGear();
-                if (!held) return;
+                return;
             }
-            else
+            EnsureGunBody();
+            if (rigKey != RigKey()) Rig();
+            if (me != null)
             {
-                EnsureGunBody();
-                if (rigKey != RigKey()) Rig();
+                // your arm muscles go soft round a held gun and let it lead; carrying it, the arm does its own work
+                me.ragdoll.armCompliance = carrying ? 1f : jointedR != null || jointedL != null ? 0.15f : 1f;
+                // the hand on the gun keeps it; the other one goes out to catch you
+                var gh = GripHold != null ? GripHold.hand : null;
+                me.ragdoll.braceArms = gh == null ? 3 : gh.id == PartId.HandR ? 1 : 2;
+                me.ragdoll.tuckCarry = carrying && falling;
             }
-            // your arm muscles go soft round a held gun and let it lead
-            if (me != null) me.ragdoll.armCompliance = jointedR != null || jointedL != null ? 0.15f : 1f;
-            // drawn where your eyes are this frame (the physics step only says where it is relative to them)
-            if (gInit && gunRb != null && gunRb.isKinematic && BodyHeld) { GunPose(out var gp, out var gr); vmRoot.SetPositionAndRotation(gp, gr); }
+            // drawn where your eyes are this frame (the physics step only says where it is relative to them) -
+            // or, carried, where your hand is
+            if (carrying && CarriedPose(out var cpos, out var crot)) vmRoot.SetPositionAndRotation(cpos, crot);
+            else if (gInit && gunRb != null && gunRb.isKinematic && BodyHeld) { GunPose(out var gp, out var gr); vmRoot.SetPositionAndRotation(gp, gr); }
             // the hand shapes are locked on the gun as they were closed round it (never twisted off it or sunk into
             // it); the physical wrists are pulled to meet them, so the forearms still run into them
             if (jointedR != null && visR != null && jointedR.id == PartId.HandR) visR.transform.SetPositionAndRotation(vmRoot.TransformPoint(visRelPosR), vmRoot.rotation * visRelRotR);
@@ -2040,6 +2131,15 @@ namespace Carl
         void FireGun(WeaponDef d)
         {
             nextFire = Time.unscaledTime + 60f / Rpm(current);
+            // shooting at people gets the adrenaline going (shooting at a wall, much less)
+            var meA = PlayerAvatar.Body;
+            if (meA != null && !meA.Dead)
+            {
+                bool fight = false;
+                foreach (var h in HumanBody.All)
+                    if (h != null && h != meA && !h.Dead && Vector3.Distance(h.Center, cam.transform.position) < 70f && Vector3.Angle(cam.transform.forward, h.Center - cam.transform.position) < 35f) { fight = true; break; }
+                meA.physio.AddStress(fight ? 0.03f : 0.004f);
+            }
             if (d.name == "TASER")
             {
                 // wires still in him: the trigger sends another five seconds instead of needing a fresh cartridge
@@ -2054,7 +2154,7 @@ namespace Carl
             int pellets = am != null ? am.pellets : d.pellets;
             // shot keeps its spread when aiming; single rounds tighten up
             float baseSpread = am != null && am.pellets > 1 ? am.spread : (am != null && am.spread > 0f ? am.spread : d.spread);
-            float spread = baseSpread * Mathf.Lerp(1f, pellets > 1 ? 0.85f : 0.25f, Mathf.Max(aimT, pointT * 0.55f));
+            float spread = baseSpread * Mathf.Lerp(1f, pellets > 1 ? 0.85f : 0.25f, Mathf.Max(Mathf.Max(aimT, pointT * 0.45f), pointAimT * 0.8f));
             // one hand on a long gun, shaking hands, a weak arm: everything goes wider
             float oneK = OneHandK(d);
             spread = spread * oneK + (PlayerBody.I != null ? PlayerBody.I.Tremor * 1.2f : 0f);
@@ -2309,17 +2409,21 @@ namespace Carl
                 // the butt in the shoulder, the grip a forearm in front of it, the eye 8-10 cm behind the rear sight
                 else if (d.type == WeaponType.Gun) { hip = new Vector3(0.1f, -0.32f, 0.3f); aim.z = optic ? 0.25f : 0.27f; }
                 else if (d.type == WeaponType.Tool) { hip = new Vector3(0.12f, -0.16f, 0.42f); aim = hip; }
+                else if (d.type == WeaponType.Medical) { hip = new Vector3(0.1f, -0.2f, 0.36f); aim = hip; }
                 else { hip = new Vector3(0.16f, -0.24f, 0.36f); aim = hip; }
             }
             Vector3 pos = Vector3.Lerp(hip, aim, Mathf.SmoothStep(0, 1, aimT));
             Quaternion pointRot = Quaternion.identity;
             if (pointT > 0f && d.type == WeaponType.Gun)
             {
-                // point aim: the sights brought up to the eye as if aiming, then the gun rolled about 30 degrees to the left
-                // round that sight line, and let down a touch below it
+                // point aim: aiming without the sights. Held canted and well down below the eye, looking over it;
+                // with right mouse it comes up and out to just under the eye line, nearly level, pointed where you
+                // look - still under your eyes, so you see over it, never down the sights
                 float k = Mathf.SmoothStep(0f, 1f, pointT) * (1f - aimT);
-                Quaternion roll = Quaternion.Euler(0f, 0f, 30f);
-                Vector3 point = roll * aim + new Vector3(0f, -0.025f, 0f);
+                float up = Mathf.SmoothStep(0f, 1f, pointAimT);
+                Quaternion roll = Quaternion.Euler(0f, 0f, Mathf.Lerp(28f, 8f, up));
+                Vector3 low = new Vector3(0.025f, -0.085f, 0.03f), raised = new Vector3(0.01f, -0.055f, 0.05f);
+                Vector3 point = roll * aim + Vector3.Lerp(low, raised, up);
                 pos = Vector3.Lerp(pos, point, k);
                 pointRot = Quaternion.Slerp(Quaternion.identity, roll, k);
             }
@@ -2384,8 +2488,8 @@ namespace Carl
             // held in your hands the gun stays (it is jointed to them); looking through a scope just hides it
             if (held && Armed) { vmRoot.gameObject.SetActive(true); ShowHeldGun(!Scoped); }
             else vmRoot.gameObject.SetActive(!Scoped);
-            // the projected reticle is only seen looking through the glass
-            foreach (var r in reticles) if (r) r.enabled = aimT > 0.75f;
+            // the projected reticle (at infinity, so it is only seen looking more or less through the glass)
+            foreach (var r in reticles) if (r) r.enabled = false;   // (the optic draws its reticle in its own picture now: ScopeView)
 
             flashTimer -= dt;
             bool showFlash = flashTimer > 0f && d.type == WeaponType.Gun;
