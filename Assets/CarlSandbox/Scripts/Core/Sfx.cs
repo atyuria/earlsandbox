@@ -168,7 +168,7 @@ namespace Carl
         {
             FlyBys++;
             // a round cracking past your head: a jolt of adrenaline
-            if (PlayerAvatar.Body != null && !PlayerAvatar.Body.Dead) PlayerAvatar.Body.physio.AddStress(speed > 360f ? 0.14f : 0.08f);
+            if (PlayerAvatar.Body != null && !PlayerAvatar.Body.Dead) PlayerAvatar.Body.physio.AddStress(speed > 360f ? 0.2f : 0.12f);
             if (speed > 360f) Play("flyby_crack", at, 0.85f, 1f, 1.5f, 0.12f, 40f);
             else Play("flyby_whiz", at, 0.7f, 1f, 1.2f, 0.15f, 25f);
         }

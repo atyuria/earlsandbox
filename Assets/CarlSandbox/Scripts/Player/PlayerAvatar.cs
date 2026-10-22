@@ -169,12 +169,14 @@ namespace Carl
             // backing off and side-stepping are slower than walking forward (the legs can only step back so fast)
             if (speed > 0f) { float fw = Vector3.Dot(wishWorld.normalized, flat); speed *= fw < -0.2f ? 0.62f : fw < 0.5f ? 0.8f : 1f; if (fw < 0.5f) speed = Mathf.Min(speed, 2.4f); }
             rag.moveDir = wishWorld.sqrMagnitude > 0.01f ? wishWorld.normalized : flat;
+            // firing a hard-kicking gun you slow right down to hold it
+            if (w != null) speed *= 1f - 0.55f * w.FireSlow;
             rag.moveSpeed = speed * Mathf.Clamp01(wishWorld.magnitude);
             // Z: go down / try to get up. On the ground: hold space to get up, keys to crawl
-            if (keys && kb.zKey.wasPressedThisFrame && !rag.IsDown) rag.Fall("player");
+            if (keys && kb.yKey.wasPressedThisFrame && !rag.IsDown) rag.Fall("player");
             if (rag.IsDown)
             {
-                rag.wantStand = !keys || kb.spaceKey.isPressed || kb.zKey.wasPressedThisFrame;
+                rag.wantStand = !keys || kb.spaceKey.isPressed || kb.yKey.wasPressedThisFrame;
                 rag.wantCrawl = wishWorld.sqrMagnitude > 0.01f;
                 rag.crawlDir = rag.wantCrawl ? wishWorld.normalized : Vector3.zero;
             }

@@ -90,6 +90,7 @@ namespace Carl
         public int shrapnel = 260;
         // glock
         public bool extMag;               // 33-round extended magazine
+        public int fireMode;              // which of the gun's fire modes (Z): WeaponController.ModesFor
         public bool autoSwitch;           // "glock switch": full auto
         // rails and muzzle
         public bool suppressor;           // quieter, little flash, a longer gun

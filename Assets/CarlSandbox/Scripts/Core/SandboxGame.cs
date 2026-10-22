@@ -515,13 +515,14 @@ namespace Carl
             }
             GUI.Box(new Rect(W - 230, H - 96, 214, 82), GUIContent.none, hudCard);
             GUI.Label(new Rect(W - 330, H - 64, 300, 50), weapons.AmmoText, hudBig);
-            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Armed ? weapons.Current.name : "", new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } });
+            string fm = weapons.Armed ? weapons.FireMode(weapons.current) : "";
+            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Armed ? weapons.Current.name + (fm != "" ? "  ·  " + fm : "") : "", new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } });
 
             if (showHelp && medical.selected == null && (menus == null || !menus.IsOpen))
             {
                 string help =
                     "<b><color=#F58F29>CONTROLS</color></b>\n" +
-                    "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Z drop down\n" +
+                    "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Y drop down · Z fire mode\n" +
                     "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
                     "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +

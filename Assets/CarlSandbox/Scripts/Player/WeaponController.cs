@@ -38,7 +38,7 @@ namespace Carl
             new WeaponDef { name = "AWP", type = WeaponType.Gun, auto = false, rpm = 42, muzzleVelocity = 900, bulletMass = 0.0162f, diameter = 0.0086f, magazine = 5, reloadTime = 3.2f, recoil = 4.5f, spread = 0.02f, zoomFov = 11, scope = true, loudness = 95, tracer = true },
             new WeaponDef { name = ".50 CAL", type = WeaponType.Gun, auto = false, rpm = 110, muzzleVelocity = 890, bulletMass = 0.0421f, diameter = 0.0127f, magazine = 10, reloadTime = 3.6f, recoil = 7f, spread = 0.04f, zoomFov = 9, scope = true, loudness = 120, tracer = true },
             // 12-gauge pump, 00 buckshot: nine 8.4 mm pellets per shell
-            new WeaponDef { name = "MOSSBERG 590", type = WeaponType.Gun, auto = false, rpm = 70, muzzleVelocity = 400, bulletMass = 0.0035f, diameter = 0.0084f, magazine = 6, reloadTime = 3.2f, recoil = 6f, spread = 2.4f, zoomFov = 55, loudness = 100, tracer = false, pellets = 9 },
+            new WeaponDef { name = "MOSSBERG 590", type = WeaponType.Gun, auto = false, rpm = 70, muzzleVelocity = 400, bulletMass = 0.0035f, diameter = 0.0084f, magazine = 6, reloadTime = 3.2f, recoil = 8.5f, spread = 2.4f, zoomFov = 55, loudness = 100, tracer = false, pellets = 9 },
             new WeaponDef { name = "KNIFE", type = WeaponType.Knife },
             new WeaponDef { name = "GRENADE", type = WeaponType.Grenade },
             // melee: mass (kg) decides how hard a swing lands; the hammer crushes, the sword cuts
@@ -136,7 +136,34 @@ namespace Carl
         /// <summary>Rounds in a full magazine, with whatever magazine is fitted.</summary>
         public int MagSize(int i) => IsGlock(i) && loadouts != null && loadouts[i].extMag ? 33 : defs[i].magazine;
         /// <summary>Holding the trigger keeps firing (rifles, or a Glock with a switch on the back).</summary>
-        public bool IsAuto(int i) => defs[i].auto || (IsGlock(i) && loadouts != null && loadouts[i].autoSwitch);
+        public bool IsAuto(int i) => FireMode(i) == "AUTO";
+
+        /// <summary>The fire modes a gun has, in the order Z goes through them.</summary>
+        public string[] ModesFor(int i)
+        {
+            switch (defs[i].name)
+            {
+                case "AK-47": return new[] { "AUTO", "SEMI" };
+                case "AR-15": return new[] { "AUTO", "BURST", "SEMI" };
+                case "GLOCK 17": return loadouts != null && loadouts[i].autoSwitch ? new[] { "AUTO", "SEMI" } : new[] { "SEMI" };
+                case "MOSSBERG 590": return new[] { "PUMP" };
+                case "AWP": return new[] { "BOLT" };
+                default: return new[] { "SEMI" };
+            }
+        }
+        public string FireMode(int i)
+        {
+            if (defs[i].type != WeaponType.Gun) return "";
+            var m = ModesFor(i);
+            int k = loadouts != null ? Mathf.Clamp(loadouts[i].fireMode, 0, m.Length - 1) : 0;
+            return m[k];
+        }
+
+        // recoil state: which shot of a burst this is, and that burst's pattern
+        float lastShotTime = -9f, burstSeed, burstSide = 1f, fireHeat;
+        int burstShot, burstLeft;
+        /// <summary>0..1: how much firing a hard-kicking gun is slowing you down right now.</summary>
+        public float FireSlow => Mathf.Clamp01(fireHeat);
         /// <summary>Rounds per minute: a switched Glock runs away at about 1100.</summary>
         public float Rpm(int i) => IsGlock(i) && loadouts != null && loadouts[i].autoSwitch ? 1100f : defs[i].rpm;
         public AmmoType CurrentAmmo { get { var a = AmmoTable.For(Current.name); return a == null ? null : a[Mathf.Clamp(Loadout.ammo, 0, a.Length - 1)]; } }
@@ -873,6 +900,13 @@ namespace Carl
             if (reloading && Time.unscaledTime >= reloadEnd) { reloading = false; ammo[current] = MagSize(current); }
             if (GameSettings.InfiniteAmmo && d.type == WeaponType.Gun) ammo[current] = MagSize(current);
             if (d.type == WeaponType.Gun && ammo[current] > MagSize(current)) ammo[current] = MagSize(current);   // extended mag taken off
+            // Z: fire mode
+            if (locked && kb.zKey.wasPressedThisFrame && d.type == WeaponType.Gun)
+            {
+                var modes = ModesFor(current);
+                if (modes.Length > 1) { Loadout.fireMode = (Mathf.Clamp(Loadout.fireMode, 0, modes.Length - 1) + 1) % modes.Length; burstLeft = 0; Sfx.Play("click_empty", cam.transform.position, 0.35f, 0f, 1f, 0.05f); }
+                SandboxGame.Instance?.Toast("FIRE MODE: " + FireMode(current) + (modes.Length > 1 ? "" : " ONLY"));
+            }
             if (locked && kb.rKey.wasPressedThisFrame && d.type == WeaponType.Gun && !reloading && ammo[current] < MagSize(current)) StartReload();
 
             // ALT held with a blade or hammer: the mouse moves the weapon instead of the view
@@ -884,7 +918,9 @@ namespace Carl
                 switch (d.type)
                 {
                     case WeaponType.Gun:
-                        bool trigger = mouse.leftButton.wasPressedThisFrame || (IsAuto(current) && mouse.leftButton.isPressed);
+                        // burst: one pull fires three
+                        if (FireMode(current) == "BURST" && mouse.leftButton.wasPressedThisFrame && burstLeft <= 0) burstLeft = 3;
+                        bool trigger = mouse.leftButton.wasPressedThisFrame || (IsAuto(current) && mouse.leftButton.isPressed) || burstLeft > 0;
                         if (trigger && !reloading && Time.unscaledTime >= nextFire)
                         {
                             bool taserLive = d.name == "TASER" && TaserWires.Current != null && TaserWires.Current.Arrived;
@@ -900,24 +936,102 @@ namespace Carl
                         if (meleeMode == 0 && mouse.rightButton.wasPressedThisFrame) { meleeMode = 2; meleeT = 0f; meleeHitDone = false; Sfx.Play("knife", cam.transform.position, 0.7f, 0f); }
                         break;
                     case WeaponType.Grenade:
-                        if (Time.unscaledTime >= nextFire && (mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame))
+                        // a throw is a movement: wind up, whip the arm through, let go at the right moment
+                        if (throwT < 0f && Time.unscaledTime >= nextFire && (mouse.leftButton.wasPressedThisFrame || mouse.rightButton.wasPressedThisFrame))
                         {
-                            bool far = mouse.leftButton.wasPressedThisFrame;
-                            // more shrapnel = a heavier grenade that doesn't throw as far
-                            float heavy = Mathf.Lerp(1.15f, 0.7f, Mathf.InverseLerp(100f, 700f, Loadout.shrapnel));
-                            Vector3 v = (cam.transform.forward * (far ? 17f : 7f) + Vector3.up * (far ? 2.5f : 1.5f)) * heavy;
-                            var gr = Grenade.Throw(cam.transform.position + cam.transform.forward * 0.5f - cam.transform.up * 0.1f, v);
-                            gr.shrapnel = Loadout.shrapnel;
-                            if (Loadout.FuseSeconds < 0f) { gr.impact = true; gr.fuse = 30f; } else gr.fuse = Loadout.FuseSeconds;
-                            nextFire = Time.unscaledTime + 0.9f;
-                            kick = 1.2f;
+                            throwFar = mouse.leftButton.wasPressedThisFrame;
+                            throwT = 0f; thrown = false;
                         }
                         break;
                 }
             }
             UpdateMelee(dt);
+            UpdateThrow(dt);
             Animate(dt);
             if (!Armed) vmRoot.gameObject.SetActive(false);
+        }
+
+        // ------------------------------------------------------------ throwing a grenade
+        // Overarm (left click): the arm goes back over the shoulder, then whips forward and lets go at the top of
+        // the swing, and follows through; a fresh grenade comes up into the hand. Underhand (right click): a lower,
+        // gentler swing from beside the hip. The grenade leaves from where your hand is when you let go.
+        float throwT = -1f; bool throwFar, thrown;
+        const float FarRelease = 0.46f, LowRelease = 0.36f, ThrowDone = 1.15f;
+        public bool Throwing => throwT >= 0f;
+
+        void UpdateThrow(float dt)
+        {
+            if (throwT < 0f) return;
+            if (!Armed || Current.type != WeaponType.Grenade) { throwT = -1f; SetGrenadeShown(true); return; }
+            throwT += dt;
+            if (!thrown && throwT >= (throwFar ? FarRelease : LowRelease))
+            {
+                thrown = true;
+                // more shrapnel = a heavier grenade that doesn't throw as far
+                float heavy = Mathf.Lerp(1.15f, 0.7f, Mathf.InverseLerp(100f, 700f, Loadout.shrapnel));
+                Vector3 v = (cam.transform.forward * (throwFar ? 17f : 7f) + Vector3.up * (throwFar ? 2.5f : 1.5f)) * heavy;
+                // from the hand (the grenade model as it is now), or in front of you without a body
+                Vector3 from = current < models.Count && models[current] != null ? models[current].transform.position : cam.transform.position + cam.transform.forward * 0.5f;
+                // never from inside a wall: if the hand is past one, it leaves from in front of your face
+                if (Physics.Linecast(cam.transform.position, from, out _, ~(1 << PlayerAvatar.OwnLayer), QueryTriggerInteraction.Ignore)) from = cam.transform.position + cam.transform.forward * 0.3f;
+                var gr = Grenade.Throw(from, v + (BodyHeld && gInit ? simVel * 0.3f : Vector3.zero));
+                gr.shrapnel = Loadout.shrapnel;
+                if (Loadout.FuseSeconds < 0f) { gr.impact = true; gr.fuse = 30f; } else gr.fuse = Loadout.FuseSeconds;
+                SetGrenadeShown(false);
+                Sfx.Play("knife", cam.transform.position, 0.35f, 0f, 1f, 0.15f);
+            }
+            if (thrown && throwT > ThrowDone - 0.3f) SetGrenadeShown(true);   // the next one in the hand
+            if (throwT >= ThrowDone) { throwT = -1f; nextFire = Time.unscaledTime + 0.15f; }
+        }
+
+        void SetGrenadeShown(bool on)
+        {
+            if (current >= models.Count || models[current] == null) return;
+            foreach (var r in models[current].GetComponentsInChildren<MeshRenderer>(true))
+                if (r.name.StartsWith("Gun_") && r.enabled != on) r.enabled = on;
+        }
+
+        /// <summary>The arm's movement through the throw, added to where the grenade is held.</summary>
+        void ThrowPose(ref Vector3 pos, ref Quaternion rot)
+        {
+            if (throwT < 0f) return;
+            float t = throwT;
+            Vector3 back, through; Vector3 eBack, eThrough; float rel;
+            if (throwFar)
+            {
+                // back and up over the shoulder, then over the top and well forward
+                back = new Vector3(0.1f, 0.2f, -0.26f); eBack = new Vector3(-65f, 10f, 15f);
+                through = new Vector3(-0.05f, 0.04f, 0.36f); eThrough = new Vector3(70f, -15f, -10f);
+                rel = FarRelease;
+            }
+            else
+            {
+                // down and back beside the hip, then swung forward and up
+                back = new Vector3(0.06f, -0.16f, -0.18f); eBack = new Vector3(40f, 0f, 0f);
+                through = new Vector3(-0.02f, 0.02f, 0.3f); eThrough = new Vector3(-35f, 0f, 0f);
+                rel = LowRelease;
+            }
+            Vector3 p; Vector3 e;
+            if (t < rel * 0.75f)
+            {
+                // the wind-up: slow, the weight going back
+                float u = Mathf.SmoothStep(0f, 1f, t / (rel * 0.75f));
+                p = back * u; e = eBack * u;
+            }
+            else if (t < rel + 0.12f)
+            {
+                // the throw: fast, the arm whipping through
+                float u = Mathf.SmoothStep(0f, 1f, (t - rel * 0.75f) / (rel * 0.25f + 0.12f));
+                p = Vector3.Lerp(back, through, u); e = Vector3.Lerp(eBack, eThrough, u);
+            }
+            else
+            {
+                // follow through and back to the ready
+                float u = Mathf.SmoothStep(0f, 1f, (t - rel - 0.12f) / (ThrowDone - rel - 0.12f));
+                p = Vector3.Lerp(through, Vector3.zero, u); e = Vector3.Lerp(eThrough, Vector3.zero, u);
+            }
+            pos += p;
+            rot *= Quaternion.Euler(e);
         }
 
         // ------------------------------------------------------------ K
@@ -1667,10 +1781,16 @@ namespace Carl
             acc += (inv * Vector3.down) * 9.81f * weak * 0.35f * heavy;
             angAcc += (offRot * Vector3.right) * (weak * heavy * 6f);
             // shaking: pain, blood loss, damaged arms, the brain
-            float tremor = ((PlayerBody.I != null ? PlayerBody.I.Tremor : 0f) + (1f - ga) * 0.4f) * (1f - 0.5f * ads);
+            float rush = PlayerBody.I != null ? PlayerBody.I.Rush : 0f;
+            float tremor = (Mathf.Max(0f, (PlayerBody.I != null ? PlayerBody.I.Tremor : 0f) - rush * 0.75f) + (1f - ga) * 0.4f) * (1f - 0.5f * ads);
             float t = Time.time;
             acc += new Vector3(Mathf.PerlinNoise(t * 7f, 3f) - 0.5f, Mathf.PerlinNoise(5f, t * 7f) - 0.5f, 0f) * tremor * 22f;
             angAcc += new Vector3(Mathf.PerlinNoise(t * 6f, 11f) - 0.5f, Mathf.PerlinNoise(13f, t * 6f) - 0.5f, 0f) * tremor * 16f;
+            // adrenaline: a fast, jittery shake in the hands that aiming down the sights doesn't steady - the
+            // tighter hold only makes the muzzle buzz harder on the target
+            float jitter = rush * (1f + 3.5f * ads);
+            acc += new Vector3(Mathf.PerlinNoise(t * 14f, 21f) - 0.5f, Mathf.PerlinNoise(23f, t * 14f) - 0.5f, 0f) * jitter * 30f;
+            angAcc += new Vector3(Mathf.PerlinNoise(t * 12f, 31f) - 0.5f, Mathf.PerlinNoise(37f, t * 12f) - 0.5f, Mathf.PerlinNoise(t * 9f, 41f) - 0.5f) * jitter * 34f;
             offVel = Vector3.ClampMagnitude(offVel + acc * dt, 4f);
             offAng = Vector3.ClampMagnitude(offAng + angAcc * dt, 22f);
             offPos += offVel * dt;
@@ -2131,14 +2251,15 @@ namespace Carl
         void FireGun(WeaponDef d)
         {
             nextFire = Time.unscaledTime + 60f / Rpm(current);
-            // shooting at people gets the adrenaline going (shooting at a wall, much less)
+            if (burstLeft > 0) burstLeft--;
+            // shooting at people gets the adrenaline going a little (nothing like being shot at)
             var meA = PlayerAvatar.Body;
             if (meA != null && !meA.Dead)
             {
                 bool fight = false;
                 foreach (var h in HumanBody.All)
                     if (h != null && h != meA && !h.Dead && Vector3.Distance(h.Center, cam.transform.position) < 70f && Vector3.Angle(cam.transform.forward, h.Center - cam.transform.position) < 35f) { fight = true; break; }
-                meA.physio.AddStress(fight ? 0.03f : 0.004f);
+                meA.physio.AddStress(fight ? 0.008f : 0.001f);
             }
             if (d.name == "TASER")
             {
@@ -2177,25 +2298,34 @@ namespace Carl
             }
             Ballistics.FiringBody = null;
 
-            float gripK = Loadout.grip == GripKind.Vertical ? 0.7f : Loadout.grip == GripKind.Angled ? 0.82f : 1f;
+            float gripK = Loadout.grip == GripKind.Vertical ? 0.78f : Loadout.grip == GripKind.Angled ? 0.88f : 1f;
             float ammoK = am != null ? Mathf.Clamp(Mathf.Sqrt(am.Energy / Mathf.Max(1f, d.Energy)), 0.5f, 1.4f) : 1f;
-            float camK = (held ? 0.45f : 1f) * (IsAuto(current) ? 0.7f : 1f);    // held, most of the kick goes into the gun and your arms; a long burst climbs less per round
-            // aiming down the sights, braced into the shoulder with the cheek on the stock: much less kick
-            float adsK = Mathf.Lerp(1f, 0.42f, aimT);
-            pc.AddRecoil(camK * d.recoil * ammoK * gripK * oneK * Random.Range(0.8f, 1.2f) * adsK, camK * Random.Range(-0.35f, 0.35f) * d.recoil * 0.5f * gripK * oneK * oneK * adsK);
-            if (held)
+            float suppK = Loadout.suppressor && SuppressorFor(d) ? 0.9f : 1f;    // a can takes a little of the muzzle rise off
+            // braced into the shoulder, cheek on the stock: it helps, but a rifle still kicks hard
+            float adsK = Mathf.Lerp(1f, 0.62f, aimT);
+            var rec = Recoil.For(d.name);
+            // the burst: a pause between shots starts a new one with a new (unpredictable) pattern
+            if (Time.unscaledTime - lastShotTime > 0.32f) { burstShot = 0; burstSeed = Random.Range(0f, 1000f); burstSide = Random.value < 0.6f ? 1f : -1f; }
+            lastShotTime = Time.unscaledTime;
+            float k = ammoK * gripK * oneK * adsK * suppK;
+            Vector2 kickDeg = rec.Shot(burstShot, burstSeed, burstSide) * k;
+            burstShot++;
+            // held by your body most of the kick goes into the gun and your arms (they throw the muzzle about);
+            // the rest moves your view
+            float camK = held ? 0.5f : 1f;
+            pc.AddRecoil(camK * kickDeg.y, camK * kickDeg.x);
+            if (held && gunRb != null)
             {
-                // the gun is thrown back into the hands and the muzzle flips up (more so one-handed or hurt)
-                float r = d.recoil * ammoK * gripK * Mathf.Lerp(1f, 0.45f, aimT);
-                if (gunRb != null)
-                {
-                    KickGun((-(gRot * Vector3.forward) * 0.55f + Vector3.up * 0.12f) * r * Mathf.Sqrt(oneK),
-                        (gRot * Vector3.right) * (-r * 2.4f * oneK) + (gRot * Vector3.up) * (Random.Range(-1f, 1f) * r * 0.7f * oneK));
-                }
+                // the gun is driven back into the hands, the muzzle flips up and jumps sideways, and it rolls
+                float r = d.recoil * ammoK * gripK * suppK * Mathf.Lerp(1f, 0.6f, aimT);
+                KickGun(-(gRot * Vector3.forward) * (0.55f * r * Mathf.Sqrt(oneK)) + Vector3.up * (0.1f * r),
+                    (gRot * Vector3.right) * (-kickDeg.y * rec.flip * 0.9f) + (gRot * Vector3.up) * (kickDeg.x * rec.flip * 0.8f) + (gRot * Vector3.forward) * (Random.Range(-1f, 1f) * kickDeg.y * 0.35f));
             }
-            swayVel += new Vector2(Random.Range(-1f, 1f), 1.5f) * d.recoil * 0.02f * oneK * Mathf.Lerp(1f, 0.4f, aimT);
-            if (d.recoil > 4f) pc.Shake(0.15f);
-            kick = Mathf.Min(1.5f, kick + 0.6f + d.recoil * 0.08f);
+            swayVel += new Vector2(kickDeg.x * 0.006f, kickDeg.y * 0.012f);
+            if (d.recoil > 4f) pc.Shake(0.15f + 0.02f * d.recoil);
+            kick = Mathf.Min(1.6f, kick + 0.5f + d.recoil * 0.1f);
+            // a hard-kicking gun slows you down while you're firing it
+            fireHeat = Mathf.Min(1.5f, fireHeat + Mathf.Clamp(d.recoil * ammoK, 0.4f, 8f) * 0.07f);
             bool supp = Loadout.suppressor && SuppressorFor(d);
             flashTimer = supp ? 0f : 0.045f;   // the can swallows the flash
             // a fresh flash shape every shot
@@ -2390,6 +2520,7 @@ namespace Carl
         {
             var d = Current;
             kick = Mathf.MoveTowards(kick, 0f, dt * 6f);
+            fireHeat = Mathf.MoveTowards(fireHeat, 0f, dt * 1.1f);
             Vector3 hip = new Vector3(0.17f, -0.17f, 0.36f);
             // aiming puts the sight line (iron sights, the optic's centre or the scope's axis) right on the eye
             bool held = BodyHeld;
@@ -2457,6 +2588,7 @@ namespace Carl
                 pos += new Vector3(0f, 0.12f * up - 0.08f * (1f - up) * (t > 0.4f ? 1f : 0f), 0.08f);
                 rot *= Quaternion.Euler(Mathf.Lerp(-70f, 60f, Mathf.SmoothStep(0.3f, 0.7f, t)), 0f, 0f);
             }
+            if (d.type == WeaponType.Grenade) ThrowPose(ref pos, ref rot);
             // sway with movement
             float bob = Mathf.Sin(Time.unscaledTime * 8f) * 0.004f * (1f - aimT);
             pos.y += bob;

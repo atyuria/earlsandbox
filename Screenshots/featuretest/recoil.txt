@@ -1,0 +1,11 @@
+== recoil  (21:10:23)
+PASS  AK starts on AUTO
+PASS  Z: AK to SEMI
+SEMI, trigger held 0.8 s: 30 / 30 -> 29 / 30
+PASS  SEMI: holding the trigger fires one round
+PASS  Z again: back to AUTO
+PASS  one aimed AK shot: the muzzle jumps 3.17 deg
+AK burst 1: climb 13.0 deg, side 0.9 deg  ·  AK burst 2: climb 12.5, side 1.1  ·  AR-15: climb 12.8, side 0.6
+FAIL  the AK kicks harder and dances more than the AR-15
+PASS  two AK bursts don't follow the same track (mean side difference 0.31 deg)
+FAIL  firing the AK slows your walk (0.00)

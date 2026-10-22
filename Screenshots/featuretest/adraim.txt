@@ -1,0 +1,2 @@
+== adraim  (21:12:20)
+FAIL  aiming down the sights: muzzle wander calm 0.149 deg, with adrenaline 0.422 deg

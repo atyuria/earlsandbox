@@ -109,6 +109,8 @@ namespace Carl
             pain = Mathf.Clamp01(pain + amount);
             chronicPain = Mathf.Clamp(chronicPain + amount * 0.35f, 0f, 0.85f);
             adrenaline = Mathf.Clamp01(adrenaline + amount * 0.6f);
+            // you, getting hit: the adrenaline floods in at once
+            if (body != null && body == PlayerAvatar.Body) adrenaline = Mathf.Clamp01(adrenaline + 0.2f + amount);
             // vasovagal faint from sudden severe pain
             if (amount > 0.35f && EffectivePain > 0.8f && Random.value < 0.18f)
                 faintTimer = Random.Range(3f, 9f);

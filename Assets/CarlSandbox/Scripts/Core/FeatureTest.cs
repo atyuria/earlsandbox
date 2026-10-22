@@ -54,6 +54,8 @@ namespace Carl
                 case "audio": body = Audio(); break;
                 case "pistol": body = Pistol(); break;
                 case "adrenaline": body = Adrenaline(); break;
+                case "adraim": body = AdrenalineAim(); break;
+                case "recoil": body = RecoilTest(); break;
                 default: Line("unknown scenario"); break;
             }
             if (body != null) yield return body;
@@ -396,7 +398,7 @@ namespace Carl
                 if (me.ragdoll.Falling) bracedFrames++;
             }
             // drop (Z): going over
-            keysDown.Add(UnityEngine.InputSystem.Key.Z);
+            keysDown.Add(UnityEngine.InputSystem.Key.Y);
             yield return Hold(0.1f, Watch);
             keysDown.Clear();
             yield return Hold(0.25f, Watch);
@@ -693,6 +695,131 @@ namespace Carl
             PlayerBody.I.Revive(); Game.player.Teleport(Game.SpawnPoint, 0f);
             yield return new WaitForSeconds(1.5f);
             Check(PlayerBody.I.Dark < 0.05f, "back up: the screen is clear again");
+            Release();
+        }
+
+        /// <summary>Aiming down the sights: how far the muzzle wanders calm, and with adrenaline up.</summary>
+        IEnumerator AdrenalineAim()
+        {
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            var me = PlayerAvatar.Body;
+            Wpn.Give(Idx("AK-47"), true);
+            yield return Hold(1f);
+            rmb = true; yield return Hold(1.2f);
+            IEnumerator Measure(float adr, System.Action<float> result)
+            {
+                var dirs = new List<Vector3>();
+                for (float t = 0; t < 2.5f; t += Time.deltaTime)
+                {
+                    me.physio.adrenaline = adr; me.physio.pain = 0f;
+                    Keys();
+                    if (t > 0.5f) dirs.Add(Quaternion.Inverse(Game.cam.transform.rotation) * Wpn.AimDirection);
+                    yield return null;
+                }
+                Vector3 mean = Vector3.zero; foreach (var d in dirs) mean += d; mean.Normalize();
+                float s = 0f; foreach (var d in dirs) s += Vector3.Angle(d, mean); result(s / Mathf.Max(1, dirs.Count));
+            }
+            float calm = 0f, rushed = 0f;
+            yield return Measure(0.05f, v => calm = v);
+            yield return Measure(0.95f, v => rushed = v);
+            Check(rushed > calm * 3f && rushed > 0.1f, $"aiming down the sights: muzzle wander calm {calm:0.000} deg, with adrenaline {rushed:0.000} deg");
+            rmb = false; Release();
+            me.physio.adrenaline = 0.05f;
+        }
+
+        // ------------------------------------------------------------ recoil and fire modes
+
+        /// <summary>Fire n rounds (held trigger) aiming down the sights; the path the barrel takes, in degrees
+        /// right / up from where it pointed before the first shot.</summary>
+        IEnumerator Burst(int gun, int n, List<Vector2> path)
+        {
+            Wpn.Give(gun, true);
+            GameSettings.InfiniteAmmo = true;
+            yield return Hold(0.8f);
+            rmb = true; yield return Hold(1.2f);
+            Vector3 f0 = Wpn.AimDirection, r0 = Game.cam.transform.right, u0 = Game.cam.transform.up;
+            float tEnd = Time.unscaledTime + n * 60f / Wpn.Rpm(gun) + 0.05f;
+            lmb = true;
+            while (Time.unscaledTime < tEnd)
+            {
+                Keys();
+                Vector3 d = Wpn.AimDirection;
+                path.Add(new Vector2(Mathf.Asin(Mathf.Clamp(Vector3.Dot(d, r0), -1f, 1f)) * Mathf.Rad2Deg, Mathf.Asin(Mathf.Clamp(Vector3.Dot(d, u0), -1f, 1f)) * Mathf.Rad2Deg));
+                yield return null;
+            }
+            lmb = false; yield return Hold(0.6f);
+            rmb = false; yield return Hold(0.8f);
+        }
+
+        static (float climb, float side) Spread(List<Vector2> p)
+        {
+            float up = 0f, lo = 0f, hi = 0f;
+            foreach (var v in p) { up = Mathf.Max(up, v.y); lo = Mathf.Min(lo, v.x); hi = Mathf.Max(hi, v.x); }
+            return (up, hi - lo);
+        }
+
+        IEnumerator RecoilTest()
+        {
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            int ak = Idx("AK-47"), ar = Idx("AR-15");
+            // fire modes
+            Wpn.Give(ak, true); Wpn.loadouts[ak].fireMode = 0;
+            yield return Hold(0.6f);
+            Check(Wpn.FireMode(ak) == "AUTO", "AK starts on AUTO");
+            keysDown.Add(UnityEngine.InputSystem.Key.Z); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.3f);
+            Check(Wpn.FireMode(ak) == "SEMI", "Z: AK to SEMI");
+            GameSettings.InfiniteAmmo = false;
+            Wpn.Give(ak, true); yield return Hold(0.5f);
+            string before = Wpn.AmmoText;
+            lmb = true; yield return Hold(0.8f); lmb = false; yield return Hold(0.3f);
+            Line($"SEMI, trigger held 0.8 s: {before} -> {Wpn.AmmoText}");
+            Check(Wpn.AmmoText.StartsWith("29"), "SEMI: holding the trigger fires one round");
+            keysDown.Add(UnityEngine.InputSystem.Key.Z); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.3f);
+            Check(Wpn.FireMode(ak) == "AUTO", "Z again: back to AUTO");
+            // one aimed AK shot still kicks
+            var one = new List<Vector2>();
+            yield return Burst(ak, 1, one);
+            float oneMax = 0f; foreach (var v in one) oneMax = Mathf.Max(oneMax, v.magnitude);
+            Check(oneMax > 0.6f, $"one aimed AK shot: the muzzle jumps {oneMax:0.00} deg");
+            // ten-round bursts, AK and AR-15
+            var akA = new List<Vector2>(); var akB = new List<Vector2>(); var arA = new List<Vector2>();
+            yield return Burst(ak, 10, akA);
+            float slow = Wpn.FireSlow;
+            yield return Burst(ak, 10, akB);
+            yield return Burst(ar, 10, arA);
+            var sa = Spread(akA); var sb = Spread(akB); var sr = Spread(arA);
+            Line($"AK burst 1: climb {sa.climb:0.0} deg, side {sa.side:0.0} deg  ·  AK burst 2: climb {sb.climb:0.0}, side {sb.side:0.0}  ·  AR-15: climb {sr.climb:0.0}, side {sr.side:0.0}");
+            Check(sa.climb > sr.climb * 1.3f && (sa.side + sb.side) * 0.5f > sr.side, "the AK kicks harder and dances more than the AR-15");
+            float diff = 0f; int nn = Mathf.Min(akA.Count, akB.Count);
+            for (int i = 0; i < nn; i++) diff += Mathf.Abs(akA[i].x - akB[i].x);
+            Check(nn > 0 && diff / nn > 0.15f, $"two AK bursts don't follow the same track (mean side difference {diff / Mathf.Max(1, nn):0.00} deg)");
+            Check(slow > 0.3f, $"firing the AK slows your walk ({slow:0.00})");
+            // the shotgun: one shell, a big kick
+            var sg = new List<Vector2>();
+            yield return Burst(Idx("MOSSBERG 590"), 1, sg);
+            float sgMax = 0f; foreach (var v in sg) sgMax = Mathf.Max(sgMax, v.magnitude);
+            Check(sgMax > oneMax * 2.5f, $"a shotgun shell kicks far harder than an AK round ({sgMax:0.0} vs {oneMax:0.0} deg)");
+            GameSettings.InfiniteAmmo = false;
+            // a grenade throw: wind up, let go from the hand, follow through
+            Wpn.Give(Idx("GRENADE"), true);
+            yield return Hold(0.8f);
+            int g0 = FindObjectsByType<Grenade>().Length;
+            Vector3 handStart = Wpn.CurrentModel.transform.position;
+            lmb = true; yield return Hold(0.05f); lmb = false;
+            yield return Hold(0.3f);
+            Check(Wpn.Throwing && FindObjectsByType<Grenade>().Length == g0, "throw: winding up, not let go yet");
+            float back = Vector3.Dot(Wpn.CurrentModel.transform.position - handStart, -Game.cam.transform.forward);
+            Check(back > 0.08f, $"the arm goes back for the throw ({back * 100f:0} cm)");
+            yield return GrabView("grenade_windup");
+            yield return Hold(0.3f);
+            Check(FindObjectsByType<Grenade>().Length > g0, "let go: the grenade is in the air");
+            yield return GrabView("grenade_release");
+            yield return Hold(0.8f);
+            Check(!Wpn.Throwing, "follow through done, ready for the next");
             Release();
         }
 
