@@ -159,6 +159,8 @@ namespace Carl
 
             // ---- moving: the same gait as any Earl, so a hurt leg limps and a lost one drops you
             float speed = wishWorld.sqrMagnitude > 0.01f ? (sprint ? 4.8f : 2.3f) : 0f;
+            // backing off and side-stepping are slower than walking forward (the legs can only step back so fast)
+            if (speed > 0f) { float fw = Vector3.Dot(wishWorld.normalized, flat); speed *= fw < -0.2f ? 0.62f : fw < 0.5f ? 0.8f : 1f; if (fw < 0.5f) speed = Mathf.Min(speed, 2.4f); }
             rag.moveDir = wishWorld.sqrMagnitude > 0.01f ? wishWorld.normalized : flat;
             rag.moveSpeed = speed * Mathf.Clamp01(wishWorld.magnitude);
             // Z: go down / try to get up. On the ground: hold space to get up, keys to crawl
@@ -206,6 +208,9 @@ namespace Carl
             Vector3 eye = head.position + Vector3.up * 0.05f + flatFwd * 0.09f;
             // the spine bends the head out; a little extra so the eye clears the corner the way it does for real
             eye += Vector3.Cross(Vector3.up, flatFwd) * (leanCam * 0.12f);
+            // aiming a long gun: the head goes down onto the stock
+            var wpn = SandboxGame.Instance != null ? SandboxGame.Instance.weapons : null;
+            if (wpn != null) eye -= Vector3.up * wpn.CheekDrop;
             pc.cam.transform.rotation = pc.cam.transform.rotation * Quaternion.Euler(0f, 0f, -leanCam * 12f);
             if (!camInit) { camPos = eye; camInit = true; }
             camPos = Vector3.Lerp(camPos, eye, Mathf.Clamp01(Time.unscaledDeltaTime * 30f));

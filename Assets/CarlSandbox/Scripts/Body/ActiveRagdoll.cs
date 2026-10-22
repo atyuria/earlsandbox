@@ -671,8 +671,8 @@ namespace Carl
                 if (stumbleTimer > 0f) { stumbleTimer -= dt; vDes += stumbleVel; }
                 Vector3 vCur = Vector3.ProjectOnPlane(pelvis.linearVelocity, Vector3.up);
                 // (you respond to the keys more crisply than a wandering Earl does)
-                float driveK = grit > 1f ? 13f : 5f;
-                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * driveK, grit > 1f ? 2000f : 950f) * upright * GaitTraction();
+                float driveK = grit > 1f ? 11f : 5f;
+                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * driveK, grit > 1f ? 1700f : 950f) * upright * GaitTraction();
                 pelvis.AddForce(fh * 0.6f);
                 chest.AddForce(fh * 0.4f);
                 StabilityForces(dt, pelvis, chest, M);

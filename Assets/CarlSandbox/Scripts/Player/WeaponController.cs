@@ -62,6 +62,12 @@ namespace Carl
         public bool[] owned;
         public bool Armed => owned != null && current >= 0 && current < owned.Length && owned[current];
 
+        /// <summary>
+        /// How far your head goes down onto the stock when you aim a long gun (the cheek weld): the eye comes down
+        /// to the sights rather than the gun coming up to the eye, so the butt stays in your shoulder.
+        /// </summary>
+        public float CheekDrop => Armed && Current.type == WeaponType.Gun && !IsPistol(Current) && BodyHeld ? 0.06f * Mathf.SmoothStep(0f, 1f, aimT) : 0f;
+
         /// <summary>Take a weapon (and pull it out) or put it back.</summary>
         public void Give(int i, bool on)
         {
@@ -633,7 +639,7 @@ namespace Carl
         // Glock's slide sights, the AK's front post. The rest of the gun is untouched.
         static readonly Dictionary<string, Bounds[]> ironRegions = new Dictionary<string, Bounds[]>
         {
-            ["AR-15"] = new[] { MinMax(-0.013f, 0.0293f, 0.326f, 0.013f, 0.07f, 0.355f), MinMax(-0.013f, 0.0293f, -0.164f, 0.013f, 0.06f, -0.135f) },
+            ["AR-15"] = new[] { MinMax(-0.013f, 0.0293f, 0.326f, 0.013f, 0.07f, 0.355f), MinMax(-0.013f, 0.0293f, -0.164f, 0.013f, 0.075f, -0.135f) },
             ["GLOCK 17"] = new[] { MinMax(-0.012f, 0.0503f, -0.0885f, 0.012f, 0.06f, -0.0755f), MinMax(-0.003f, 0.0503f, 0.081f, 0.003f, 0.06f, 0.0895f) },
             ["AK-47"] = new[] { MinMax(-0.0025f, 0.021f, 0.442f, 0.0025f, 0.036f, 0.448f) },
         };
@@ -1159,7 +1165,7 @@ namespace Carl
             if (gunRb == null)
             {
                 gunRb = vmRoot.gameObject.AddComponent<Rigidbody>();
-                gunRb.interpolation = RigidbodyInterpolation.Interpolate;
+                gunRb.interpolation = RigidbodyInterpolation.None;   // (drawn where your eyes are each frame instead: LateUpdate)
                 gunRb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
                 gunRb.maxAngularVelocity = 30f;
                 gunRb.solverIterations = 16; gunRb.solverVelocityIterations = 8;
@@ -1426,33 +1432,141 @@ namespace Carl
         /// <summary>Straight to where it is held (on first holding it, or after a teleport).</summary>
         void SnapGun()
         {
+            snaps++;
             Quaternion hf = HoldFrame();
-            Vector3 tp = Eye.position + hf * tgtPos;
-            Quaternion tr = hf * tgtRot;
-            simPos = tp; simRot = tr; simVel = simAng = Vector3.zero;
-            gunRb.position = tp; gunRb.rotation = tr;
-            vmRoot.SetPositionAndRotation(tp, tr);
-            lastTp = tp; lastTpOk = true;
+            Vector3 eye = Eye.position;
+            offPos = tgtPos; offRot = tgtRot; offVel = offAng = Vector3.zero;
+            simPos = eye + hf * offPos; simRot = hf * offRot; simVel = simAng = Vector3.zero;
+            lastEyeP = eye; lastHf = hf; lastSimPos = simPos; lastSimRot = simRot;
+            gunRb.position = simPos; gunRb.rotation = simRot;
+            vmRoot.SetPositionAndRotation(simPos, simRot);
+            lastTp = simPos; lastTpOk = true;
             gunInit = gInit = true;
         }
 
-        // the gun's own motion: sprung to where it is held, swung by turning, thrown by recoil, sagging and
-        // shaking with hurt arms. It is moved kinematically (nothing feeds back into it to set it shaking); the
-        // hands hang on it by springs and the arms follow them.
+        // The gun is held in front of your eyes, so it is simulated THERE: as an offset from your eyes (offPos /
+        // offRot, in the frame the gun is held in), sprung to where the arms hold it. Walking, turning and leaning
+        // carry it along with you exactly; only a little of each movement is left behind as sway, which the arms
+        // then take back up. Recoil, a knock, weak or shaking arms move it about its place, never out of a small
+        // box round it - so it can't be left behind as you walk into it, or sink back into your chest however hurt
+        // you are. simPos / simRot are where that puts it in the world (for the hands and the physics).
         Vector3 simPos, simVel, simAng; Quaternion simRot = Quaternion.identity;
+        Vector3 offPos, offVel, offAng; Quaternion offRot = Quaternion.identity;
+        Vector3 lastEyeP, lastSimPos; Quaternion lastHf = Quaternion.identity, lastSimRot = Quaternion.identity;
+        const float SwayTurn = 0.1f, SwayWalk = 0.06f;   // how much of a turn / a step the gun lags behind before the arms catch it
+
+        int simWeapon = -1;
+        Vector3 heldAt;   // where the arms want it this step (eye frame), for the playtest
+
+        /// <summary>
+        /// The gun is never inside you: points along it from the grip to the muzzle (the bore line and the
+        /// underside: magazine, handguard) are checked against your torso as it is now (a capsule from the pelvis
+        /// up through the chest), and the gun is pushed straight out of it - however you turn, walk, look down or
+        /// however weak your arms are. (The stock behind the grip belongs against your shoulder.)
+        /// </summary>
+        void KeepOutOfTorso(HumanBody me, Vector3 eye, Quaternion hf, Quaternion inv) => PushOutOfTorso(me, eye, hf, inv, ref offPos, true);
+
+        // points spread over each gun's own mesh, from a little ahead of the grip on (what must stay out of you)
+        readonly Dictionary<int, Vector3[]> torsoProbes = new Dictionary<int, Vector3[]>();
+        Vector3[] TorsoProbes(int i)
+        {
+            if (torsoProbes.TryGetValue(i, out var p)) return p;
+            if (i >= models.Count || models[i] == null || i >= gripPts.Count) return null;
+            var list = new List<Vector3>();
+            foreach (var mf in models[i].GetComponentsInChildren<MeshFilter>(true))
+            {
+                if (!mf.name.StartsWith("Gun_") || mf.sharedMesh == null) continue;
+                var v = mf.sharedMesh.vertices;
+                var keep = new List<Vector3>();
+                for (int k = 0; k < v.Length; k++)
+                {
+                    Vector3 lp = vmRoot.InverseTransformPoint(mf.transform.TransformPoint(v[k]));
+                    if (lp.z > gripPts[i].z + 0.05f) keep.Add(lp);
+                }
+                int step = Mathf.Max(1, keep.Count / 60);
+                for (int k = 0; k < keep.Count; k += step) list.Add(keep[k]);
+                // and the extremes: the bottom of the magazine, the sides of the handguard
+                if (keep.Count > 0)
+                {
+                    Vector3 lo = keep[0], hiX = keep[0], loX = keep[0];
+                    foreach (var q in keep) { if (q.y < lo.y) lo = q; if (q.x > hiX.x) hiX = q; if (q.x < loX.x) loX = q; }
+                    list.Add(lo); list.Add(hiX); list.Add(loX);
+                }
+                break;
+            }
+            p = list.Count > 0 ? list.ToArray() : null;
+            torsoProbes[i] = p;
+            return p;
+        }
+
+        void PushOutOfTorso(HumanBody me, Vector3 eye, Quaternion hf, Quaternion inv, ref Vector3 op, bool sim)
+        {
+            if (me == null || me.Pelvis == null || me.Chest == null || current >= gripPts.Count) return;
+            Vector3 tA = me.Pelvis.transform.position, tB = me.Chest.transform.position + me.Chest.transform.up * 0.12f;
+            Vector3 ab = tB - tA;
+            const float R = 0.145f;                   // (the chest is about 0.13 deep in front of its middle, and a margin)
+            var probes = TorsoProbes(current);
+            if (probes == null) return;
+            for (int it = 0; it < 3; it++)
+            {
+                Vector3 pos = eye + hf * op; Quaternion rot = hf * offRot;
+                float worst = 0f; Vector3 dir = Vector3.zero;
+                foreach (var lp in probes)
+                {
+                    Vector3 w = pos + rot * lp;
+                    float t = Mathf.Clamp01(Vector3.Dot(w - tA, ab) / ab.sqrMagnitude);
+                    Vector3 d = w - (tA + ab * t);
+                    d = Vector3.ProjectOnPlane(d, ab.normalized);
+                    float dist = d.magnitude;
+                    if (R - dist > worst) { worst = R - dist; dir = dist > 1e-4f ? d / dist : Vector3.ProjectOnPlane(Eye.forward, ab.normalized).normalized; }
+                }
+                if (worst <= 0f) return;
+                Vector3 pushL = inv * (dir * worst);
+                op += pushL;
+                if (!sim) continue;
+                float into = Vector3.Dot(offVel, -pushL.normalized);
+                if (into > 0f) offVel += pushL.normalized * into;
+            }
+        }
+
+        /// <summary>The held gun's pose in the world from its offset and your eyes now.</summary>
+        void GunPose(out Vector3 pos, out Quaternion rot)
+        {
+            Quaternion hf = HoldFrame();
+            // (out of your body as it is this frame too: the camera turns at once, your chest a moment later)
+            Vector3 op = offPos;
+            PushOutOfTorso(PlayerAvatar.Body, Eye.position, hf, Quaternion.Inverse(hf), ref op, false);
+            pos = Eye.position + hf * op;
+            rot = hf * offRot;
+        }
 
         /// <summary>Physics step: the gun moves where the arms take it, and the hands go with it.</summary>
         void HoldPhysics()
         {
             if (!BodyHeld || !Armed || gunRb == null || !gunInit) return;
+            // another weapon in the hands: it starts where it is held (not flung there from the last one)
+            if (simWeapon != current) { simWeapon = current; SnapGun(); return; }
             float dt = Time.fixedDeltaTime;
             Quaternion hf = HoldFrame();
-            Vector3 tp = Eye.position + hf * tgtPos;
+            Vector3 eye = Eye.position;
+            Quaternion inv = Quaternion.Inverse(hf);
+            // where the arms want it (in the eye's frame), pulled in when the muzzle would go into a wall
+            Vector3 tp = eye + hf * tgtPos;
             Quaternion tr = hf * tgtRot;
             var d = Current;
             if (d.type == WeaponType.Gun) Tuck(ref tp, ref tr);
-            // far out of place (a teleport, a respawn): straight back into the hands
-            if ((simPos - tp).sqrMagnitude > 0.5f * 0.5f || Quaternion.Angle(simRot, tr) > 70f) { SnapGun(); rigKey = null; return; }
+            Vector3 tpL = inv * (tp - eye);
+            heldAt = tpL;
+            Quaternion trL = inv * tr;
+            // a teleport, a respawn, a fall: straight back into the hands
+            if ((eye - lastEyeP).sqrMagnitude > 1f || Quaternion.Angle(offRot, trL) > 70f || (offPos - tpL).sqrMagnitude > 0.3f * 0.3f) { SnapGun(); rigKey = null; return; }
+
+            // carried with you: a little of this step's turn and walk is left behind as sway
+            Quaternion turn = inv * lastHf;                                   // last step's frame, seen from this one
+            Quaternion lag = Quaternion.Slerp(Quaternion.identity, turn, SwayTurn);
+            offPos = tpL + lag * (offPos - tpL);
+            offRot = lag * offRot;
+            offPos -= inv * (eye - lastEyeP) * SwayWalk;
 
             Hands(out var gh, out var sh, out float ga, out float sa);
             var me = PlayerAvatar.Body;
@@ -1466,28 +1580,50 @@ namespace Carl
             // aiming down the sights: cheek on the stock, the sights held on the eye - much stiffer, only the shakes
             float ads = melee ? 0f : Mathf.SmoothStep(0f, 1f, Mathf.Max(aimT, pointT * 0.6f));
             kp *= 1f + 5f * ads; kr *= 1f + 6f * ads;
+            kp = Mathf.Max(kp, 60f); kr = Mathf.Max(kr, 40f);              // (even limp arms keep it roughly up)
             float dp = 2f * Mathf.Sqrt(kp) * 0.85f, dr = 2f * Mathf.Sqrt(kr) * 0.85f;
 
-            Vector3 acc = (tp - simPos) * kp - simVel * dp;
-            (tr * Quaternion.Inverse(simRot)).ToAngleAxis(out float ang, out Vector3 ax);
+            Vector3 acc = (tpL - offPos) * kp - offVel * dp;
+            (trL * Quaternion.Inverse(offRot)).ToAngleAxis(out float ang, out Vector3 ax);
             if (ang > 180f) ang -= 360f;
             if (!float.IsFinite(ax.x)) ax = Vector3.zero;
-            Vector3 angAcc = ax * (ang * Mathf.Deg2Rad) * kr - simAng * dr;
+            Vector3 angAcc = ax * (ang * Mathf.Deg2Rad) * kr - offAng * dr;
             // weak arms can't hold the weight up: it sags and the muzzle droops
             float weak = (1f - Mathf.Clamp01(hold)) * (1f - 0.85f * ads);
-            acc += Vector3.down * 9.81f * weak * 0.35f * heavy;
-            angAcc += (simRot * Vector3.right) * (weak * heavy * 6f);
+            acc += (inv * Vector3.down) * 9.81f * weak * 0.35f * heavy;
+            angAcc += (offRot * Vector3.right) * (weak * heavy * 6f);
             // shaking: pain, blood loss, damaged arms, the brain
             float tremor = ((PlayerBody.I != null ? PlayerBody.I.Tremor : 0f) + (1f - ga) * 0.4f) * (1f - 0.5f * ads);
             float t = Time.time;
             acc += new Vector3(Mathf.PerlinNoise(t * 7f, 3f) - 0.5f, Mathf.PerlinNoise(5f, t * 7f) - 0.5f, 0f) * tremor * 22f;
             angAcc += new Vector3(Mathf.PerlinNoise(t * 6f, 11f) - 0.5f, Mathf.PerlinNoise(13f, t * 6f) - 0.5f, 0f) * tremor * 16f;
-            simVel = Vector3.ClampMagnitude(simVel + acc * dt, 4f);
-            simAng = Vector3.ClampMagnitude(simAng + angAcc * dt, 22f);
-            simPos += simVel * dt;
-            float w = simAng.magnitude;
-            if (w > 1e-5f) simRot = Quaternion.AngleAxis(w * Mathf.Rad2Deg * dt, simAng / w) * simRot;
-            simRot.Normalize();
+            offVel = Vector3.ClampMagnitude(offVel + acc * dt, 4f);
+            offAng = Vector3.ClampMagnitude(offAng + angAcc * dt, 22f);
+            offPos += offVel * dt;
+            float w = offAng.magnitude;
+            if (w > 1e-5f) offRot = Quaternion.AngleAxis(w * Mathf.Rad2Deg * dt, offAng / w) * offRot;
+            offRot.Normalize();
+            // never out of a small box round where it is held: not back into your chest, not off to the side
+            // (a blade or a grenade goes wherever the swing takes it)
+            Vector3 dv = melee ? Vector3.zero : offPos - tpL;
+            Vector3 lo = new Vector3(-0.06f, -0.1f, -0.05f), hi = new Vector3(0.06f, 0.06f, 0.05f);
+            Vector3 cl = new Vector3(Mathf.Clamp(dv.x, lo.x, hi.x), Mathf.Clamp(dv.y, lo.y, hi.y), Mathf.Clamp(dv.z, lo.z, hi.z));
+            if (cl != dv)
+            {
+                for (int k = 0; k < 3; k++) if (cl[k] != dv[k] && Mathf.Sign(offVel[k]) == Mathf.Sign(dv[k] - cl[k])) offVel[k] = 0f;
+                offPos = tpL + cl;
+            }
+            if (!melee && Quaternion.Angle(offRot, trL) > 15f) offRot = Quaternion.RotateTowards(trL, offRot, 15f);
+            KeepOutOfTorso(me, eye, hf, inv);
+
+            // where that is in the world, and how fast it is going there (for the hands)
+            simPos = eye + hf * offPos;
+            simRot = hf * offRot;
+            simVel = (simPos - lastSimPos) / dt;
+            (simRot * Quaternion.Inverse(lastSimRot)).ToAngleAxis(out float wa, out Vector3 wx);
+            if (wa > 180f) wa -= 360f;
+            simAng = float.IsFinite(wx.x) ? wx * (wa * Mathf.Deg2Rad / dt) : Vector3.zero;
+            lastSimPos = simPos; lastSimRot = simRot; lastEyeP = eye; lastHf = hf;
             gunRb.MovePosition(simPos);
             gunRb.MoveRotation(simRot);
 
@@ -1522,7 +1658,9 @@ namespace Carl
             // at any frame rate), and carry the arm's own weight
             Vector3 dv = e * (0.3f * k / dt) + (gunVelAt - rb.GetPointVelocity(at)) * (0.6f * k);
             Vector3 f = rb.mass * dv / dt - Physics.gravity * (ArmLoad(h.hand) - rb.mass * 0f);
-            f = Vector3.ClampMagnitude(f, 500f);
+            // (no more than an arm can pull: swung round hard, the hand trails a little rather than wrenching the
+            // body over - and exactly that much back into your chest, so the arms never move you as a whole)
+            f = Vector3.ClampMagnitude(f, 200f);
             rb.AddForceAtPosition(f, at, ForceMode.Force);
             if (chest != null) chest.AddForce(-f, ForceMode.Force);
             // the hand turned on the grip the way it closes round it
@@ -1540,7 +1678,7 @@ namespace Carl
         }
 
         /// <summary>Recoil, a shove: straight into the gun's motion.</summary>
-        void KickGun(Vector3 dv, Vector3 dw) { simVel += dv; simAng += dw; }
+        void KickGun(Vector3 dv, Vector3 dw) { var inv = Quaternion.Inverse(HoldFrame()); offVel += inv * dv; offAng += inv * dw; }
 
 
         // ---- your arms as you see them
@@ -1554,11 +1692,11 @@ namespace Carl
         const float WristLen = 0.032f;      // from the end of the forearm bones to the heel of the palm
         bool armsDrawn;
         public bool ArmsDrawn => armsDrawn;
-        static readonly Vector3[] elbowPole = new Vector3[2];
 
         void DrawArms()
         {
             armsDrawn = false;
+            dbgOn[0] = dbgOn[1] = false;
             var me = PlayerAvatar.Body;
             var hR = jointedR != null && jointedR.id == PartId.HandR ? jointedR : null;
             var hL = jointedL ?? (jointedR != null && jointedR.id == PartId.HandL ? jointedR : null);
@@ -1579,38 +1717,108 @@ namespace Carl
             if (fa == null || ua == null || fa.severed || ua.severed || fa.joint == null || ua.joint == null || ua.joint.connectedBody == null) return false;
             float s = hand.id == PartId.HandR ? 1f : -1f;
             Transform eye = Eye;
-            // the hand on the gun: where its heel is and which way it runs (wrist to knuckles)
+            // the hand on the gun: where its heel is, which way it runs (wrist to knuckles), which way the
+            // forearm should leave it for this hold
             Vector3 heel = vis.transform.TransformPoint(vis.WristLocal);
             Vector3 handDir = vis.transform.TransformDirection(vis.PalmZ).normalized;
-            Vector3 W = heel - handDir * WristLen;
-            // the shoulder, on your chest as it is now
-            Vector3 S = ua.joint.connectedBody.transform.TransformPoint(ua.joint.connectedAnchor);
+            Vector3 hint = -vis.transform.TransformDirection(vis.ForearmLocal).normalized;   // forearm running INTO the wrist
             // the bones (this body's own proportions)
             Vector3 eUA = fa.joint.connectedAnchor, sUA = ua.joint.anchor;        // in the upper arm
             Vector3 eFA = fa.joint.anchor, wFA = hand.joint.connectedAnchor;       // in the forearm
             float L1 = Vector3.Scale(sUA - eUA, ua.transform.lossyScale).magnitude;
             float L2 = Vector3.Scale(eFA - wFA, fa.transform.lossyScale).magnitude;
-            // reaching further than the arm is long: the shoulder comes forward to it (it does - the shoulder
-            // blade slides round the ribs) rather than the arm stretching or leaving a gap at the wrist
-            Vector3 d = W - S; float dist = d.magnitude;
-            float reach = (L1 + L2) * 0.992f;
-            if (dist > reach) { S = W - d / dist * reach; d = W - S; dist = reach; }
-            dist = Mathf.Max(dist, Mathf.Abs(L1 - L2) + 0.03f);
-            Vector3 dn = d.normalized;
-            // the elbow: down, out to its own side and a touch back - and never anywhere it can't bend to
-            Vector3 poleWant = eye.rotation * new Vector3(s * (slot == 1 ? 0.6f : 0.45f), -1f, -0.12f);
-            elbowPole[slot] = elbowPole[slot].sqrMagnitude < 0.5f ? poleWant.normalized : Vector3.Slerp(elbowPole[slot], poleWant.normalized, Mathf.Clamp01(Time.deltaTime * 20f));
-            Vector3 perp = Vector3.ProjectOnPlane(elbowPole[slot], dn);
-            if (perp.sqrMagnitude < 1e-5f) perp = Vector3.ProjectOnPlane(Vector3.down, dn);
-            perp.Normalize();
-            float cosA = Mathf.Clamp((L1 * L1 + dist * dist - L2 * L2) / (2f * L1 * dist), -1f, 1f);
-            Vector3 E = S + dn * (L1 * cosA) + perp * (L1 * Mathf.Sqrt(1f - cosA * cosA));
-            W = S + dn * dist;
-            DrawLimb(ua, sUA, eUA, S, E, perp);
-            DrawLimb(fa, eFA, wFA, E, W, perp);
+            Vector3 S = ua.joint.connectedBody.transform.TransformPoint(ua.joint.connectedAnchor);
+            // (the shoulder mostly where your body is turning to: turning fast, your chest follows the view a moment
+            // later, and arms drawn from where it lags would cut through it to the gun)
+            Vector3 flatF = Vector3.ProjectOnPlane(eye.forward, Vector3.up).normalized;
+            if (flatF.sqrMagnitude > 0.5f && me.Chest != null)
+            {
+                Quaternion turned = Quaternion.FromToRotation(Vector3.ProjectOnPlane(me.Chest.transform.forward, Vector3.up).normalized, flatF);
+                Vector3 piv = me.Chest.transform.position;
+                S = Vector3.Lerp(S, piv + turned * (S - piv), 0.7f);
+            }
+            Vector3 up = eye.up, fwd = eye.forward;
+            Vector3 tA = me.Pelvis != null ? me.Pelvis.transform.position : S - up * 0.4f;
+            Vector3 tB = me.Chest != null ? me.Chest.transform.position + me.Chest.transform.up * 0.1f : S - up * 0.1f;
+            // A real arm keeps the wrist nearly straight and lets the shoulder and elbow go where they must: so the
+            // FOREARM is chosen first - in line with the hand as near as it goes - and the elbow put behind it.
+            // Directions round that line are tried in widening rings; each is scored on the bend at the wrist, the
+            // upper arm still reaching the shoulder (it can't stretch or shrink), the elbow not up over the
+            // shoulder, neither bone through your body, and not jumping from where it was.
+            Vector3 ideal = (handDir * 0.5f + hint * 0.5f).normalized;
+            Vector3 q0 = Vector3.Cross(ideal, up); if (q0.sqrMagnitude < 1e-4f) q0 = Vector3.Cross(ideal, fwd); q0.Normalize();
+            Vector3 q1 = Vector3.Cross(ideal, q0);
+            Vector3 prev = armFore[slot].sqrMagnitude > 0.5f ? armFore[slot] : ideal;
+            float bestCost = float.MaxValue; Vector3 bestF = ideal;
+            for (int r = 0; r <= 9; r++)
+            {
+                float tilt = r * 9f;
+                int n = r == 0 ? 1 : 16;
+                for (int k = 0; k < n; k++)
+                {
+                    float az = k * 22.5f * Mathf.Deg2Rad;
+                    Vector3 f = Quaternion.AngleAxis(tilt, q0 * Mathf.Cos(az) + q1 * Mathf.Sin(az)) * ideal;
+                    Vector3 Wc = heel - (f + handDir).normalized * WristLen;
+                    Vector3 E = Wc - f * L2;
+                    float cost = tilt * tilt;
+                    float reach = (E - S).magnitude - L1;                                   // upper arm too short (+) / too long (-)
+                    cost += reach * reach * 4e5f;
+                    float high = Vector3.Dot(E - S, up);
+                    if (high > 0.04f) cost += (high - 0.04f) * (high - 0.04f) * 2.5e6f;     // elbow up above the shoulder
+                    for (int t = 1; t <= 4; t++)
+                    {
+                        float dF = DistToSeg(Vector3.Lerp(E, Wc, t * 0.25f), tA, tB);
+                        if (dF < 0.17f) cost += (0.17f - dF) * (0.17f - dF) * 2e6f;          // forearm through your body
+                        float dU = DistToSeg(Vector3.Lerp(S, E, 0.3f + t * 0.175f), tA, tB);
+                        if (dU < 0.15f) cost += (0.15f - dU) * (0.15f - dU) * 2e6f;          // upper arm through it
+                    }
+                    if (Vector3.Dot(f, fwd) < -0.3f) cost += 3000f;                            // forearm pointing back at you
+                    float jump = Vector3.Angle(f, prev);
+                    cost += jump * jump * 0.3f;
+                    if (cost < bestCost) { bestCost = cost; bestF = f; }
+                }
+            }
+            // swung there smoothly (fast, but never a jump)
+            Vector3 fwdArm = Vector3.Slerp(prev, bestF, 1f - Mathf.Exp(-Mathf.Max(Time.deltaTime, 0.004f) * 30f)).normalized;
+            armFore[slot] = fwdArm;
+            Vector3 W = heel - (fwdArm + handDir).normalized * WristLen;   // the wrist bridge splits the bend between its ends
+            Vector3 El = W - fwdArm * L2;
+            // the upper arm from the elbow to the shoulder joint
+            Vector3 Sd = S;   // (the solver keeps the elbow where the upper arm about fits; any difference is taken up along it)
+            Vector3 roll = Vector3.Cross(fwdArm, up); if (roll.sqrMagnitude < 1e-4f) roll = q0;
+            DrawLimb(ua, sUA, eUA, Sd, El, roll);
+            DrawLimb(fa, eFA, wFA, El, W, roll);
             vis.Wrist(W);
+            dbgS[slot] = Sd; dbgE[slot] = El; dbgW[slot] = W; dbgHeel[slot] = heel; dbgWrist[slot] = Vector3.Angle(fwdArm, handDir); dbgOn[slot] = true;
             return true;
         }
+
+        static float DistToSeg(Vector3 p, Vector3 a, Vector3 b)
+        {
+            Vector3 ab = b - a; float t = Mathf.Clamp01(Vector3.Dot(p - a, ab) / Mathf.Max(1e-6f, ab.sqrMagnitude));
+            return (p - (a + ab * t)).magnitude;
+        }
+        readonly float[] armAng = new float[2];
+        readonly Vector3[] dbgS = new Vector3[2], dbgE = new Vector3[2], dbgW = new Vector3[2], dbgHeel = new Vector3[2];
+        readonly float[] dbgWrist = new float[2];
+        readonly bool[] dbgOn = new bool[2];
+        int snaps;
+
+        /// <summary>What the automated playtest (ArmTest) measures: the arms as drawn, the gun and its offset.</summary>
+        public struct HoldDebug
+        {
+            public bool held; public int weapon, snaps;
+            public bool[] armOn; public Vector3[] S, E, W, heel; public float[] wrist;
+            public Vector3 gunVel, eyeVel; public float offErr; public Transform gun; public MeshFilter gunMesh; public float gripZ;
+        }
+        public HoldDebug GetHoldDebug() => new HoldDebug
+        {
+            held = BodyHeld && gInit && Armed, weapon = current, snaps = snaps, armOn = dbgOn, S = dbgS, E = dbgE, W = dbgW, heel = dbgHeel, wrist = dbgWrist,
+            gunVel = simVel, offErr = (offPos - heldAt).magnitude, gun = current < models.Count && models[current] != null ? models[current].transform : null,
+            gunMesh = current < models.Count && models[current] != null ? models[current].GetComponentInChildren<MeshFilter>() : null,
+            gripZ = current < gripPts.Count ? gripPts[current].z : 0f,
+        };
+        readonly Vector3[] armFore = new Vector3[2];
 
         /// <summary>Draw a body part's own mesh stretched between two points: its joint at `pLocal` on P, `dLocal` on D.</summary>
         static void DrawLimb(BodyPart bp, Vector3 pLocal, Vector3 dLocal, Vector3 P, Vector3 D, Vector3 roll)
@@ -1675,6 +1883,7 @@ namespace Carl
         {
             if (cam == null || vmRoot == null) return;
             armsDrawn = false;
+            dbgOn[0] = dbgOn[1] = false;
             UpdatePendingCases();
             bool held = BodyHeld && Armed;
             var me = PlayerAvatar.Body;
@@ -1701,6 +1910,8 @@ namespace Carl
             }
             // your arm muscles go soft round a held gun and let it lead
             if (me != null) me.ragdoll.armCompliance = jointedR != null || jointedL != null ? 0.15f : 1f;
+            // drawn where your eyes are this frame (the physics step only says where it is relative to them)
+            if (gInit && gunRb != null && gunRb.isKinematic && BodyHeld) { GunPose(out var gp, out var gr); vmRoot.SetPositionAndRotation(gp, gr); }
             // the hand shapes are locked on the gun as they were closed round it (never twisted off it or sunk into
             // it); the physical wrists are pulled to meet them, so the forearms still run into them
             if (jointedR != null && visR != null && jointedR.id == PartId.HandR) visR.transform.SetPositionAndRotation(vmRoot.TransformPoint(visRelPosR), vmRoot.rotation * visRelRotR);
@@ -2093,9 +2304,10 @@ namespace Carl
             if (held)
             {
                 // cheek on the stock with the eye behind the sights; a pistol pushed out at arm's length
-                if (IsPistol(d)) { hip = new Vector3(0.1f, -0.17f, 0.36f); aim.z = 0.42f; }
-                else if (d.scope) { hip = new Vector3(0.13f, -0.22f, 0.22f); aim.z = 0.15f; }
-                else if (d.type == WeaponType.Gun) { hip = new Vector3(0.08f, -0.2f, 0.2f); aim.z = 0.19f; }
+                if (IsPistol(d)) { hip = new Vector3(0.05f, -0.15f, 0.46f); aim.z = 0.5f; }   // pushed out, arms nearly straight
+                else if (d.scope) { hip = new Vector3(0.12f, -0.32f, 0.3f); aim.z = 0.24f; }   // (scope eye relief)
+                // the butt in the shoulder, the grip a forearm in front of it, the eye 8-10 cm behind the rear sight
+                else if (d.type == WeaponType.Gun) { hip = new Vector3(0.1f, -0.32f, 0.3f); aim.z = optic ? 0.25f : 0.27f; }
                 else if (d.type == WeaponType.Tool) { hip = new Vector3(0.12f, -0.16f, 0.42f); aim = hip; }
                 else { hip = new Vector3(0.16f, -0.24f, 0.36f); aim = hip; }
             }
