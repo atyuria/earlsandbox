@@ -43,6 +43,88 @@ namespace Carl
             return g;
         }
 
+        // ------------------------------------------------------------ Poly Haven surfaces and props (CC0)
+        // Surfaces: Resources/Textures/ph/<name>_diff / _nor (colour and OpenGL normal map, 1K). Props: Resources/Props
+        // (FBX made from the glTFs by BlenderTools/ph_props.py), real-world size, pivot on the ground.
+        static readonly System.Collections.Generic.Dictionary<string, Material> phMats = new System.Collections.Generic.Dictionary<string, Material>();
+
+        /// <summary>A Poly Haven surface, one texture repeat every <paramref name="metres"/> on a 1 m UV (tile per object with Tiled).</summary>
+        static Material PH(string name, float smooth = 0.15f, Color? tint = null, float bump = 1f)
+        {
+            string key = name + smooth + tint + bump;
+            if (phMats.TryGetValue(key, out var m) && m != null) return m;
+            var diff = Resources.Load<Texture2D>("Textures/ph/" + name + "_diff");
+            var nor = Resources.Load<Texture2D>("Textures/ph/" + name + "_nor");
+            if (diff != null) { diff.wrapMode = TextureWrapMode.Repeat; diff.anisoLevel = 8; }
+            m = Mats.LitTextured(diff, Vector2.one, tint ?? Color.white, smooth);
+            if (nor != null) { nor.wrapMode = TextureWrapMode.Repeat; m.SetTexture("_BumpMap", nor); m.SetFloat("_BumpScale", bump); m.EnableKeyword("_NORMALMAP"); }
+            return phMats[key] = m;
+        }
+
+        /// <summary>This box's own copy of the material, repeating the texture every <paramref name="metres"/> along its faces.</summary>
+        static GameObject Tiled(GameObject g, float metres)
+        {
+            var mr = g.GetComponent<MeshRenderer>();
+            var s = g.transform.localScale;
+            var m = new Material(mr.sharedMaterial);
+            var t = new Vector2(Mathf.Max(s.x, s.z) / metres, Mathf.Max(s.y, Mathf.Min(s.x, s.z)) / metres);
+            m.SetTextureScale("_BaseMap", t); m.SetTextureScale("_BumpMap", t);
+            mr.sharedMaterial = m;
+            return g;
+        }
+
+        static readonly System.Collections.Generic.Dictionary<string, GameObject> props = new System.Collections.Generic.Dictionary<string, GameObject>();
+
+        // The props' textures: Resources/PropTex/<id>/ with <id>.json naming each material's colour and normal maps
+        // and whether it is cut out (leaves, grass) and two-sided (BlenderTools/ph_proptex.js).
+        [System.Serializable] class PropTexMat { public string name, diff, nor; public bool cut, two; }
+        [System.Serializable] class PropTexList { public PropTexMat[] mats; }
+        static readonly System.Collections.Generic.Dictionary<string, Material> propMats = new System.Collections.Generic.Dictionary<string, Material>();
+
+        static Material[] PropMaterials(string id, Material[] src)
+        {
+            var ta = Resources.Load<TextAsset>("PropTex/" + id);
+            if (ta == null) return src;
+            var list = JsonUtility.FromJson<PropTexList>(ta.text);
+            if (list?.mats == null || list.mats.Length == 0) return src;
+            var res = new Material[src.Length];
+            for (int i = 0; i < src.Length; i++)
+            {
+                string name = src[i] != null ? src[i].name : "";
+                string key = id + "/" + name;
+                if (propMats.TryGetValue(key, out var m) && m != null) { res[i] = m; continue; }
+                var e = System.Array.Find(list.mats, x => x.name == name) ?? list.mats[0];
+                var diff = string.IsNullOrEmpty(e.diff) ? null : Resources.Load<Texture2D>("PropTex/" + id + "/" + e.diff);
+                m = Mats.LitTextured(diff, Vector2.one, Color.white, 0.25f);
+                var nor = string.IsNullOrEmpty(e.nor) ? null : Resources.Load<Texture2D>("PropTex/" + id + "/" + e.nor);
+                if (nor != null) { m.SetTexture("_BumpMap", nor); m.EnableKeyword("_NORMALMAP"); }
+                if (e.cut) { m.SetFloat("_AlphaClip", 1f); m.SetFloat("_Cutoff", 0.45f); m.EnableKeyword("_ALPHATEST_ON"); m.renderQueue = 2450; }
+                if (e.two) m.SetFloat("_Cull", 0f);
+                if (id == "cement_bag") m.SetColor("_BaseColor", new Color(0.62f, 0.6f, 0.45f));   // (printed paper sacks: tinted to read as hessian sandbags)
+                res[i] = propMats[key] = m;
+            }
+            return res;
+        }
+
+        /// <summary>A Poly Haven prop stood at <paramref name="pos"/> (local to <paramref name="r"/>); solid ones get mesh colliders.</summary>
+        static GameObject Prop(Transform r, string id, Vector3 pos, float yaw = 0f, float scale = 1f, bool solid = true, Vector3 tilt = default)
+        {
+            if (!props.TryGetValue(id, out var pf) || pf == null) props[id] = pf = Resources.Load<GameObject>("Props/" + id);
+            if (pf == null) return null;
+            var g = Object.Instantiate(pf, r, false);
+            g.name = id;
+            g.transform.localPosition = pos;
+            g.transform.localRotation = Quaternion.Euler(tilt.x, yaw, tilt.z);
+            g.transform.localScale = Vector3.one * scale;
+            foreach (var mr in g.GetComponentsInChildren<MeshRenderer>()) mr.sharedMaterials = PropMaterials(id, mr.sharedMaterials);
+            foreach (var mf in g.GetComponentsInChildren<MeshFilter>())
+            {
+                if (solid) mf.gameObject.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
+                mf.gameObject.isStatic = true;
+            }
+            return g;
+        }
+
         static GameObject Floor(Transform root, Vector3 center, Vector2 size, Material baseMat)
         {
             var g = Box(root, "Floor", center + Vector3.down * 1f, new Vector3(size.x, 2f, size.y), baseMat);
@@ -257,7 +339,7 @@ namespace Carl
         {
             if (bark == null)
             {
-                bark = Mats.Lit(new Color(0.33f, 0.3f, 0.27f), 0.1f);
+                bark = new Material(PH("bark_brown_02", 0.05f, new Color(0.8f, 0.78f, 0.75f))); bark.SetTextureScale("_BaseMap", new Vector2(1f, 4f)); bark.SetTextureScale("_BumpMap", new Vector2(1f, 4f));
                 logMat = Mats.Lit(new Color(0.4f, 0.32f, 0.22f), 0.1f);
                 bulkBag = Mats.Lit(new Color(0.85f, 0.86f, 0.84f), 0.2f);
                 shrub = Mats.Lit(new Color(0.22f, 0.18f, 0.12f), 0.02f);
@@ -274,7 +356,7 @@ namespace Carl
             var ground = new GameObject("TrenchGround");
             ground.transform.SetParent(r, false);
             ground.AddComponent<MeshFilter>().sharedMesh = data.mesh;
-            ground.AddComponent<MeshRenderer>().sharedMaterials = new[] { Tex("trench_earth", 0.06f, new Color(0.74f, 0.68f, 0.62f)), Tex("trench_mud", 0.22f, new Color(0.9f, 0.82f, 0.74f)), Tex("trench_litter", 0.04f, new Color(0.82f, 0.8f, 0.76f)) };
+            ground.AddComponent<MeshRenderer>().sharedMaterials = new[] { PH("excavated_soil_wall", 0.08f, new Color(0.85f, 0.8f, 0.75f), 1.4f), PH("muddy_tracks", 0.35f, new Color(0.9f, 0.85f, 0.8f), 1.2f), PH("leaves_forest_ground", 0.05f, new Color(0.9f, 0.88f, 0.85f), 1.2f) };   // cut earth, wet mud, leaf litter (Poly Haven)
             var col = ground.AddComponent<MeshCollider>();
             col.sharedMesh = data.mesh;
             ground.AddComponent<Surface>().kind = SurfaceKind.Dirt;
@@ -393,6 +475,84 @@ namespace Carl
                 if (Open(p.x, z)) { Rand(0.9f, 1.3f); Rand(0.6f, 0.9f); Rand(0.9f, 1.3f); Rand(0f, 180f); }
             }
 
+            // ---- dressing (Poly Haven): duckboards down the trench floors, plank revetment on posts holding the walls
+            // of the front lines, sandbags on the parapets of the fighting positions, kit in the positions and dugouts,
+            // and undergrowth, stumps, deadfall and rocks over the ground between
+            var dr = new System.Random(77);
+            float R2(float a, float b) => a + (float)dr.NextDouble() * (b - a);
+            var planks = PH("old_planks_02", 0.1f, new Color(0.78f, 0.72f, 0.66f));
+            foreach (var (kind, pts) in data.lines)
+                for (int i = 0; i < pts.Length - 1; i++)
+                {
+                    Vector2 a = pts[i], b = pts[i + 1];
+                    float len = Vector2.Distance(a, b);
+                    if (len < 0.6f) continue;
+                    float ya = H(a.x, a.y), yb = H(b.x, b.y);
+                    if (ya > 0.5f || yb > 0.5f) continue;
+                    Vector3 A3 = new Vector3(a.x, ya + 0.03f, a.y), B3 = new Vector3(b.x, yb + 0.03f, b.y);
+                    var duck = Box(r, "Duckboard", (A3 + B3) * 0.5f, new Vector3(0.5f, 0.05f, len - 0.1f), planks);
+                    duck.transform.localRotation = Quaternion.LookRotation(B3 - A3);
+                    Tiled(duck, 1.2f);
+                    if (kind > 1) continue;
+                    // the front lines: boards along both walls, held by posts driven in every couple of metres
+                    Vector3 d3 = new Vector3(b.x - a.x, 0f, b.y - a.y) / len, n3 = new Vector3(-d3.z, 0f, d3.x);
+                    float floor = Mathf.Min(ya, yb);
+                    for (int s = -1; s <= 1; s += 2)
+                    {
+                        Vector3 mid = new Vector3((a.x + b.x) * 0.5f, floor + 0.75f, (a.y + b.y) * 0.5f) + n3 * s * 0.47f;
+                        var wallB = Box(r, "Revetment", mid, new Vector3(0.04f, 1.5f, len), planks);
+                        wallB.transform.localRotation = Quaternion.LookRotation(d3);
+                        Tiled(wallB, 1.2f);
+                        for (float t = 0.2f; t < len; t += 2f)
+                        {
+                            Vector3 pp = new Vector3(a.x, floor, a.y) + d3 * t + n3 * s * 0.43f;
+                            Pole(r, "Post", pp - Vector3.up * 0.2f, pp + Vector3.up * R2(1.6f, 1.85f), 0.05f, logMat, true);
+                        }
+                    }
+                }
+            foreach (var (kind, c, rad) in data.cells)
+            {
+                float fy = H(c.x, c.y);
+                if (kind == 0)
+                {
+                    // sandbags along the lip facing the enemy, two layers
+                    Vector3 front = new Vector3(0f, 0f, c.y < 0f ? 1f : -1f), side = Vector3.right;
+                    for (int k = -2; k <= 2; k++)
+                    {
+                        Vector3 p = new Vector3(c.x, 0f, c.y) + front * (rad + 0.45f) + side * k * 0.55f;
+                        float y = H(p.x, p.z);
+                        if (y < 1f) continue;
+                        Prop(r, "cement_bag", new Vector3(p.x, y - 0.05f, p.z), R2(-8f, 8f));
+                        if (k > -2 && k < 2) Prop(r, "cement_bag", new Vector3(p.x + 0.27f, y + 0.1f, p.z), R2(-8f, 8f));
+                    }
+                    if (dr.NextDouble() < 0.7) Prop(r, "ammo_box", new Vector3(c.x + R2(-0.4f, 0.4f), fy, c.y + R2(-0.4f, 0.4f)), R2(0f, 360f));
+                    if (dr.NextDouble() < 0.35) Prop(r, "metal_jerrycan_green", new Vector3(c.x + R2(-0.4f, 0.4f), fy, c.y + R2(-0.4f, 0.4f)), R2(0f, 360f));
+                }
+                else
+                {
+                    Prop(r, dr.NextDouble() < 0.5 ? "old_military_crate" : "wooden_crate_01", new Vector3(c.x + R2(-0.5f, 0.5f), fy, c.y + R2(-0.5f, 0.5f)), R2(0f, 360f));
+                    Prop(r, "Lantern_01", new Vector3(c.x + R2(-0.5f, 0.5f), fy, c.y + R2(-0.5f, 0.5f)), R2(0f, 360f), 1f, false);
+                    if (dr.NextDouble() < 0.5) Prop(r, "ammo_box", new Vector3(c.x + R2(-0.5f, 0.5f), fy, c.y + R2(-0.5f, 0.5f)), R2(0f, 360f));
+                }
+            }
+            void Scatter(string id, int n, float s0, float s1, bool solid, float sink = 0f, bool lying = false)
+            {
+                for (int k = 0, tries = 0; k < n && tries < n * 6; tries++)
+                {
+                    float x = R2(-48f, 48f), z = R2(-50f, 52f);
+                    if (!Open(x, z, 1.6f) || !Open(x + 0.8f, z, 1.6f) || !Open(x - 0.8f, z, 1.6f) || !Open(x, z + 0.8f, 1.6f) || !Open(x, z - 0.8f, 1.6f)) continue;
+                    Prop(r, id, G(x, z) - Vector3.up * sink, R2(0f, 360f), R2(s0, s1), solid, lying ? new Vector3(R2(-4f, 4f), 0f, R2(-4f, 4f)) : default);
+                    k++;
+                }
+            }
+            Scatter("grass_medium_01", 35, 0.8f, 1.3f, false);
+            Scatter("fern_02", 45, 0.7f, 1.2f, false);
+            Scatter("shrub_02", 10, 0.6f, 1f, false, 0.3f);
+            Scatter("dry_branches_medium_01", 20, 0.8f, 1.3f, false);
+            Scatter("tree_stump_01", 5, 0.8f, 1.2f, true, 0.05f); Scatter("tree_stump_02", 5, 0.8f, 1.2f, true, 0.05f);
+            Scatter("dead_tree_trunk", 5, 0.9f, 1.1f, true, 0.1f, true); Scatter("dead_tree_trunk_02", 5, 0.9f, 1.1f, true, 0.1f, true);
+            Scatter("boulder_01", 5, 0.5f, 0.9f, true, 0.2f); Scatter("rock_07", 12, 3f, 6f, true, 0.1f);
+
             // you start in your own front line, the Earls in theirs and in their fighting positions
             var friendly = data.lines.Find(l => l.kind == 0).pts;
             var enemy = data.lines.Find(l => l.kind == 1).pts;
@@ -425,15 +585,16 @@ namespace Carl
         static void BuildLab(Transform r, out Vector3 spawn, out float yaw, out Vector3[] carls)
         {
             float W = 60f, D = 44f, H = 9f;
-            Floor(r, Vector3.zero, new Vector2(W, D), floorLab);
-            // walls
-            Box(r, "WallN", new Vector3(0, H / 2, D / 2), new Vector3(W, H, 0.5f), wall);
-            Box(r, "WallS", new Vector3(0, H / 2, -D / 2), new Vector3(W, H, 0.5f), wall);
-            Box(r, "WallE", new Vector3(W / 2, H / 2, 0), new Vector3(0.5f, H, D), wall);
-            Box(r, "WallW", new Vector3(-W / 2, H / 2, 0), new Vector3(0.5f, H, D), wall);
+            // a sealed concrete hangar floor, block walls, steel plate wainscot (Poly Haven surfaces)
+            Tiled(Box(r, "Floor", Vector3.down, new Vector3(W, 2f, D), PH("hangar_concrete_floor", 0.3f)), 4f);
+            var blocks = PH("beige_wall_001", 0.1f, new Color(0.95f, 0.96f, 0.98f));
+            Tiled(Box(r, "WallN", new Vector3(0, H / 2, D / 2), new Vector3(W, H, 0.5f), blocks), 2.4f);
+            Tiled(Box(r, "WallS", new Vector3(0, H / 2, -D / 2), new Vector3(W, H, 0.5f), blocks), 2.4f);
+            Tiled(Box(r, "WallE", new Vector3(W / 2, H / 2, 0), new Vector3(0.5f, H, D), blocks), 2.4f);
+            Tiled(Box(r, "WallW", new Vector3(-W / 2, H / 2, 0), new Vector3(0.5f, H, D), blocks), 2.4f);
             // dark lower panels + orange trim
-            Box(r, "PanelN", new Vector3(0, 2.2f, D / 2 - 0.3f), new Vector3(W - 1, 4.4f, 0.1f), wallDark);
-            Box(r, "PanelE", new Vector3(W / 2 - 0.3f, 2.2f, 0), new Vector3(0.1f, 4.4f, D - 1), wallDark);
+            Tiled(Box(r, "PanelN", new Vector3(0, 2.2f, D / 2 - 0.3f), new Vector3(W - 1, 4.4f, 0.1f), PH("metal_plate", 0.45f, new Color(0.85f, 0.87f, 0.9f))), 1.5f);
+            Tiled(Box(r, "PanelE", new Vector3(W / 2 - 0.3f, 2.2f, 0), new Vector3(0.1f, 4.4f, D - 1), PH("metal_plate", 0.45f, new Color(0.85f, 0.87f, 0.9f))), 1.5f);
             Box(r, "TrimN", new Vector3(0, 4.45f, D / 2 - 0.36f), new Vector3(W - 1, 0.06f, 0.05f), orange);
             Box(r, "TrimE", new Vector3(W / 2 - 0.36f, 4.45f, 0), new Vector3(0.05f, 0.06f, D - 1), orange);
             // roof (does not block the sun's light so the lab stays bright)
@@ -460,11 +621,11 @@ namespace Carl
             for (int i = 0; i < 3; i++)
             {
                 var pos = new Vector3(-14f + i * 14f, 1.25f, 9f + (i % 2) * 4f);
-                Box(r, "Cover", pos, new Vector3(4.5f, 2.5f, 0.3f), white);
+                Tiled(Box(r, "Cover", pos, new Vector3(4.5f, 2.5f, 0.3f), PH("beige_wall_002", 0.1f)), 2f);
                 Text(r, $"COVER / 0{i + 1}", pos + new Vector3(0, 0.6f, -0.17f), Quaternion.identity, 0.35f, new Color(0.3f, 0.3f, 0.32f));
             }
             // raised platform with stairs (east side)
-            Box(r, "Platform", new Vector3(20f, 1.2f, 12f), new Vector3(12f, 2.4f, 10f), white);
+            Tiled(Box(r, "Platform", new Vector3(20f, 1.2f, 12f), new Vector3(12f, 2.4f, 10f), PH("metal_plate_02", 0.4f)), 2f);
             Box(r, "PlatformEdge", new Vector3(20f, 2.42f, 6.95f), new Vector3(12f, 0.04f, 0.1f), orange);
             Stairs(r, new Vector3(20f, 0f, -1.6f), 2.4f, 12, 4f, 0.72f, 0f, white);
             // white tables
@@ -481,6 +642,36 @@ namespace Carl
             Box(r, "SplatterWall", new Vector3(0f, 2f, 18f), new Vector3(8f, 4f, 0.3f), white);
             // physics crates
             for (int i = 0; i < 6; i++) Crate(r, new Vector3(-26f + (i % 3) * 1.1f, 0.5f + (i / 3) * 1.01f, -16f), 1f, 25f);
+
+            // the lab's kit (Poly Haven): stocked shelving down the west wall, the bench work on the tables, drums
+            // and containers in the corners, a workshop corner, extinguishers on the walls
+            for (int i = 0; i < 4; i++)
+            {
+                float z = -10f + i * 4.2f;
+                Prop(r, "Shelf_01", new Vector3(-29.1f, 0f, z), 90f);
+                Prop(r, "cardboard_box_01", new Vector3(-28.4f, 0f, z + 1.6f), 90f + i * 23f);
+            }
+            Prop(r, "drawer_cabinet", new Vector3(-29.2f, 0f, -18.5f), 90f);
+            Prop(r, "chemistry_set", new Vector3(-20f, 0.89f, -4f), 180f, 1f, false);
+            Prop(r, "medical_box", new Vector3(-18.6f, 0.89f, -3.9f), 160f, 1f, false);
+            Prop(r, "industrial_microscope", new Vector3(-16f, 0.89f, -4f), 180f, 1f, false);
+            Prop(r, "classic_laptop", new Vector3(-12.3f, 0.89f, -4.05f), 175f, 1f, false);
+            Prop(r, "desk_lamp_arm_01", new Vector3(-11.3f, 0.89f, -3.75f), 200f, 1f, false);
+            for (int i = 0; i < 3; i++) Prop(r, "SchoolChair_01", new Vector3(-20f + i * 4f, 0f, -5.2f), Random.Range(-15f, 15f));
+            Prop(r, "Barrel_01", new Vector3(27.3f, 0f, 19.6f), 20f); Prop(r, "barrel_03", new Vector3(28.4f, 0f, 18.3f), 75f);
+            Prop(r, "Barrel_01", new Vector3(28.5f, 0f, 20.4f), 140f);
+            Prop(r, "industrial_pastic_container", new Vector3(26.5f, 0f, -20.2f), 0f);
+            Prop(r, "industrial_storage_cart", new Vector3(24f, 0f, -15.5f), 30f);
+            Prop(r, "hand_truck", new Vector3(27.6f, 0f, -12.5f), -60f);
+            Prop(r, "drill_press_01", new Vector3(28.8f, 0f, -3f), -90f);
+            Prop(r, "concrete_road_barrier", new Vector3(12f, 0f, -14f), 0f);
+            Prop(r, "concrete_road_barrier", new Vector3(-25.5f, 0f, 4f), 90f);
+            Prop(r, "WetFloorSign_01", new Vector3(3f, 0f, -9f), 35f);
+            Prop(r, "wooden_military_crate", new Vector3(-27.6f, 0f, 20.2f), 5f);
+            Prop(r, "plastic_crate_01", new Vector3(-22.5f, 0f, -19.5f), 12f);
+            Prop(r, "plastic_crate_01", new Vector3(-22.4f, 0.3f, -19.4f), -8f);
+            foreach (var (p, y) in new[] { (new Vector3(29.4f, 0f, -9f), -90f), (new Vector3(-29.4f, 0f, 9f), 90f), (new Vector3(5f, 0f, 21.5f), 180f), (new Vector3(-5f, 0f, -21.5f), 0f) })
+                Prop(r, "korean_fire_extinguisher_01", p, y);
 
             spawn = new Vector3(0, 0.1f, -18f);
             yaw = 0f;

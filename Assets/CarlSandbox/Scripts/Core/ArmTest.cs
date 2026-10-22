@@ -75,6 +75,7 @@ namespace Carl
                 P("walk+look down", 1.8f, new[] { Key.W }, (t) => (0f, Mathf.Lerp(20f, 85f, Mathf.Clamp01(t / 0.8f)))),
                 P("look up", 1.2f, null, (t) => (0f, Mathf.Lerp(5f, -80f, Mathf.Clamp01(t / 0.6f)))),
                 P("fast spin", 1.6f, new[] { Key.D }, (t) => (t * 420f, 10f + Mathf.Sin(t * 9f) * 30f)),
+                P("ADS still", 1.4f, null, (t) => (0f, 0f), rmb: true),
                 P("ADS walk", 1.6f, new[] { Key.W }, (t) => (Mathf.Sin(t * 2f) * 20f, 5f), rmb: true),
                 P("fire", 1.4f, null, (t) => (0f, 5f), lmb: true),
                 P("ADS fire", 1.4f, null, (t) => (0f, 5f), lmb: true, rmb: true),
@@ -311,6 +312,47 @@ namespace Carl
             System.IO.File.WriteAllText(path, report.ToString());
             Debug.Log("[ArmTest] done: " + path + "\n" + report);
             Current = null;
+            Destroy(gameObject);
+        }
+    }
+}
+
+namespace Carl
+{
+    /// <summary>
+    /// The sight picture of every gun: aims down the sights with each one in turn on the open range and saves what
+    /// the eye sees (Temp/Sight_&lt;gun&gt;.jpg), to check the sights line up and nothing blocks them.
+    /// </summary>
+    public class SightShots : MonoBehaviour
+    {
+        public static void Run() { if (FindFirstObjectByType<SightShots>() == null) new GameObject("SightShots").AddComponent<SightShots>(); }
+
+        System.Collections.IEnumerator Start()
+        {
+            var wc = FindFirstObjectByType<WeaponController>();
+            var pc = FindFirstObjectByType<PlayerController>();
+            if (SandboxGame.Instance != null) SandboxGame.Instance.LoadMap(1);
+            yield return null;
+            for (int i = 0; i < 8; i++)
+            {
+                wc.Give(i, true); wc.Select(i);
+                if (wc.Current.type != WeaponType.Gun) continue;
+                pc.Teleport(new Vector3(0f, 0.1f, 10f), 0f);
+                WeaponController.ForceAim = true;
+                yield return new WaitForSeconds(1.6f);
+                var cam = Camera.main;
+                var rt = new RenderTexture(960, 540, 24);
+                var keep = cam.targetTexture; cam.targetTexture = rt; cam.Render(); cam.targetTexture = keep;
+                RenderTexture.active = rt;
+                var t = new Texture2D(960, 540, TextureFormat.RGB24, false);
+                t.ReadPixels(new Rect(0, 0, 960, 540), 0, 0); t.Apply();
+                RenderTexture.active = null; Destroy(rt);
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(Application.dataPath, "../Temp/Sight_" + wc.Current.name.Replace(" ", "_").Replace(".", "") + ".jpg"), t.EncodeToJPG(85));
+                WeaponController.ForceAim = false;
+                yield return new WaitForSeconds(0.3f);
+            }
+            WeaponController.ForceAim = false;
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, "../Temp/Sight_done.txt"), System.DateTime.Now.ToString());
             Destroy(gameObject);
         }
     }

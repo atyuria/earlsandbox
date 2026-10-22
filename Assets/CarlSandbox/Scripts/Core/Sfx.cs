@@ -295,10 +295,10 @@ namespace Carl
             v.src.volume *= Mathf.Lerp(1f, 0.4f, EarCover);
         }
 
-        void Say(Voice v, string group, float vol = 1f, float pitchMul = 1f)
+        void Say(HumanBody h, Voice v, string group, float vol = 1f, float pitchMul = 1f)
         {
             if (!GameSettings.DummyVoices) return;
-            var clip = Clip(group) ?? Clip("moan");
+            var clip = Line(h, group) ?? Clip("moan");
             if (clip == null) return;
             v.src.Stop();
             v.src.clip = clip;
@@ -308,6 +308,46 @@ namespace Carl
             v.src.Play();
             v.cooldown = clip.length + Random.Range(0.6f, 2.5f);
         }
+
+
+        // ------------------------------------------------------------ what the begging lines say
+        // Some lines are about something specific ("Where's my arm?", "Why is it so dark?"): each of those is only
+        // said when it is true of the speaker, and is likely to be said when it is. The rest suit anyone hurt.
+        static bool Gone(HumanBody h, PartId id) { for (var p = h[id]; p != null; p = p.parent) if (p.severed) return true; return false; }
+        static bool ArmGone(HumanBody h) => Gone(h, PartId.ForearmL) || Gone(h, PartId.ForearmR);
+        static bool LegGone(HumanBody h) => Gone(h, PartId.ShinL) || Gone(h, PartId.ShinR);
+        static bool CantSee(HumanBody h) { var p = h.physio; return p.Blind || p.LossFrac > 0.33f || p.consciousness < 0.45f || p.brainO2 < 0.6f; }
+        static readonly Dictionary<string, System.Func<HumanBody, bool>> lineTrue = new Dictionary<string, System.Func<HumanBody, bool>>
+        {
+            { "beg_08", h => !h.physio.HasSensation(PartId.ShinL) && !h.physio.HasSensation(PartId.ShinR) },   // can't feel my legs
+            { "beg_11", h => h.physio.bleedOut > 5f || h.physio.LossFrac > 0.15f },                         // I'm bleeding so much
+            { "beg_13", h => { var p = h.physio; return p.airwayBlood > 0.15f || p.breathing < 0.6f || p.spo2 < 0.88f || p.lungCollapseL + p.lungCollapseR > 0.5f; } }, // can't breathe
+            { "beg_15", h => h.physio.LossFrac > 0.25f || h.physio.shock > 0.4f },                          // it's so cold
+            { "beg_21", ArmGone },                                                                           // where's my arm?
+            { "beg_22", h => LegGone(h) || h.physio.LegSupport(-1) < 0.15f && h.physio.HasSensation(PartId.ThighL)
+                                        || h.physio.LegSupport(1) < 0.15f && h.physio.HasSensation(PartId.ThighR) },   // my leg!
+            { "beg_26", h => h.physio.LossFrac > 0.2f || h.physio.shock > 0.4f || h.physio.consciousness < 0.6f },     // am I dying?
+            { "beg_27", CantSee },                                                                           // I can't see anything
+            { "beg_29", CantSee },                                                                           // why is it so dark?
+            { "beg_37", h => h.physio.concussion > 0.25f || h.physio.confusion > 0.25f },                    // where am I?
+        };
+        readonly List<AudioClip> fits = new List<AudioClip>(), apt = new List<AudioClip>();
+
+        /// <summary>A clip from the group this person could truthfully say: half the time one about their own state when there is one.</summary>
+        AudioClip Line(HumanBody h, string group)
+        {
+            if (!groups.TryGetValue(group, out var l) || l.Count == 0) return null;
+            fits.Clear(); apt.Clear();
+            foreach (var c in l)
+            {
+                if (!lineTrue.TryGetValue(c.name, out var test)) fits.Add(c);
+                else if (test(h)) apt.Add(c);
+            }
+            if (apt.Count > 0 && (fits.Count == 0 || Random.value < 0.65f)) return apt[Random.Range(0, apt.Count)];
+            return fits.Count > 0 ? fits[Random.Range(0, fits.Count)] : null;
+        }
+
+        bool HasSay(HumanBody h) { foreach (var kv in lineTrue) if (kv.Value(h)) return true; return false; }
 
         /// <summary>What a person in this state would be making noise about.</summary>
         void Think(HumanBody h, Voice v, float dt)
@@ -320,7 +360,7 @@ namespace Carl
             if (p.dead)
             {
                 // one last wet breath
-                if (!v.wasDead) { v.wasDead = true; if (Random.value < 0.5f) Say(v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.6f, 0.95f); }
+                if (!v.wasDead) { v.wasDead = true; if (Random.value < 0.5f) Say(h, v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.6f, 0.95f); }
                 return;
             }
             v.wasDead = false;
@@ -329,31 +369,33 @@ namespace Carl
             if (spike > 0.18f && p.consciousness > 0.35f && (!talking || v.src.time > 0.4f))
             {
                 // a real person's first reaction: a sharp cry or grunt; a bad one makes them scream
-                Say(v, spike > 0.4f && Random.value < 0.7f ? "scream" : "grunt", 1f, Random.Range(0.95f, 1.06f));
+                Say(h, v, spike > 0.4f && Random.value < 0.7f ? "scream" : "grunt", 1f, Random.Range(0.95f, 1.06f));
                 v.lastPain = pain;
                 return;
             }
             if (talking || v.cooldown > 0f) return;
             if (p.consciousness < 0.25f)
             {
-                if (Random.value < 0.3f) Say(v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.45f, 0.95f);
+                if (Random.value < 0.3f) Say(h, v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.45f, 0.95f);
                 else v.cooldown = Random.Range(2f, 5f);
                 return;
             }
             // drowning in their own blood
-            if (p.airwayBlood > 0.25f) { Say(v, Random.value < 0.6f ? "gurgle" : "cough", 0.9f); return; }
+            if (p.airwayBlood > 0.25f) { Say(h, v, Random.value < 0.6f ? "gurgle" : "cough", 0.9f); return; }
             // brain injured but alive: giggling, babbling nonsense
-            if (p.brainTrauma > 0.3f && p.consciousness > 0.4f) { Say(v, Random.value < 0.6f ? "laugh" : "mad", 0.9f); return; }
+            if (p.brainTrauma > 0.3f && p.consciousness > 0.4f) { Say(h, v, Random.value < 0.6f ? "laugh" : "mad", 0.9f); return; }
+            // something specific wrong with them (an arm gone, going dark): they say so
+            if ((pain > 0.2f || p.LossFrac > 0.15f) && Random.value < 0.4f && HasSay(h)) { Say(h, v, "beg", 0.95f); return; }
             if (pain > 0.55f)
             {
                 float r = Random.value;
-                Say(v, r < 0.2f ? "scream" : r < 0.5f ? "moan" : r < 0.7f ? "grunt" : "beg", 1f);
+                Say(h, v, r < 0.2f ? "scream" : r < 0.5f ? "moan" : r < 0.7f ? "grunt" : "beg", 1f);
                 return;
             }
             if (pain > 0.2f || p.LossFrac > 0.25f)
             {
                 float r = Random.value;
-                Say(v, r < 0.45f ? "moan" : r < 0.65f ? "grunt" : "beg", 0.85f);
+                Say(h, v, r < 0.45f ? "moan" : r < 0.65f ? "grunt" : "beg", 0.85f);
                 return;
             }
             v.cooldown = Random.Range(2f, 4f);

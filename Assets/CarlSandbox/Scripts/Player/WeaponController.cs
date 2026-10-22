@@ -108,6 +108,8 @@ namespace Carl
             foreach (var mb in g.GetComponentsInChildren<MonoBehaviour>(true)) Destroy(mb);
             return g;
         }
+        /// <summary>Aim down the sights as if the right button were held (playtests).</summary>
+        public static bool ForceAim;
         readonly List<MeshRenderer> reticles = new List<MeshRenderer>();
         Light muzzleLight;
         float flashTimer, kick, meleeT;
@@ -881,7 +883,7 @@ namespace Carl
             // held canted and low, and right mouse brings it up canted to the eye (a canted aim)
             if (locked && kb.bKey.wasPressedThisFrame && d.type == WeaponType.Gun) pointOn = !pointOn;
             if (d.type != WeaponType.Gun) pointOn = false;
-            bool rmbAim = locked && mouse.rightButton.isPressed && d.type == WeaponType.Gun && !reloading;
+            bool rmbAim = (ForceAim || locked && mouse.rightButton.isPressed) && d.type == WeaponType.Gun && !reloading;
             bool aimHeld = rmbAim && !pointOn;
             aimT = Mathf.MoveTowards(aimT, aimHeld ? 1f : 0f, dt * (IsScope ? 5f : Loadout.grip == GripKind.Angled ? 11f : 8f));
             bool pointHeld = pointOn && d.type == WeaponType.Gun && !reloading;

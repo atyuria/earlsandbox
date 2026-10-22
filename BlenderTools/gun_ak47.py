@@ -27,10 +27,11 @@ G.cyl((15.2, 3, -168), (17.4, 3, -168), 5, S, seg=14)
 G.box((9.5, 5, -30), (8, 9, 60), S, bevel=0.5)
 G.prof([(-4, 2), (6, 2), (8, 10, 3), (-2, 10, 3)], 15, 30, S, bevel=1.4, seg=2)
 G.cyl((30, 6, 2), (36, 6, 2), 5, S, seg=12, bevel=1.0)
-# rear sight block and tangent leaf (notch 34 mm above the bore)
+# rear sight block and tangent leaf: its top level with the front post (34 mm above the bore), a U notch dropping
+# below that so the post shows in it with clear sky round it
 G.box((0, 14, 72), (24, 16, 34), M, bevel=1.4)
-lf = G.prof([(56, 22), (88, 22), (86, 31), (58, 36)], -7, 7, S, bevel=0.6)
-G.cut(lf, [G.C("box", (0, 36, 58), (3, 6, 6), S, bevel=0)])
+lf = G.prof([(56, 22), (88, 22), (86, 30), (58, 34.2)], -7, 7, M, bevel=0.5)
+G.cut(lf, [G.C("cyl", (0, 31.6, 50), (0, 31.6, 66), 2.3, M, seg=14), G.C("box", (0, 35, 58), (4.6, 7, 16), M, bevel=0)])
 G.box((0, 26, 72), (16, 4, 6), S, bevel=0.8)                                # range slider
 # ---- barrel, gas system, front sight, brake, cleaning rod
 G.cyl((0, 0, 58), (0, 0, 458), 8.6, S, seg=20)
@@ -41,7 +42,7 @@ fsb = G.prof([(432, -14), (458, -14), (458, 18), (452, 30), (440, 30), (432, 18)
 G.cut(fsb, [G.C("prof", [(436, 22), (454, 22), (454, 40), (436, 40)], -6.5, 6.5, M, bevel=0)])
 G.cyl((0, 30.5, 437), (0, 30.5, 452), 10, M, seg=20, r2=10)                  # hood (open at the top, see below)
 G.cut(G.parts[-1], [G.C("cyl", (0, 30.5, 430), (0, 30.5, 460), 8.3, M, seg=20), G.C("box", (0, 41, 445), (14, 8, 30), M, bevel=0)])
-G.cyl((0, 22, 445), (0, 34, 445), 1.4, S, seg=10)                             # the post
+G.cyl((0, 22, 445), (0, 34, 445), 1.4, M, seg=10)                             # the post
 G.box((0, -17, 430), (10, 7, 18), M, bevel=1.0)                              # bayonet lug
 br = G.cyl((0, 0, 458), (0, 0, 488), 10, S, seg=20, bevel=0.6)
 G.cut(br, [G.C("cyl", (0, 0, 455), (0, 0, 495), 5.2, S, seg=16),

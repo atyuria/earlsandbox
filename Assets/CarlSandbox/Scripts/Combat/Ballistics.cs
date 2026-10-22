@@ -419,7 +419,7 @@ namespace Carl
             main.simulationSpace = ParticleSystemSimulationSpace.World;
             main.startLifetime = life;
             main.gravityModifier = gravity;
-            main.maxParticles = 4000;
+            main.maxParticles = 10000;
             main.playOnAwake = false;
             var em = ps.emission; em.enabled = false;
             var sh = ps.shape; sh.enabled = false;
@@ -451,15 +451,15 @@ namespace Carl
         public static void Sparks(Vector3 pos, Vector3 normal, int n)
         {
             if (I == null) return;
-            for (int i = 0; i < n; i++)
-                Emit(I.sparks, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(3f, 9f), Random.Range(0.01f, 0.025f), new Color(1f, 0.7f, 0.3f), Random.Range(0.1f, 0.3f));
+            for (int i = 0; i < n * 3; i++)
+                Emit(I.sparks, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(3f, 10f), Random.Range(0.004f, 0.011f), new Color(1f, 0.7f, 0.3f), Random.Range(0.1f, 0.3f));
         }
 
         public static void Dust(Vector3 pos, Vector3 normal, int n)
         {
             if (I == null) return;
-            for (int i = 0; i < n; i++)
-                Emit(I.dust, pos, (normal + Random.insideUnitSphere * 0.6f).normalized * Random.Range(0.4f, 1.8f), Random.Range(0.05f, 0.16f), new Color(0.72f, 0.72f, 0.7f, 0.6f), Random.Range(0.4f, 1f));
+            for (int i = 0; i < n * 3; i++)
+                Emit(I.dust, pos + Random.insideUnitSphere * 0.02f, (normal + Random.insideUnitSphere * 0.6f).normalized * Random.Range(0.4f, 2.2f), Random.Range(0.02f, 0.07f), new Color(0.72f, 0.72f, 0.7f, 0.6f), Random.Range(0.4f, 1f));
         }
 
         /// <summary>Is this the earth of a trench, a field (dust and clods), rather than concrete or steel?</summary>
@@ -475,15 +475,15 @@ namespace Carl
         {
             if (I == null) return;
             power = Mathf.Clamp(power, 0.4f, 2.5f);
-            int n = 8 + (int)(10f * power);
+            int n = 20 + (int)(26f * power);
             for (int i = 0; i < n; i++)
             {
                 Vector3 v = (normal * Random.Range(0.6f, 1.6f) + Random.insideUnitSphere * 0.7f) * Random.Range(0.5f, 2f) * power;
                 float shade = Random.Range(0.85f, 1.1f);
-                Emit(I.dust, pos + Random.insideUnitSphere * 0.03f, v, Random.Range(0.1f, 0.32f) * Mathf.Sqrt(power), new Color(0.46f * shade, 0.38f * shade, 0.28f * shade, 0.7f), Random.Range(0.9f, 2.2f));
+                Emit(I.dust, pos + Random.insideUnitSphere * 0.03f, v, Random.Range(0.04f, 0.15f) * Mathf.Sqrt(power), new Color(0.46f * shade, 0.38f * shade, 0.28f * shade, 0.7f), Random.Range(0.9f, 2.2f));
             }
-            for (int i = 0; i < 4 + (int)(5f * power); i++)
-                Emit(I.debris, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(1.5f, 4.5f) * Mathf.Sqrt(power), Random.Range(0.01f, 0.03f), new Color(0.27f, 0.21f, 0.15f), Random.Range(0.5f, 1.1f));
+            for (int i = 0; i < 12 + (int)(14f * power); i++)
+                Emit(I.debris, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(1.5f, 4.5f) * Mathf.Sqrt(power), Random.Range(0.005f, 0.016f), new Color(0.27f, 0.21f, 0.15f), Random.Range(0.5f, 1.1f));
         }
 
         static readonly RaycastHit[] blastBuf = new RaycastHit[8];
@@ -508,10 +508,10 @@ namespace Carl
                 float k = (1f - best / 1.1f) * power;
                 // blown along the surface, away from the muzzle, and lifted off it
                 Vector3 along = Vector3.ProjectOnPlane(hit.point - muzzle + dir * 0.3f, hit.normal).normalized;
-                int m = 2 + (int)(6f * k);
+                int m = 5 + (int)(14f * k);
                 for (int i = 0; i < m; i++)
                     Emit(I.dust, hit.point + Random.insideUnitSphere * 0.05f, (along * Random.Range(0.8f, 2.5f) + hit.normal * Random.Range(0.2f, 0.9f) + Random.insideUnitSphere * 0.4f) * k,
-                        Random.Range(0.12f, 0.3f), new Color(0.5f, 0.42f, 0.32f, 0.5f), Random.Range(0.8f, 1.8f));
+                        Random.Range(0.05f, 0.14f), new Color(0.5f, 0.42f, 0.32f, 0.5f), Random.Range(0.8f, 1.8f));
             }
         }
 
@@ -565,17 +565,17 @@ namespace Carl
             Vector3 side = Vector3.Cross(dir, Vector3.up).normalized;
             if (side.sqrMagnitude < 0.01f) side = Vector3.right;
             Vector3 up2 = Vector3.Cross(side, dir);
-            int n = Mathf.RoundToInt(6 + power * 8);
+            int n = Mathf.RoundToInt(14 + power * 18);
             for (int i = 0; i < n; i++)
-                Emit(I.flame, pos + dir * Random.Range(0f, 0.08f * power), dir * Random.Range(2f, 8f) * power + Random.insideUnitSphere * 1.2f, Random.Range(0.04f, 0.12f) * power, new Color(1f, Random.Range(0.6f, 0.85f), 0.35f, 1f), Random.Range(0.025f, 0.06f));
+                Emit(I.flame, pos + dir * Random.Range(0f, 0.08f * power), dir * Random.Range(2f, 8f) * power + Random.insideUnitSphere * 1.2f, Random.Range(0.018f, 0.06f) * power, new Color(1f, Random.Range(0.6f, 0.85f), 0.35f, 1f), Random.Range(0.025f, 0.06f));
             for (int k = 0; k < 4; k++)
             {
                 Vector3 jet = Quaternion.AngleAxis(k * 90f + Random.Range(-20f, 20f), dir) * side;
-                Emit(I.flame, pos + dir * 0.02f, (jet * 3f + dir) * power, 0.05f * power, new Color(1f, 0.7f, 0.4f, 0.9f), 0.035f);
+                Emit(I.flame, pos + dir * 0.02f, (jet * 3f + dir) * power, 0.026f * power, new Color(1f, 0.7f, 0.4f, 0.9f), 0.035f);
             }
-            for (int i = 0; i < 3; i++)
-                Emit(I.smoke, pos + dir * 0.05f, dir * Random.Range(0.4f, 1.2f) + up2 * 0.3f + Random.insideUnitSphere * 0.2f, Random.Range(0.08f, 0.16f) * (0.6f + power * 0.5f), new Color(0.75f, 0.74f, 0.72f, 0.25f), Random.Range(0.6f, 1.2f));
-            if (Random.value < 0.6f) Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.3f).normalized * 6f, 0.008f, new Color(1f, 0.75f, 0.35f), 0.15f);
+            for (int i = 0; i < 8; i++)
+                Emit(I.smoke, pos + dir * 0.05f + Random.insideUnitSphere * 0.02f, dir * Random.Range(0.4f, 1.2f) + up2 * 0.3f + Random.insideUnitSphere * 0.2f, Random.Range(0.035f, 0.08f) * (0.6f + power * 0.5f), new Color(0.75f, 0.74f, 0.72f, 0.25f), Random.Range(0.6f, 1.2f));
+            for (int i = 0; i < 4; i++) Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.35f).normalized * Random.Range(4f, 9f), 0.005f, new Color(1f, 0.75f, 0.35f), 0.15f);
         }
 
         /// <summary>Dragon's breath: a long jet of burning magnesium out of the barrel, showering sparks.</summary>
