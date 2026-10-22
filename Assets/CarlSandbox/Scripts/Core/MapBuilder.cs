@@ -102,9 +102,9 @@ namespace Carl
             else if (index == 1) BuildYard(root, out playerSpawn, out playerYaw, out carlSpawns);
             else if (index == 2) Houses.Neighbourhood(root, out playerSpawn, out playerYaw, out carlSpawns);
             else BuildTrenches(root, out playerSpawn, out playerYaw, out carlSpawns);
-            // the trenches are fought in a cold brown haze
+            // the trenches: an overcast grey haze
             RenderSettings.fog = index == 3;
-            if (index == 3) { RenderSettings.fogMode = FogMode.ExponentialSquared; RenderSettings.fogDensity = 0.012f; RenderSettings.fogColor = new Color(0.55f, 0.52f, 0.47f); }
+            if (index == 3) { RenderSettings.fogMode = FogMode.ExponentialSquared; RenderSettings.fogDensity = 0.014f; RenderSettings.fogColor = new Color(0.62f, 0.63f, 0.6f); }
             Batch(root);
             return root;
         }
@@ -128,15 +128,15 @@ namespace Carl
 
         // ================================================================ TRENCHES
         //
-        // Two zig-zag front lines facing each other across 50 m of no man's land, with support lines behind and
-        // communication trenches joining them. The ground is solid earth 1.9 m above the trench floors (floor y = 0,
-        // so everything that spawns on the ground spawns in a trench). Fire steps along the enemy side let you look
-        // over the sandbagged parapet; duckboards on the floor, plank revetments on the walls, wire and craters out in
-        // the open.
+        // Modern trench lines as dug in Ukraine: narrow slots a metre wide and deeper than a man, cut in zig-zags
+        // through the tree lines that break up the fields, fighting positions pushed out toward the enemy, dugouts
+        // roofed over with logs and earth, the dug earth heaped in spoil along both lips, leaf litter everywhere.
+        // Two lines face each other across a cratered field. The ground itself is modelled in Blender
+        // (BlenderTools/trench_build.py -> Resources/Models/Trench.bytes, textures painted by trench_textures.py);
+        // this places what stands on it. Trench floors are at y = 0, the field about 1.8 m above.
 
-        static Material mud, dirt, wood, darkWood, bag, wireMat, craterMud;
-        const float TC = 2f, TrenchDepth = 1.9f, TX0 = -36f, TZ0 = -50f;
-        const int TNX = 36, TNZ = 50;
+        static Material bark, logMat, bulkBag, shrub, roofEarth, water;
+        static Mesh blob;
 
         static GameObject Deco(Transform r, string name, Vector3 c, Vector3 size, Material m, Vector3 euler = default)
         {
@@ -146,161 +146,262 @@ namespace Carl
             return g;
         }
 
-        static Vector3 CellPos(int i, int j, float y = 0f) => new Vector3(TX0 + (i + 0.5f) * TC, y, TZ0 + (j + 0.5f) * TC);
+        /// <summary>A rounded lump (a shrub, a bag, earth on a roof): an ellipsoid, solid if asked.</summary>
+        static GameObject Blob(Transform r, string name, Vector3 c, Vector3 size, Material m, float rotY, bool solid)
+        {
+            if (blob == null) blob = ProcMesh.Ellipsoid(Vector3.one * 0.5f, 12, 8);
+            var g = new GameObject(name);
+            g.transform.SetParent(r, false);
+            g.transform.localPosition = c;
+            g.transform.localRotation = Quaternion.Euler(0f, rotY, 0f);
+            g.transform.localScale = size;
+            g.AddComponent<MeshFilter>().sharedMesh = blob;
+            g.AddComponent<MeshRenderer>().sharedMaterial = m;
+            if (solid) { var mc = g.AddComponent<MeshCollider>(); mc.sharedMesh = blob; mc.convex = true; }
+            g.isStatic = true;
+            return g;
+        }
+
+        static GameObject Pole(Transform r, string name, Vector3 a, Vector3 b, float radius, Material m, bool solid)
+        {
+            var g = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            g.name = name;
+            g.transform.SetParent(r, false);
+            Vector3 d = b - a;
+            g.transform.localPosition = (a + b) * 0.5f;
+            g.transform.localRotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
+            g.transform.localScale = new Vector3(radius * 2f, d.magnitude * 0.5f, radius * 2f);
+            g.GetComponent<MeshRenderer>().sharedMaterial = m;
+            if (!solid) Object.Destroy(g.GetComponent<Collider>());
+            g.isStatic = true;
+            return g;
+        }
+
+        class TrenchData
+        {
+            public Mesh mesh;
+            public readonly System.Collections.Generic.List<(int kind, Vector2[] pts)> lines = new System.Collections.Generic.List<(int, Vector2[])>();
+            public readonly System.Collections.Generic.List<(int kind, Vector2 c, float r)> cells = new System.Collections.Generic.List<(int, Vector2, float)>();
+            public readonly System.Collections.Generic.List<(Vector2 c, float r)> craters = new System.Collections.Generic.List<(Vector2, float)>();
+        }
+        static TrenchData trenchData;
+
+        /// <summary>
+        /// The Blender terrain: three parts (cut earth walls, mud floors, leaf litter on top) and the layout it was
+        /// dug from. Texture coordinates are made here: the walls side-on per triangle, the rest from above.
+        /// </summary>
+        static TrenchData LoadTrench()
+        {
+            // (a mesh made in play mode is destroyed when play stops: the static outlives it, so check the mesh)
+            if (trenchData != null && trenchData.mesh != null) return trenchData;
+            var ta = Resources.Load<TextAsset>("Models/Trench");
+            if (ta == null) { Debug.LogError("[Carl] Models/Trench.bytes missing"); return null; }
+            var d = new TrenchData();
+            using (var br = new System.IO.BinaryReader(new System.IO.MemoryStream(ta.bytes)))
+            {
+                br.ReadBytes(4);
+                int subs = br.ReadInt32();
+                var verts = new System.Collections.Generic.List<Vector3>();
+                var norms = new System.Collections.Generic.List<Vector3>();
+                var uvs = new System.Collections.Generic.List<Vector2>();
+                var tris = new int[subs][];
+                for (int s = 0; s < subs; s++)
+                {
+                    int nv = br.ReadInt32(), b = verts.Count;
+                    for (int i = 0; i < nv; i++) verts.Add(new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+                    for (int i = 0; i < nv; i++) norms.Add(new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+                    int nt = br.ReadInt32();
+                    tris[s] = new int[nt * 3];
+                    for (int i = 0; i < nt * 3; i++) tris[s][i] = b + br.ReadInt32();
+                    for (int i = 0; i < nv; i++) { var p = verts[b + i]; uvs.Add(new Vector2(p.x, p.z) * (s == 1 ? 0.5f : 0.33f)); }
+                    if (s == 0)
+                        for (int i = 0; i < nt * 3; i += 3)
+                        {
+                            // each wall triangle has its own corners: map it on whichever side it faces most
+                            Vector3 a = verts[tris[s][i]], e1 = verts[tris[s][i + 1]] - a, e2 = verts[tris[s][i + 2]] - a;
+                            Vector3 n = Vector3.Cross(e1, e2);
+                            bool alongZ = Mathf.Abs(n.x) > Mathf.Abs(n.z);
+                            for (int k = 0; k < 3; k++) { var p = verts[tris[s][i + k]]; uvs[tris[s][i + k]] = new Vector2(alongZ ? p.z : p.x, p.y) * 0.5f; }
+                        }
+                }
+                var m = new Mesh { name = "Trench", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                m.SetVertices(verts); m.SetNormals(norms); m.SetUVs(0, uvs);
+                m.subMeshCount = subs;
+                for (int s = 0; s < subs; s++) m.SetTriangles(tris[s], s);
+                m.RecalculateBounds(); m.RecalculateTangents();
+                d.mesh = m;
+                int nl = br.ReadInt32();
+                for (int l = 0; l < nl; l++)
+                {
+                    int kind = br.ReadInt32(), n = br.ReadInt32();
+                    var pts = new Vector2[n];
+                    for (int i = 0; i < n; i++) pts[i] = new Vector2(br.ReadSingle(), br.ReadSingle());
+                    d.lines.Add((kind, pts));
+                }
+                int nc = br.ReadInt32();
+                for (int c = 0; c < nc; c++) d.cells.Add((br.ReadInt32(), new Vector2(br.ReadSingle(), br.ReadSingle()), br.ReadSingle()));
+                int ncr = br.ReadInt32();
+                for (int c = 0; c < ncr; c++) d.craters.Add((new Vector2(br.ReadSingle(), br.ReadSingle()), br.ReadSingle()));
+            }
+            return trenchData = d;
+        }
+
+        static Material Tex(string name, float smooth, Color tint)
+        {
+            var t = Resources.Load<Texture2D>("Textures/" + name);
+            if (t != null) { t.wrapMode = TextureWrapMode.Repeat; t.anisoLevel = 8; }
+            return Mats.LitTextured(t, Vector2.one, tint, smooth);
+        }
 
         static void BuildTrenches(Transform r, out Vector3 spawn, out float yaw, out Vector3[] carls)
         {
-            if (mud == null)
+            if (bark == null)
             {
-                mud = Mats.Lit(new Color(0.24f, 0.19f, 0.13f), 0.35f);
-                dirt = Mats.Lit(new Color(0.35f, 0.28f, 0.19f), 0.05f);
-                wood = Mats.Lit(new Color(0.42f, 0.31f, 0.19f), 0.1f);
-                darkWood = Mats.Lit(new Color(0.27f, 0.2f, 0.13f), 0.1f);
-                bag = Mats.Lit(new Color(0.57f, 0.51f, 0.37f), 0.05f);
-                wireMat = Mats.Lit(new Color(0.22f, 0.2f, 0.19f), 0.4f, 0.6f);
-                craterMud = Mats.Lit(new Color(0.2f, 0.16f, 0.11f), 0.45f);
+                bark = Mats.Lit(new Color(0.33f, 0.3f, 0.27f), 0.1f);
+                logMat = Mats.Lit(new Color(0.4f, 0.32f, 0.22f), 0.1f);
+                bulkBag = Mats.Lit(new Color(0.85f, 0.86f, 0.84f), 0.2f);
+                shrub = Mats.Lit(new Color(0.22f, 0.18f, 0.12f), 0.02f);
+                roofEarth = Mats.Lit(new Color(0.27f, 0.21f, 0.15f), 0.08f);
+                water = Mats.Lit(new Color(0.2f, 0.17f, 0.13f), 0.93f, 0.1f);
             }
-            var t = new bool[TNX, TNZ];
-            int jA = 11, jE = 38;
-            void Mark(int i, int j) { if (i >= 0 && i < TNX && j >= 0 && j < TNZ) t[i, j] = true; }
-            // front lines: fire bays stepped back and forth (traverses stop a shell or a man clearing the whole line)
-            for (int i = 2; i <= 33; i++)
-            {
-                int bayA = (i / 4) % 2, bayE = ((i + 2) / 4) % 2;
-                Mark(i, jA + bayA); Mark(i, jE - bayE);
-                if (i % 4 == 0) { Mark(i, jA); Mark(i, jA + 1); }
-                if ((i + 2) % 4 == 0) { Mark(i, jE); Mark(i, jE - 1); }
-            }
-            // support lines and communication trenches (with doglegs), a sap pushed out into no man's land
-            for (int i = 6; i <= 28; i++) Mark(i, 4);
-            for (int i = 8; i <= 28; i++) Mark(i, 45);
-            for (int j = 4; j <= jA; j++) Mark(26, j);
-            for (int j = 7; j <= jA; j++) Mark(8, j);
-            for (int i = 8; i <= 12; i++) Mark(i, 7);
-            for (int j = 4; j <= 7; j++) Mark(12, j);
-            for (int j = jE; j <= 45; j++) Mark(10, j);
-            for (int j = jE; j <= 42; j++) Mark(24, j);
-            for (int i = 20; i <= 24; i++) Mark(i, 42);
-            for (int j = 42; j <= 45; j++) Mark(20, j);
-            for (int j = jA + 1; j <= jA + 5; j++) Mark(18, j);
-            for (int i = 17; i <= 19; i++) Mark(i, jA + 5);
-
-            float W = TNX * TC, D = TNZ * TC;
-            // trench floor (mud) under everything, earth on every cell that isn't trench, a high bank round the edge
-            Box(r, "Mud", new Vector3(0f, -0.5f, 0f), new Vector3(W + 20f, 1f, D + 20f), mud);
-            for (int j = 0; j < TNZ; j++)
-            {
-                int i = 0;
-                while (i < TNX)
-                {
-                    if (t[i, j]) { i++; continue; }
-                    int s = i;
-                    while (i < TNX && !t[i, j]) i++;
-                    float x0 = TX0 + s * TC, x1 = TX0 + i * TC, z = TZ0 + (j + 0.5f) * TC;
-                    Box(r, "Earth", new Vector3((x0 + x1) * 0.5f, TrenchDepth * 0.5f, z), new Vector3(x1 - x0, TrenchDepth, TC), dirt);
-                }
-            }
-            Box(r, "BankN", new Vector3(0f, 2.5f, D / 2 + 3f), new Vector3(W + 12f, 5f, 6f), dirt);
-            Box(r, "BankS", new Vector3(0f, 2.5f, -D / 2 - 3f), new Vector3(W + 12f, 5f, 6f), dirt);
-            Box(r, "BankE", new Vector3(W / 2 + 3f, 2.5f, 0f), new Vector3(6f, 5f, D), dirt);
-            Box(r, "BankW", new Vector3(-W / 2 - 3f, 2.5f, 0f), new Vector3(6f, 5f, D), dirt);
-
-            int[] di = { 1, -1, 0, 0 }, dj = { 0, 0, 1, -1 };
-            for (int i = 0; i < TNX; i++)
-                for (int j = 0; j < TNZ; j++)
-                {
-                    if (!t[i, j]) continue;
-                    Vector3 c = CellPos(i, j);
-                    // duckboards: a walkway of slats on two runners
-                    bool alongX = (i > 0 && t[i - 1, j]) || (i < TNX - 1 && t[i + 1, j]);
-                    float ry = alongX ? 90f : 0f;
-                    var duck = Box(r, "Duckboard", c + Vector3.up * 0.04f, new Vector3(0.9f, 0.08f, TC), darkWood, ry);
-                    for (int k = 0; k < 5; k++)
-                    {
-                        float o = -0.8f + k * 0.4f;
-                        Vector3 off = alongX ? new Vector3(o, 0f, 0f) : new Vector3(0f, 0f, o);
-                        Deco(r, "Slat", c + off + Vector3.up * 0.09f, alongX ? new Vector3(0.12f, 0.03f, 1f) : new Vector3(1f, 0.03f, 0.12f), wood);
-                    }
-                    for (int n = 0; n < 4; n++)
-                    {
-                        int ni = i + di[n], nj = j + dj[n];
-                        if (ni >= 0 && ni < TNX && nj >= 0 && nj < TNZ && t[ni, nj]) continue;
-                        // revetment: planks against the earth wall, held by posts
-                        Vector3 nrm = new Vector3(di[n], 0f, dj[n]);
-                        Vector3 face = c + nrm * (TC * 0.5f - 0.04f);
-                        Vector3 size = di[n] != 0 ? new Vector3(0.06f, TrenchDepth - 0.1f, TC) : new Vector3(TC, TrenchDepth - 0.1f, 0.06f);
-                        Deco(r, "Revetment", face + Vector3.up * (TrenchDepth * 0.5f - 0.05f), size, wood);
-                        Vector3 side = di[n] != 0 ? Vector3.forward : Vector3.right;
-                        Deco(r, "Post", face - nrm * 0.05f + side * (TC * 0.5f - 0.08f) + Vector3.up * TrenchDepth * 0.5f, new Vector3(0.12f, TrenchDepth, 0.12f), darkWood);
-                        // the enemy-facing wall of a front line: a fire step to stand on and a sandbag parapet with loopholes
-                        bool allied = j < 25;
-                        bool front = (allied && dj[n] == 1 && j >= jA && j <= jA + 5) || (!allied && dj[n] == -1 && j <= jE && j >= jE - 1);
-                        if (!front) continue;
-                        Box(r, "FireStep", c + nrm * (TC * 0.5f - 0.35f) + Vector3.up * 0.3f, new Vector3(TC, 0.6f, 0.6f), darkWood);
-                        Vector3 top = c + nrm * (TC * 0.5f + 0.3f) + Vector3.up * TrenchDepth;
-                        Box(r, "Sandbags", top + Vector3.up * 0.11f, new Vector3(TC, 0.22f, 0.45f), bag);
-                        for (int k = 0; k < 3; k++)
-                        {
-                            if (k == 1 && (i + j) % 2 == 0) continue;   // a loophole every other bay
-                            Box(r, "Sandbag", top + new Vector3((k - 1) * 0.66f, 0.33f, 0f), new Vector3(0.6f, 0.22f, 0.4f), bag, (k - 1) * 6f);
-                        }
-                    }
-                }
-
-            // no man's land: craters, wire and the stumps of trees
-            var rng = new System.Random(1916);
+            var rng = new System.Random(2022);
             float Rand(float a, float b) => a + (float)rng.NextDouble() * (b - a);
-            for (int k = 0; k < 22; k++)
-            {
-                Vector3 c = new Vector3(Rand(-32f, 32f), TrenchDepth, Rand(-20f, 20f));
-                float rad = Rand(1.2f, 3.2f);
-                Deco(r, "CraterMud", c + Vector3.up * 0.01f, new Vector3(rad * 1.6f, 0.02f, rad * 1.6f), craterMud, new Vector3(0f, Rand(0f, 90f), 0f));
-                for (int s = 0; s < 8; s++)
-                {
-                    float a = s / 8f * Mathf.PI * 2f;
-                    Box(r, "CraterLip", c + new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * rad + Vector3.up * 0.15f, new Vector3(rad * 0.85f, 0.3f, 0.7f), dirt, -a * Mathf.Rad2Deg + 90f);
-                }
-            }
-            foreach (float zLine in new[] { -20.5f, -17f, 17f, 20.5f })
-            {
-                for (float x = -33f; x <= 33f; x += 3f)
-                {
-                    Vector3 p = new Vector3(x + Rand(-0.4f, 0.4f), TrenchDepth, zLine + Rand(-0.5f, 0.5f));
-                    Deco(r, "Picket", p + Vector3.up * 0.55f, new Vector3(0.08f, 1.2f, 0.08f), darkWood, new Vector3(25f, 0f, 0f));
-                    Deco(r, "Picket", p + Vector3.up * 0.55f, new Vector3(0.08f, 1.2f, 0.08f), darkWood, new Vector3(-25f, 0f, 0f));
-                    // wire strung across to the next picket, sagging, in a few strands
-                    for (int s = 0; s < 3; s++)
-                    {
-                        float h = 0.3f + s * 0.3f;
-                        Deco(r, "Wire", p + new Vector3(1.5f, h, 0f), new Vector3(3.1f, 0.01f, 0.01f), wireMat, new Vector3(0f, Rand(-12f, 12f), Rand(-6f, 6f)));
-                    }
-                    // a loose coil
-                    if (rng.NextDouble() < 0.5)
-                        for (int s = 0; s < 6; s++)
-                            Deco(r, "Coil", p + new Vector3(0.8f, 0.35f, 0.3f), new Vector3(0.7f, 0.01f, 0.01f), wireMat, new Vector3(s * 30f, s * 31f, 0f));
-                }
-            }
-            for (int k = 0; k < 9; k++)
-            {
-                Vector3 p = new Vector3(Rand(-30f, 30f), TrenchDepth, Rand(-14f, 14f));
-                float h = Rand(2.5f, 6f);
-                var trunk = Box(r, "DeadTree", p + Vector3.up * h * 0.5f, new Vector3(0.35f, h, 0.35f), darkWood, Rand(0f, 90f));
-                trunk.transform.localRotation *= Quaternion.Euler(Rand(-6f, 6f), 0f, Rand(-6f, 6f));
-                Deco(r, "Branch", p + Vector3.up * h * 0.75f, new Vector3(0.12f, h * 0.35f, 0.12f), darkWood, new Vector3(0f, Rand(0f, 360f), Rand(35f, 60f)));
-            }
-            // a dugout entrance in the support line, and ammunition boxes along the front
-            Deco(r, "DugoutFrame", CellPos(16, 4) + new Vector3(0f, 0.95f, -0.97f), new Vector3(1.4f, 1.9f, 0.1f), darkWood);
-            Deco(r, "DugoutDark", CellPos(16, 4) + new Vector3(0f, 0.85f, -0.95f), new Vector3(1.0f, 1.6f, 0.05f), Mats.Lit(new Color(0.03f, 0.03f, 0.03f), 0f));
-            for (int k = 0; k < 6; k++) Crate(r, CellPos(4 + k * 5, jA + ((4 + k * 5) / 4) % 2, 0.35f) + new Vector3(0.4f, 0f, -0.5f), 0.5f, 18f);
+            var data = LoadTrench();
+            spawn = new Vector3(0f, 2.2f, -30f); yaw = 0f; carls = new Vector3[0];
+            if (data == null) return;
 
-            spawn = CellPos(16, jA + (16 / 4) % 2, 0.1f);
-            yaw = 0f;
-            carls = new Vector3[6];
-            for (int k = 0; k < 6; k++)
+            // the ground
+            var ground = new GameObject("TrenchGround");
+            ground.transform.SetParent(r, false);
+            ground.AddComponent<MeshFilter>().sharedMesh = data.mesh;
+            ground.AddComponent<MeshRenderer>().sharedMaterials = new[] { Tex("trench_earth", 0.06f, new Color(0.74f, 0.68f, 0.62f)), Tex("trench_mud", 0.22f, new Color(0.9f, 0.82f, 0.74f)), Tex("trench_litter", 0.04f, new Color(0.82f, 0.8f, 0.76f)) };
+            var col = ground.AddComponent<MeshCollider>();
+            col.sharedMesh = data.mesh;
+            ground.AddComponent<Surface>().kind = SurfaceKind.Dirt;
+            ground.isStatic = true;
+            // solid earth under the trench floors: nothing that tunnels through the thin ground falls out of the world
+            var under = Box(r, "Bedrock", new Vector3(0f, -1.25f, 0f), new Vector3(120f, 2f, 140f), roofEarth);
+            under.GetComponent<MeshRenderer>().enabled = false;
+            under.AddComponent<Surface>().kind = SurfaceKind.Dirt;
+            Physics.SyncTransforms();
+            float H(float x, float z) => col.Raycast(new Ray(new Vector3(x, 30f, z), Vector3.down), out var h, 60f) ? h.point.y : 0f;
+            Vector3 G(float x, float z) => new Vector3(x, H(x, z), z);
+
+            // tree lines along both fronts (the trenches are dug into them), thinner ones behind, a few lone trees
+            void Tree(Vector3 p)
             {
-                int i = 5 + k * 5;
-                carls[k] = CellPos(i, jE - ((i + 2) / 4) % 2, 0f);
+                float h = Rand(6f, 13f), rad = Rand(0.08f, 0.2f);
+                Vector3 lean = new Vector3(Rand(-0.15f, 0.15f), 1f, Rand(-0.15f, 0.15f)).normalized;
+                Pole(r, "Trunk", p - Vector3.up * 0.3f, p + lean * h, rad, bark, true);
+                int branches = rng.Next(4, 9);
+                for (int b = 0; b < branches; b++)
+                {
+                    Vector3 from = p + lean * h * Rand(0.3f, 0.92f);
+                    float a = Rand(0f, Mathf.PI * 2f);
+                    Vector3 dir = new Vector3(Mathf.Cos(a), Rand(0.5f, 1.5f), Mathf.Sin(a)).normalized;
+                    float len = Rand(1.2f, 3.4f);
+                    Pole(r, "Branch", from, from + dir * len, rad * Rand(0.2f, 0.4f), bark, false);
+                    // and twigs off the branch
+                    if (rng.NextDouble() < 0.6)
+                    {
+                        Vector3 f2 = from + dir * len * Rand(0.4f, 0.8f);
+                        Vector3 d2 = (dir + new Vector3(Rand(-0.8f, 0.8f), Rand(0f, 0.6f), Rand(-0.8f, 0.8f))).normalized;
+                        Pole(r, "Twig", f2, f2 + d2 * Rand(0.6f, 1.4f), rad * 0.12f, bark, false);
+                    }
+                }
             }
+            bool Open(float x, float z, float min = 1.5f) => H(x, z) > min;   // not in a trench or crater
+            foreach (var (zc, w, count) in new[] { (-22f, 7f, 85), (24f, 7f, 85), (-44f, 5f, 30), (46f, 5f, 30) })
+                for (int k = 0; k < count; k++)
+                {
+                    float x = Rand(-47f, 47f), z = zc + Rand(-w, w);
+                    if (!Open(x, z) || !Open(x + 0.4f, z) || !Open(x - 0.4f, z) || !Open(x, z + 0.4f) || !Open(x, z - 0.4f)) continue;
+                    Tree(G(x, z));
+                    if (rng.NextDouble() < 0.12) Blob(r, "Scrub", G(x + Rand(-1.5f, 1.5f), z + Rand(-1.5f, 1.5f)) + Vector3.up * 0.2f, new Vector3(Rand(0.8f, 1.8f), Rand(0.5f, 1f), Rand(0.8f, 1.8f)), shrub, Rand(0f, 180f), false);
+                }
+            for (int k = 0; k < 8; k++) { float x = Rand(-44f, 44f), z = Rand(-12f, 12f); if (Open(x, z)) Tree(G(x, z)); }
+
+            Vector2 Point(Vector2[] pts) { int i = rng.Next(pts.Length - 1); return Vector2.Lerp(pts[i], pts[i + 1], Rand(0f, 1f)); }
+            var mains = data.lines.FindAll(l => l.kind <= 2);
+            // dugouts: logs laid across the hole, earth heaped on top
+            foreach (var (kind, c, rad) in data.cells)
+            {
+                if (kind != 1) continue;
+                float top = Mathf.Max(H(c.x + rad + 0.6f, c.y), H(c.x - rad - 0.6f, c.y));
+                float y = Mathf.Min(top, 2f) - 0.05f;
+                for (float zz = -rad - 0.2f; zz <= rad + 0.2f; zz += 0.23f)
+                    Pole(r, "RoofLog", new Vector3(c.x - rad - 0.7f, y + Rand(-0.03f, 0.03f), c.y + zz), new Vector3(c.x + rad + 0.7f, y + Rand(-0.03f, 0.03f), c.y + zz + Rand(-0.1f, 0.1f)), Rand(0.09f, 0.12f), logMat, true);
+                Blob(r, "RoofEarth", new Vector3(c.x, y + 0.12f, c.y), new Vector3(rad * 2f + 1f, 0.55f, rad * 2f + 0.6f), roofEarth, Rand(-10f, 10f), true);
+                // spare boxes and a bag by the entrance
+                Crate(r, new Vector3(c.x + Rand(-0.4f, 0.4f), 0.3f, c.y + Rand(-0.4f, 0.4f)), 0.42f, 14f);
+            }
+            // camouflage netting draped over most of the fighting positions, sagging into the hole
+            var net = Tex("trench_net", 0.05f, Color.white);
+            net.SetFloat("_AlphaClip", 1f); net.SetFloat("_Cutoff", 0.5f); net.EnableKeyword("_ALPHATEST_ON");
+            net.SetFloat("_Cull", 0f); net.renderQueue = 2450;
+            foreach (var (kind, c, rad) in data.cells)
+            {
+                if (kind != 0 || rng.NextDouble() < 0.3) continue;
+                const int N = 12; float half = rad + 1.3f;
+                var vs = new Vector3[N * N]; var uv = new Vector2[N * N]; var tri = new System.Collections.Generic.List<int>();
+                float top = 0f;
+                for (int k = 0; k < 8; k++) { float a = k * Mathf.PI / 4f; top = Mathf.Max(top, H(c.x + Mathf.Cos(a) * half, c.y + Mathf.Sin(a) * half)); }
+                float rot = Rand(0f, Mathf.PI);
+                for (int i = 0; i < N; i++)
+                    for (int j = 0; j < N; j++)
+                    {
+                        float u = i / (N - 1f) * 2f - 1f, v = j / (N - 1f) * 2f - 1f;
+                        float x = (u * Mathf.Cos(rot) - v * Mathf.Sin(rot)) * half, z = (u * Mathf.Sin(rot) + v * Mathf.Cos(rot)) * half;
+                        float q = Mathf.Clamp01(Mathf.Sqrt(u * u + v * v));
+                        float y = Mathf.Max(H(c.x + x, c.y + z) + 0.06f, top + 0.15f - 0.55f * (1f - q * q) + Rand(-0.05f, 0.05f));
+                        vs[i * N + j] = new Vector3(c.x + x, y, c.y + z);
+                        uv[i * N + j] = new Vector2(u, v) * half * 0.5f;
+                        if (i < N - 1 && j < N - 1) { int a = i * N + j; tri.AddRange(new[] { a, a + 1, a + N, a + 1, a + N + 1, a + N }); }
+                    }
+                var nm = new Mesh { name = "CamoNet", vertices = vs, uv = uv, triangles = tri.ToArray() };
+                nm.RecalculateNormals();
+                var go = new GameObject("CamoNet");
+                go.transform.SetParent(r, false);
+                go.AddComponent<MeshFilter>().sharedMesh = nm;
+                go.AddComponent<MeshRenderer>().sharedMaterial = net;
+                go.isStatic = true;
+            }
+            // branches fallen across the trenches, puddles in the low spots
+            for (int k = 0; k < 45; k++)
+            {
+                var p = Point(mains[rng.Next(mains.Count)].pts);
+                float a = Rand(0f, Mathf.PI);
+                Vector3 d = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)) * Rand(1f, 2f);
+                Vector3 c = new Vector3(p.x, 0f, p.y);
+                Vector3 e0 = G(c.x - d.x, c.z - d.z) + Vector3.up * 0.05f, e1 = G(c.x + d.x, c.z + d.z) + Vector3.up * 0.05f;
+                if (e0.y > 1.2f && e1.y > 1.2f) Pole(r, "FallenBranch", e0, e1, Rand(0.025f, 0.07f), bark, false);
+            }
+            for (int k = 0; k < 70; k++)
+            {
+                var p = Point(mains[rng.Next(mains.Count)].pts);
+                float y = H(p.x, p.y);
+                if (y < 0f) Deco(r, "Puddle", new Vector3(p.x, y + 0.015f, p.y), new Vector3(Rand(0.5f, 0.9f), 0.01f, Rand(0.6f, 1.4f)), water, new Vector3(0f, Rand(0f, 180f), 0f));
+            }
+            // white bulk bags dumped behind the positions
+            for (int k = 0; k < 12; k++)
+            {
+                var line = data.lines[k % 2].pts;
+                var p = Point(line);
+                float z = p.y + (k % 2 == 0 ? -1f : 1f) * Rand(3f, 6f);
+                if (Open(p.x, z)) Blob(r, "BulkBag", G(p.x, z) + Vector3.up * 0.3f, new Vector3(Rand(0.9f, 1.3f), Rand(0.6f, 0.9f), Rand(0.9f, 1.3f)), bulkBag, Rand(0f, 180f), true);
+            }
+
+            // you start in your own front line, the Earls in theirs and in their fighting positions
+            var friendly = data.lines.Find(l => l.kind == 0).pts;
+            var enemy = data.lines.Find(l => l.kind == 1).pts;
+            Vector2 sp = Vector2.Lerp(friendly[friendly.Length / 2], friendly[friendly.Length / 2 + 1], 0.5f);
+            spawn = new Vector3(sp.x, H(sp.x, sp.y) + 0.1f, sp.y);
+            yaw = 0f;
+            var spots = new System.Collections.Generic.List<Vector3>();
+            foreach (var (kind, c, rad) in data.cells) if (kind == 0 && c.y > 0f) spots.Add(new Vector3(c.x, H(c.x, c.y) + 0.05f, c.y));
+            for (int i = 0; i < enemy.Length - 1; i += 2) { var p = Vector2.Lerp(enemy[i], enemy[i + 1], 0.5f); spots.Add(new Vector3(p.x, H(p.x, p.y) + 0.05f, p.y)); }
+            carls = new Vector3[6];
+            for (int k = 0; k < 6; k++) carls[k] = spots[(k * 5 + 2) % spots.Count];
         }
 
         // ================================================================ THE LAB

@@ -32,6 +32,8 @@ namespace Carl
         [HideInInspector] public float grit = 1f;
         /// <summary>Leaning round a corner: -1 left .. +1 right (the spine bends, the head goes out sideways).</summary>
         [HideInInspector] public float lean;
+        /// <summary>Multiplier on the arm muscles: lowered while the hands are jointed to something they hold.</summary>
+        [HideInInspector] public float armCompliance = 1f;
         [HideInInspector] public Vector3? lookAt;
         [HideInInspector] public float crouch;
         [HideInInspector] public float panic;
@@ -407,10 +409,20 @@ namespace Carl
         readonly Quaternion[] lastTarget = new Quaternion[17];
         bool settledCheap;
 
-        public static readonly System.Diagnostics.Stopwatch ProfSw = System.Diagnostics.Stopwatch.StartNew();
-        public static readonly long[] Prof = new long[8];
-        static long profLast;
-        static void PROF(int k) { long t = ProfSw.ElapsedTicks; if (k > 0) Prof[k] += t - profLast; profLast = t; }
+        // this body's own rigidbodies, for ignoring its own limbs in ground and wall probes (far cheaper than
+        // looking up a component on every ray hit)
+        System.Collections.Generic.HashSet<Rigidbody> ownRbs;
+        bool Own(Rigidbody rb)
+        {
+            if (rb == null) return false;
+            if (ownRbs == null)
+            {
+                ownRbs = new System.Collections.Generic.HashSet<Rigidbody>();
+                foreach (var p in body.partList) if (p != null && p.rb != null) ownRbs.Add(p.rb);
+            }
+            return ownRbs.Contains(rb);
+        }
+
         void FixedUpdate()
         {
             if (body == null) return;
@@ -432,7 +444,6 @@ namespace Carl
                 foreach (var bp in body.partList) if (bp != null && bp.rb != null) { bp.rb.solverIterations = 14; bp.rb.solverVelocityIterations = 6; }
             }
 
-            PROF(0);
             // ---- ground probe
             int n = Physics.RaycastNonAlloc(pelvis.position + Vector3.up * 0.1f, Vector3.down, rayBuf, 3f, ~0, QueryTriggerInteraction.Ignore);
             float groundY = pelvis.position.y - 5f;
@@ -440,14 +451,12 @@ namespace Carl
             for (int i = 0; i < n; i++)
             {
                 var h = rayBuf[i];
-                var bp = h.collider.GetComponent<BodyPart>();
-                if (bp != null && bp.body == body) continue;
+                if (Own(h.rigidbody)) continue;   // its own limbs
                 if (h.collider is CharacterController) continue;
                 if (h.distance < best) { best = h.distance; groundY = h.point.y; }
             }
             GroundHeight = pelvis.position.y - groundY;
 
-            PROF(1);
             // ---- decide mode transitions
             bool canStand = physio.CanStand;
             if (mode == BodyMode.Standing || mode == BodyMode.GettingUp)
@@ -484,7 +493,6 @@ namespace Carl
             else baseTone = Mathf.Lerp(0.55f, 1f, physio.consciousness);
             tone = Mathf.MoveTowards(tone, baseTone, dt * (baseTone < tone ? 3f : 1.2f));
 
-            PROF(2);
             // ---- pose
             PoseKind p = pose;
             if (physio.dead || physio.consciousness < 0.2f) p = PoseKind.Limp;
@@ -513,7 +521,6 @@ namespace Carl
             if (p == PoseKind.Writhe) AddNoise(6f + physio.EffectivePain * 12f, 0.55f);
             if (physio.posture == PostureType.Tremor) AddNoise(20f, 12f);
 
-            PROF(3);
             // ---- injury posture while upright: hunch over torso pain, guard a hurt arm
             if (mode != BodyMode.Down && !physio.dead && physio.posture == PostureType.None)
             {
@@ -585,7 +592,6 @@ namespace Carl
                 body.Pelvis.rb.AddForce(-body.Chest.transform.right * l * body.totalMass * 1.2f);
             }
 
-            PROF(4);
             // ---- drive muscles
             for (int i = 1; i < 17; i++)
             {
@@ -600,6 +606,8 @@ namespace Carl
                 // a shot arm hangs; a buckling leg gives way
                 if (holdPart != null && Anatomy.IsArm(holdPart.id) && Anatomy.IsArm(bp.id) && side == Anatomy.Side(holdPart.id)) t *= 0.25f;
                 if (Anatomy.IsLeg(bp.id) && side != 0) t *= 1f - legBuckle[side < 0 ? 0 : 1] * 0.75f;
+                // hands on a held gun: the arm muscles give way to it (they keep their shape, they don't fight it)
+                if (Anatomy.IsArm(bp.id)) t *= armCompliance;
                 // broken bones cannot hold load
                 foreach (var o in bp.organs) if (o.IsBone && o.Fractured && !o.def.shell) { t *= o.BadlyBroken ? 0.08f : 0.35f; break; }
                 float spring = HumanBody.SpringFor(bp.id) * t;
@@ -614,7 +622,6 @@ namespace Carl
                 if (Quaternion.Angle(q, lastTarget[i]) > 0.15f) { bp.joint.targetRotation = q; lastTarget[i] = q; }
             }
 
-            PROF(5);
             // ---- balance / locomotion
             bool getUpPhases = mode == BodyMode.GettingUp && UpdateGetUpPhases(dt, pelvis, chest);
             if (getUpPhases) { IsCrawling = false; }
@@ -664,8 +671,8 @@ namespace Carl
                 if (stumbleTimer > 0f) { stumbleTimer -= dt; vDes += stumbleVel; }
                 Vector3 vCur = Vector3.ProjectOnPlane(pelvis.linearVelocity, Vector3.up);
                 // (you respond to the keys more crisply than a wandering Earl does)
-                float driveK = grit > 1f ? 8f : 5f;
-                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * driveK, grit > 1f ? 1400f : 950f) * upright * GaitTraction();
+                float driveK = grit > 1f ? 13f : 5f;
+                Vector3 fh = Vector3.ClampMagnitude((vDes - vCur) * M * driveK, grit > 1f ? 2000f : 950f) * upright * GaitTraction();
                 pelvis.AddForce(fh * 0.6f);
                 chest.AddForce(fh * 0.4f);
                 StabilityForces(dt, pelvis, chest, M);
@@ -696,7 +703,6 @@ namespace Carl
             {
                 UpdateDown(dt, pelvis, chest);
             }
-            PROF(6);
         }
 
         /// <summary>Set by the brain: try to push up off the ground (strength 0..1). Too hurt = a feeble attempt.</summary>

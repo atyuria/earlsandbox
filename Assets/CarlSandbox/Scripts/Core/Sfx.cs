@@ -83,7 +83,7 @@ namespace Carl
             // a suppressor doesn't make it quiet, it takes the crack off: still a hard slap, carrying much less far
             if (suppressed) Play(g, pos, 0.32f, 0.5f, 1f, 0.06f, 45f);
             else Play(g, pos, 1f, 0.25f, 3f, 0.04f);
-            if (weapon != "MOSSBERG 590") PlayLater(Random.Range(0.35f, 0.6f), "casing", pos + Vector3.down * 1.4f, 0.5f, 0.6f);
+            // (the cases make their own sound now, as they land: Casing)
         }
 
         /// <summary>The noises of a reload, spread over its length.</summary>

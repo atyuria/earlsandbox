@@ -34,8 +34,7 @@ namespace Carl
             {
                 var h = rayBuf[i];
                 if (h.collider is CharacterController) continue;
-                var bp = h.collider.GetComponent<BodyPart>();
-                if (bp != null && bp.body == body) continue;
+                if (Own(h.rigidbody)) continue;   // its own limbs
                 best = Mathf.Min(best, h.distance - 0.3f);
             }
             return best;

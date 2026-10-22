@@ -61,7 +61,11 @@ namespace Carl
         {
             recoilPitch += up;
             recoilYaw += side;
+            // most of the climb comes back down once you stop firing (you settle the gun back on target)
+            settle += up * 0.7f;
+            lastRecoil = Time.time;
         }
+        float settle, lastRecoil;
 
         public void Shake(float amount) => shake = Mathf.Max(shake, amount);
 
@@ -99,6 +103,13 @@ namespace Carl
             pitch = Mathf.Clamp(pitch - rp, -88f, 88f);
             yaw += ry;
             recoilPitch -= rp; recoilYaw -= ry;
+            if (settle > 0.01f && Time.time - lastRecoil > 0.12f)
+            {
+                float back = Mathf.Min(settle, settle * Mathf.Clamp01(dt * 7f) + dt * 2f);
+                pitch = Mathf.Clamp(pitch + back, -88f, 88f);
+                settle -= back;
+            }
+            else if (settle > 25f) settle = 25f;
 
             shake = Mathf.Max(0f, shake - dt * 1.5f);
             Vector3 shakeOff = shake > 0f ? Random.insideUnitSphere * shake * 1.2f : Vector3.zero;
@@ -132,6 +143,8 @@ namespace Carl
 
             if (flying)
             {
+                // your body stays where you left it, standing still (not walking on blind, or dragged after the camera)
+                if (hasBody) avatar.Drive(Vector3.zero, false, kb, dt);
                 Vector3 move = cam.transform.TransformDirection(input);
                 if (kb.spaceKey.isPressed) move += Vector3.up;
                 if (kb.leftCtrlKey.isPressed) move += Vector3.down;

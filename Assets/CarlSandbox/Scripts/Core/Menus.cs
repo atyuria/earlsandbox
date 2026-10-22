@@ -17,7 +17,9 @@ namespace Carl
         public bool IsOpen => open != MenuKind.None;
         public static int LastMenuFrame;
         /// <summary>True while a menu is open or was just closed (the closing click must not fire the gun).</summary>
-        public static bool Blocking => Time.frameCount - LastMenuFrame < 3;
+        public static bool Blocking => Time.frameCount - LastMenuFrame < 3 && Time.frameCount >= LastMenuFrame;
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { LastMenuFrame = -100; }   // statics survive between play sessions here
         SandboxGame game;
 
         // spawn options

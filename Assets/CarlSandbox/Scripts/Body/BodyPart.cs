@@ -118,6 +118,17 @@ namespace Carl
             var other = c.rigidbody ? c.rigidbody.GetComponent<BodyPart>() : null;
             if (other != null && other.body == body) return;
             float speed = c.relativeVelocity.magnitude;
+            if (body == PlayerAvatar.Body && rb != null)
+            {
+                // your own body is driven hard by its muscles: a foot planted mid-stride, a hand brushing a wall, a
+                // knee bumping a crate all show big contact speeds without anything much happening. What hurts is
+                // how much the knock actually changed this part's speed - the impulse it took - so only real falls,
+                // throws and hits count, and hands and feet (built to take knocks) need a harder one.
+                speed = Mathf.Min(speed, c.impulse.magnitude / rb.mass);
+                bool extremity = id == PartId.FootL || id == PartId.FootR || id == PartId.HandL || id == PartId.HandR || id == PartId.ShinL || id == PartId.ShinR || id == PartId.ForearmL || id == PartId.ForearmR;
+                if (other == null && extremity) speed -= 3f;
+                if (speed < 4.5f || Time.time - lastImpactTime < 0.15f) return;
+            }
             if (speed < 3.2f || Time.time - lastImpactTime < 0.15f) return;
             lastImpactTime = Time.time;
             var cp = c.GetContact(0);

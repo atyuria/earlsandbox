@@ -244,9 +244,12 @@ namespace Carl
                 if (BloodSystem.Instance != null && hit.rigidbody == null)
                     BloodSystem.Instance.Mark(hit.point, hit.normal, p.kind == HitKind.Shrapnel ? 0.02f : Mathf.Clamp(p.diam * 4f, 0.03f, 0.08f));
                 if (p.kind == HitKind.Bullet || Random.value < 0.08f) Sfx.Impact(hit.collider, hit.point);
+                bool dirt = Fx.IsDirt(hit.collider);
+                if (dirt && (p.kind == HitKind.Bullet || Random.value < 0.4f)) Fx.DirtImpact(hit.point, hit.normal, p.kind == HitKind.Bullet ? Mathf.Sqrt(energy / 1500f) : 0.4f);
                 // wallbang: punch through if the round can get through this much material
                 if (p.kind == HitKind.Bullet && p.walls < 3 && TryWallbang(p, hit, dir, energy)) { remaining = Mathf.Max(0f, remaining - 0.02f); continue; }
-                if (p.kind == HitKind.Bullet) { Fx.Dust(hit.point, hit.normal, 8); Fx.Sparks(hit.point, hit.normal, 3); }
+                if (dirt) { }   // the earth already threw its dirt
+                else if (p.kind == HitKind.Bullet) { Fx.Dust(hit.point, hit.normal, 8); Fx.Sparks(hit.point, hit.normal, 3); }
                 else if (Random.value < 0.3f) Fx.Dust(hit.point, hit.normal, 2);
                 p.alive = false;
             }
@@ -448,6 +451,59 @@ namespace Carl
             if (I == null) return;
             for (int i = 0; i < n; i++)
                 Emit(I.dust, pos, (normal + Random.insideUnitSphere * 0.6f).normalized * Random.Range(0.4f, 1.8f), Random.Range(0.05f, 0.16f), new Color(0.72f, 0.72f, 0.7f, 0.6f), Random.Range(0.4f, 1f));
+        }
+
+        /// <summary>Is this the earth of a trench, a field (dust and clods), rather than concrete or steel?</summary>
+        public static bool IsDirt(Collider c)
+        {
+            if (c == null) return false;
+            var s = c.GetComponentInParent<Surface>();
+            return s != null && s.kind == SurfaceKind.Dirt;
+        }
+
+        /// <summary>A round into earth: a spout of dust thrown off the face and clods of dirt flung out.</summary>
+        public static void DirtImpact(Vector3 pos, Vector3 normal, float power)
+        {
+            if (I == null) return;
+            power = Mathf.Clamp(power, 0.4f, 2.5f);
+            int n = 8 + (int)(10f * power);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 v = (normal * Random.Range(0.6f, 1.6f) + Random.insideUnitSphere * 0.7f) * Random.Range(0.5f, 2f) * power;
+                float shade = Random.Range(0.85f, 1.1f);
+                Emit(I.dust, pos + Random.insideUnitSphere * 0.03f, v, Random.Range(0.1f, 0.32f) * Mathf.Sqrt(power), new Color(0.46f * shade, 0.38f * shade, 0.28f * shade, 0.7f), Random.Range(0.9f, 2.2f));
+            }
+            for (int i = 0; i < 4 + (int)(5f * power); i++)
+                Emit(I.debris, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(1.5f, 4.5f) * Mathf.Sqrt(power), Random.Range(0.01f, 0.03f), new Color(0.27f, 0.21f, 0.15f), Random.Range(0.5f, 1.1f));
+        }
+
+        static readonly RaycastHit[] blastBuf = new RaycastHit[8];
+
+        /// <summary>
+        /// The muzzle blast blows dust off any earth close by - the lip and walls of a trench, the ground when
+        /// firing low or lying down. The more powerful the gun, the bigger the cloud.
+        /// </summary>
+        public static void BlastDust(Vector3 muzzle, Vector3 dir, float power)
+        {
+            if (I == null) return;
+            Vector3 right = Vector3.Cross(Vector3.up, dir).normalized;
+            if (right.sqrMagnitude < 0.01f) right = Vector3.right;
+            Vector3 up = Vector3.Cross(dir, right);
+            Vector3[] rays = { -up, right, -right, (-up + right).normalized, (-up - right).normalized, (dir - up).normalized, (dir + right * 0.6f).normalized, (dir - right * 0.6f).normalized };
+            foreach (var r in rays)
+            {
+                int n = Physics.RaycastNonAlloc(muzzle, r, blastBuf, 1.1f, ~0, QueryTriggerInteraction.Ignore);
+                float best = 9f; RaycastHit hit = default; bool got = false;
+                for (int i = 0; i < n; i++) if (blastBuf[i].distance < best && IsDirt(blastBuf[i].collider)) { best = blastBuf[i].distance; hit = blastBuf[i]; got = true; }
+                if (!got) continue;
+                float k = (1f - best / 1.1f) * power;
+                // blown along the surface, away from the muzzle, and lifted off it
+                Vector3 along = Vector3.ProjectOnPlane(hit.point - muzzle + dir * 0.3f, hit.normal).normalized;
+                int m = 2 + (int)(6f * k);
+                for (int i = 0; i < m; i++)
+                    Emit(I.dust, hit.point + Random.insideUnitSphere * 0.05f, (along * Random.Range(0.8f, 2.5f) + hit.normal * Random.Range(0.2f, 0.9f) + Random.insideUnitSphere * 0.4f) * k,
+                        Random.Range(0.12f, 0.3f), new Color(0.5f, 0.42f, 0.32f, 0.5f), Random.Range(0.8f, 1.8f));
+            }
         }
 
         public static void Explosion(Vector3 pos)

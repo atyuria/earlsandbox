@@ -492,7 +492,7 @@ namespace Carl
                 string help =
                     "<b><color=#F58F29>CONTROLS</color></b>\n" +
                     "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Z drop down\n" +
-                    "LMB fire / stab / swing · RMB aim / slash · R reload · ALT hold: point aim (guns) / swing blade\n" +
+                    "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off · ALT hold: swing blade\n" +
                     "1-9 or wheel: weapons (take them in the G menu)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
                     "X real-time x-ray  ·  MIDDLE CLICK medical panel\n" +

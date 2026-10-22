@@ -398,6 +398,13 @@ namespace Carl
             rounds--;
             Sfx.Gun(WeaponName, muzzle.position);
             Fx.Muzzle(muzzle.position, weapon.transform.forward, kind == EarlWeapon.Shotgun ? 1.6f : 1f);
+            {
+                // the empty case out of the right side, a little behind the muzzle line
+                var wt = weapon.transform;
+                var ck = kind == EarlWeapon.AK47 ? CaseKind.SevenSixTwo : kind == EarlWeapon.AR15 ? CaseKind.FiveFiveSix : kind == EarlWeapon.Shotgun ? CaseKind.TwelveGauge : (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta) ? CaseKind.Nine : CaseKind.None;
+                Casing.Eject(ck, muzzle.position - wt.forward * (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta ? 0.12f : 0.45f) + wt.up * 0.02f, wt.right, wt.up, -wt.forward, Vector3.zero);
+            }
+            Fx.BlastDust(muzzle.position, weapon.transform.forward, kind == EarlWeapon.Shotgun ? 1.6f : 1f);
             HumanBrain.BroadcastNoise(muzzle.position, 60f, 0.4f);
             var hand = body[PartId.HandR];
             float oneHand = TwoHanded && ArmHealth(-1) <= 0.3f ? 2.2f : 1f;
