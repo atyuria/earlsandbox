@@ -159,6 +159,7 @@ namespace Carl
             chunk.from = part; chunk.li = this; chunk.bleed = hanging ? 6f : 10f;
 
             // the same visuals (skin, flesh layers, organs, wound tunnels), each half drawn only on its own side of the cut
+            part.body?.EnsureReveal(part);
             foreach (var r in part.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (r.GetComponentInParent<ArmourPiece>() != null) continue;
@@ -279,6 +280,7 @@ namespace Carl
         /// </summary>
         public static void ClipAt(BodyPart part, Vector3 pointPart, Vector3 normalPart)
         {
+            part.body?.EnsureReveal(part);
             foreach (var r in part.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (r.GetComponentInParent<ArmourPiece>() != null || InXray(r.transform) || r.name == "StumpCap") continue;
@@ -315,8 +317,12 @@ namespace Carl
         MaterialPropertyBlock mpb;
         float dripAcc;
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.LimbChunk.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             // it shares the body's materials: when the body is gone (cleared, despawned) so is this
             if (from == null) { Destroy(gameObject); return; }
             // organ shaders work in the limb's own frame: this piece moves on its own now
@@ -400,8 +406,12 @@ namespace Carl
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.SkinThread.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (a == null || b == null) { Destroy(gameObject); return; }
             verts.Clear(); skinT.Clear(); meatT.Clear();
             Vector3 u = Vector3.Cross(ax, Mathf.Abs(ax.y) < 0.9f ? Vector3.up : Vector3.right).normalized, v = Vector3.Cross(ax, u);

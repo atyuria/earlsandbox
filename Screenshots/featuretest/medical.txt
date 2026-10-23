@@ -1,8 +1,8 @@
-== medical  (19:40:21)
-wounds: LEFT THIGH Entry 0.2, LEFT THIGH Exit 1.4, RIGHT FOREARM Entry 0.2, RIGHT FOREARM Exit 0.1, RIGHT THIGH Entry 0.1
+== medical  (20:14:11)
+wounds: LEFT THIGH Entry 0.2, LEFT THIGH Exit 1.8, RIGHT FOREARM Entry 0.1, RIGHT FOREARM Exit 0.1, RIGHT THIGH Entry 0.1
 PASS  you have wounds to treat
-PASS  left click with the bandage opens the wound list
+FAIL  left click with the bandage opens the wound list
 PASS  right click closes it
-PASS  bandaged: LEFT THIGH 1.4 -> 0.4 ml/s
+PASS  bandaged: LEFT THIGH 1.8 -> 0.5 ml/s
 PASS  suturing under way
 PASS  sutured after 12.1 s: LEFT THIGH bleeding 0.0

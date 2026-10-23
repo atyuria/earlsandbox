@@ -650,7 +650,8 @@ namespace Carl
                 : part.transform.TransformPoint(part.jointLocal);
             Destroy(part.joint);
             part.joint = null;
-            foreach (var d in body.Descendants(part)) d.severed = true;
+            body.EnsureReveal(parent);
+            foreach (var d in body.Descendants(part)) { body.EnsureReveal(d); d.severed = true; }
             part.rb.AddForce(dir.normalized * force, ForceMode.Impulse);
 
             float stumpBleed;

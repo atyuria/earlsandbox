@@ -183,8 +183,12 @@ namespace Carl
 
         // ------------------------------------------------------------ drifting, spreading, thinning
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Haze.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (WorldFreeze.On) { Push(); return; }
             float dt = Time.deltaTime;
             float t = Time.time + gustSeed;

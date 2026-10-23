@@ -54,8 +54,12 @@ namespace Carl
             portraitCam.enabled = false;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.MedicalPanel.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (selected == null || selected.gameObject == null) { if (selected == null && portraitCam) portraitCam.enabled = false; return; }
             var pel = selected.Pelvis.transform;
             var chest = selected.Chest.transform;

@@ -833,6 +833,7 @@ namespace Carl
         /// </summary>
         void UpdateRailGear()
         {
+            BarrelHeat.I?.UpdateGlow(Armed && Current.type == WeaponType.Gun && current < muzzles.Count && vmRoot.gameObject.activeInHierarchy ? muzzles[current] : null, current, IsPistol(Current));
             bool gunLight = Armed && current < lights.Length && lights[current] != null;
             for (int k = 0; k < lights.Length; k++) if (lights[k] != null) lights[k].enabled = Armed && k == current && LightOn;
             if (torch == null && TorchOn)
@@ -922,8 +923,12 @@ namespace Carl
                 if (owned[i]) { if (k == n) { Select(i); return; } k++; }
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.WeaponController.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null || pc == null) return;
@@ -953,7 +958,7 @@ namespace Carl
             // point aim: B toggles it on and off (a gun only). Off, right mouse aims down the sights; on, the gun is
             // held canted and low, and right mouse brings it up canted to the eye (a canted aim)
             if (locked && kb.bKey.wasPressedThisFrame && d.type == WeaponType.Gun) pointOn = !pointOn;
-            // L: the light on the gun, or a head torch if there isn't one;  J: the laser
+            // L: the light on the gun, or a head torch if there isn't one;  O: the laser;  J: clear a jam
             if (locked && kb.lKey.wasPressedThisFrame)
             {
                 bool gunLight = Armed && current < lights.Length && lights[current] != null;
@@ -961,7 +966,9 @@ namespace Carl
                 else { TorchOn = !TorchOn; SandboxGame.Instance?.Toast(TorchOn ? "HEAD TORCH ON" : "HEAD TORCH OFF"); }
                 Sfx.Play("click_empty", cam.transform.position, 0.3f, 0f, 1f, 0.05f);
             }
-            if (locked && kb.jKey.wasPressedThisFrame)
+            if ((locked || ForceFire) && kb.jKey.wasPressedThisFrame && d.type == WeaponType.Gun && BarrelHeat.I != null && BarrelHeat.I.Jammed(current))
+                BarrelHeat.I.ClearStep(current, this);
+            if (locked && kb.oKey.wasPressedThisFrame)
             {
                 bool fitted = Armed && current < laserEmit.Length && laserEmit[current] != null;
                 if (!fitted) SandboxGame.Instance?.Toast("NO LASER ON THIS GUN  -  FIT ONE IN THE G MENU");
@@ -1023,7 +1030,13 @@ namespace Carl
                         // burst: one pull fires three
                         if (FireMode(current) == "BURST" && mouse.leftButton.wasPressedThisFrame && burstLeft <= 0) burstLeft = 3;
                         bool trigger = mouse.leftButton.wasPressedThisFrame || (IsAuto(current) && (mouse.leftButton.isPressed || ForceFire)) || burstLeft > 0;
-                        if (trigger && !reloading && Time.unscaledTime >= nextFire)
+                        if (trigger && BarrelHeat.I != null && BarrelHeat.I.Jammed(current))
+                        {
+                            // jammed: the trigger goes, nothing happens (J clears it)
+                            burstLeft = 0;
+                            if (mouse.leftButton.wasPressedThisFrame || ForceFire) BarrelHeat.I.DeadClick();
+                        }
+                        else if (trigger && !reloading && Time.unscaledTime >= nextFire)
                         {
                             bool taserLive = d.name == "TASER" && TaserWires.Current != null && TaserWires.Current.Arrived;
                             if (ammo[current] <= 0 && !taserLive) { Sfx.Play("click_empty", cam.transform.position, 0.6f, 0f); StartReload(); }
@@ -2180,8 +2193,12 @@ namespace Carl
             }
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.WeaponController.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (cam == null || vmRoot == null) return;
             armsDrawn = false;
             dbgOn[0] = dbgOn[1] = false;
@@ -2286,6 +2303,13 @@ namespace Carl
             if (oneK > 1f && d.type == WeaponType.Gun) { pos += new Vector3(0.05f, -0.03f, 0.02f) * (1f - aimT * 0.5f); rot *= Quaternion.Euler(0f, 0f, 22f); }
         }
 
+        /// <summary>Rounds lost clearing a jam (thrown out of the gun).</summary>
+        public void LoseRounds(int idx, int n)
+        {
+            if (GameSettings.InfiniteAmmo || idx < 0 || idx >= ammo.Length) return;
+            ammo[idx] = Mathf.Max(0, ammo[idx] - n);
+        }
+
         void StartReload()
         {
             reloading = true;
@@ -2381,6 +2405,7 @@ namespace Carl
             // one hand on a long gun, shaking hands, a weak arm: everything goes wider
             float oneK = OneHandK(d);
             spread = spread * oneK + (PlayerBody.I != null ? PlayerBody.I.Tremor * 1.2f : 0f);
+            if (BarrelHeat.I != null) spread *= BarrelHeat.I.SpreadMul(current);
             Vector3 origin = cam.transform.position;
             Vector3 dir = cam.transform.forward;
             Vector3 aimF = AimDirection;
@@ -2399,6 +2424,7 @@ namespace Carl
                     Ballistics.Instance.Fire(origin, dir, d.muzzleVelocity * Random.Range(0.97f, 1.03f), d.bulletMass, d.diameter, HitKind.Bullet, d.tracer && p == 0, muzzles[current].position);
             }
             Ballistics.FiringBody = null;
+            BarrelHeat.I?.Shot(current, d);
 
             float gripK = Loadout.grip == GripKind.Vertical ? 0.78f : Loadout.grip == GripKind.Angled ? 0.88f : 1f;
             float ammoK = am != null ? Mathf.Clamp(Mathf.Sqrt(am.Energy / Mathf.Max(1f, d.Energy)), 0.5f, 1.4f) : 1f;
@@ -2604,8 +2630,12 @@ namespace Carl
             grabLine.enabled = grabbed != null;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_FixedUpdate = new Unity.Profiling.ProfilerMarker("Carl.WeaponController.FixedUpdate");
+
         void FixedUpdate()
         {
+
+            using var pmScope = PM_FixedUpdate.Auto();
             HoldPhysics();
             if (grabbed == null) return;
             Vector3 p = grabbed.transform.TransformPoint(grabLocal);

@@ -1,12 +1,25 @@
-== battle  (16:02:53)
-the map came up with 10 enemies and 6 friendlies
+== battle  (21:52:30)
+the map came up with 9 enemies and 6 friendlies
 PASS  friendlies are there in your trench when the map loads
-  15 s: friendlies fighting 6/6, enemies 10/10; shots 1 / 4, own-side hits 0
-  30 s: friendlies fighting 5/6, enemies 10/10; shots 48 / 29, own-side hits 0
-  45 s: friendlies fighting 5/6, enemies 10/10; shots 81 / 79, own-side hits 0
-  60 s: friendlies fighting 5/6, enemies 10/10; shots 93 / 108, own-side hits 0
-battle: 3 friendlies and 6 enemies got eyes on someone; 0 grenades thrown; 6 went over the top; own-side hits 0
+12 of 12 riflemen carry grenades
+PASS  most soldiers carry grenades
+  15 s: friendlies fighting 6/6, enemies 9/9; shots 0 / 0, own-side hits 0
+  30 s: friendlies fighting 6/6, enemies 9/9; shots 0 / 0, own-side hits 0
+  45 s: friendlies fighting 6/6, enemies 13/9; shots 7 / 6, own-side hits 0
+  60 s: friendlies fighting 6/6, enemies 12/9; shots 24 / 15, own-side hits 0
+    grenade at 65 s (ours 1, theirs 0)
+  75 s: friendlies fighting 6/6, enemies 12/9; shots 38 / 72, own-side hits 0
+  90 s: friendlies fighting 6/6, enemies 12/9; shots 49 / 94, own-side hits 0
+  105 s: friendlies fighting 6/6, enemies 12/9; shots 73 / 142, own-side hits 0
+    grenade at 115 s (ours 1, theirs 1)
+  120 s: friendlies fighting 6/6, enemies 11/9; shots 93 / 196, own-side hits 0
+  135 s: friendlies fighting 5/6, enemies 11/9; shots 133 / 261, own-side hits 0
+    grenade at 136 s (ours 2, theirs 1)
+    grenade at 149 s (ours 2, theirs 2)
+battle: 4 friendlies and 5 enemies got eyes on someone; 4 grenades thrown; 8 went over the top; own-side hits 0
 PASS  both sides fight
+grenades by side: ours 2, theirs 2
+PASS  grenades get used, but no barrage (2 to 16 in 150 s)
 PASS  (almost) no shooting their own
-shots steeply up into the air: 0 of 220
+shots steeply up into the air: 0 of 395
 PASS  hardly anyone shooting at the sky

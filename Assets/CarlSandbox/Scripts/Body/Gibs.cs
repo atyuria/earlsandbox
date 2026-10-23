@@ -70,8 +70,12 @@ namespace Carl
             if (c.relativeVelocity.magnitude > 3f) Sfx.Play("impact_flesh", p.point, 0.35f, 1f, 1.5f, 0.15f, 25f);
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Gib.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (Time.time - born > Life) { live.Remove(this); Destroy(gameObject); }
         }
 

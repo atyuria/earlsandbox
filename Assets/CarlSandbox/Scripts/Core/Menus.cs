@@ -110,7 +110,7 @@ namespace Carl
                         // a friendly always comes armed (an AK unless you picked something); a medic with a pistol
                         var wpn = spawnMedic ? EarlWeapon.Pistol : spawnTeam == Teams.Friendly && spawnWeapon == EarlWeapon.None ? EarlWeapon.AK47 : spawnWeapon;
                         var g = EarlGunner.Arm(h, wpn, null, spawnTeam);
-                        if (g != null) { g.medic = spawnMedic; g.grenades = spawnMedic ? 0 : 1; }
+                        if (g != null) { g.medic = spawnMedic; g.grenades = spawnMedic || Random.value < 0.15f ? 0 : Random.Range(1, 3); }
                     }
                     game.Toast(spawnCount > 1 ? $"{spawnCount} EARLS SPAWNED" : "EARL SPAWNED");
                 }

@@ -67,11 +67,37 @@ namespace Carl
         /// <summary>One more enemy squad, somewhere out of your sight.</summary>
         public static int AddSquad(Vector3 player) => Populate(player, 1, false);
 
+        /// <summary>
+        /// One more enemy squad, brought on one man a frame (a wave arriving mid-fight: all of them in one frame
+        /// was a stall you could feel); <paramref name="done"/> gets how many came once the last is in.
+        /// </summary>
+        public static void AddSquadSpread(Vector3 player, System.Action<int> done)
+        {
+            if (SandboxGame.Instance == null) { done?.Invoke(0); return; }
+            SandboxGame.Instance.StartCoroutine(Run());
+            System.Collections.IEnumerator Run()
+            {
+                var r = new int[1];
+                var e = PopulateSteps(player, 1, false, r);
+                while (e.MoveNext()) yield return null;
+                done?.Invoke(r[0]);
+            }
+        }
+
         public static int Populate(Vector3 player, int squads = 3, bool clear = true)
+        {
+            var r = new int[1];
+            var e = PopulateSteps(player, squads, clear, r);
+            while (e.MoveNext()) { }
+            return r[0];
+        }
+
+        /// <summary>Populate, a step per man (result[0]: how many were placed).</summary>
+        static System.Collections.IEnumerator PopulateSteps(Vector3 player, int squads, bool clear, int[] result)
         {
             if (clear) Clear();
             var spots = MapBuilder.TrenchSpots;
-            if (spots.Count == 0 || SandboxGame.Instance == null) return 0;
+            if (spots.Count == 0 || SandboxGame.Instance == null) yield break;
             Vector3 eye = player + Vector3.up * 1.6f;
             bool Hidden(Vector3 p)
             {
@@ -127,13 +153,15 @@ namespace Carl
                     // the first is the point man; of the rest about a third stay put and wait for you
                     g.role = k == 0 ? SquadRole.Point : Random.value < 0.35f ? SquadRole.Hold : SquadRole.Follow;
                     g.leans = Random.value < 0.55f;
-                    g.grenades = Random.Range(1, 3);
+                    g.grenades = medic || Random.value < 0.15f ? 0 : Random.Range(1, 4);
                     g.holdPoint = used[k];
                     sq.members.Add(g);
                     placed++;
+                    result[0] = placed;
+                    yield return null;
                 }
             }
-            return placed;
+            result[0] = placed;
         }
 
         /// <summary>
@@ -170,7 +198,7 @@ namespace Carl
                 var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null, Teams.Friendly) : EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true), Teams.Friendly);
                 if (g == null) continue;
                 g.medic = medic;
-                g.grenades = medic ? 0 : Random.Range(1, 3);
+                g.grenades = medic || Random.value < 0.15f ? 0 : Random.Range(1, 4);
                 g.overTheTop = !medic && Random.value < 0.35f;
                 g.holdPoint = used[k];
                 g.leans = Random.value < 0.6f;

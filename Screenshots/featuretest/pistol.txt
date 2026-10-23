@@ -1,2 +1,2 @@
-== pistol  (20:50:37)
-PASS  point aim raised: gun up but under the eye line (5.3 cm below), not down the sights
+== pistol  (20:14:36)
+FAIL  point aim raised: gun up but under the eye line (9.7 cm below), not down the sights

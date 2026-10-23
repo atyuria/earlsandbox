@@ -120,26 +120,57 @@ namespace Carl
                 pgo.transform.SetParent(transform, false);
                 pgo.transform.SetPositionAndRotation(feet + rot * s.c, rot);
 
-                Mesh visual, coll = null;
-                if (s.ellipsoid)
+                // every Earl's parts are the same shape: the skin is worked out once per part and each Earl gets
+                // his own copy of it (it dents), the collision shape is shared (cooked for the physics once)
+                if (!skinCache.TryGetValue(s.id, out var sk) || sk.mesh == null)
                 {
-                    visual = ProcMesh.Ellipsoid(s.eRadii, 22, 16);
-                    coll = ProcMesh.Ellipsoid(s.eRadii, 10, 8);
+                    Mesh visual0, coll0 = null;
+                    if (s.ellipsoid)
+                    {
+                        visual0 = ProcMesh.Ellipsoid(s.eRadii, 22, 16);
+                        coll0 = ProcMesh.Ellipsoid(s.eRadii, 10, 8);
+                    }
+                    else
+                    {
+                        visual0 = ProcMesh.Capsule(s.rx, s.rz, s.half, 20, 6, 8);
+                        if (!s.capsuleCollider) coll0 = ProcMesh.Capsule(s.rx, s.rz, s.half, 10, 3, 2);
+                        if (s.alongZ)
+                        {
+                            RotateMesh(visual0, Quaternion.Euler(90, 0, 0));
+                            RotateMesh(coll0, Quaternion.Euler(90, 0, 0));
+                        }
+                    }
+                    // sculpted mannequin part from Blender (left limbs are mirrored), falls back to the procedural shape
+                    var model = ModelLibrary.Get(ModelName(s.id), Anatomy.Side(s.id) < 0);
+                    if (model != null) visual0 = model.mesh;
+                    var prepared = PrepareSkinMesh(visual0, s.alongZ, out int[] weld0, out float min0, out float max0, out float rad0);
+                    FleshDeformer.PrepareSource(prepared, weld0);
+                    skinCache[s.id] = sk = (prepared, coll0, weld0, min0, max0, rad0);
+                    if (coll0 != null) { SharedMeshes.Add(coll0); Physics.BakeMesh(coll0.GetEntityId(), true, CollCooking); }
+                }
+                Mesh visual = Instantiate(sk.mesh), coll = sk.coll;
+                visual.name = sk.mesh.name;
+                int[] weld = sk.weld; float uvMin = sk.min, uvMax = sk.max, uvRadius = sk.radius;
+
+                // the collider goes on before the skin: added to an object that already shows a mesh, a mesh collider
+                // takes that mesh and cooks it (the whole detailed skin) before it is given its own shape
+                Collider partCol;
+                if (s.capsuleCollider)
+                {
+                    var cc = pgo.AddComponent<CapsuleCollider>();
+                    cc.direction = 1;
+                    cc.radius = (s.rx + s.rz) * 0.5f;
+                    cc.height = s.half * 2f;
+                    partCol = cc;
                 }
                 else
                 {
-                    visual = ProcMesh.Capsule(s.rx, s.rz, s.half, 20, 6, 8);
-                    if (!s.capsuleCollider) coll = ProcMesh.Capsule(s.rx, s.rz, s.half, 10, 3, 2);
-                    if (s.alongZ)
-                    {
-                        RotateMesh(visual, Quaternion.Euler(90, 0, 0));
-                        RotateMesh(coll, Quaternion.Euler(90, 0, 0));
-                    }
+                    var mc = pgo.AddComponent<MeshCollider>();
+                    mc.convex = true;
+                    mc.cookingOptions = CollCooking;
+                    mc.sharedMesh = coll;
+                    partCol = mc;
                 }
-                // sculpted mannequin part from Blender (left limbs are mirrored), falls back to the procedural shape
-                var model = ModelLibrary.Get(ModelName(s.id), Anatomy.Side(s.id) < 0);
-                if (model != null) visual = model.mesh;
-                visual = PrepareSkinMesh(visual, s.alongZ, out int[] weld, out float uvMin, out float uvMax, out float uvRadius);
 
                 var mf = pgo.AddComponent<MeshFilter>();
                 mf.sharedMesh = visual;
@@ -158,23 +189,9 @@ namespace Carl
                 bp.uvMin = uvMin; bp.uvMax = uvMax; bp.uvRadius = uvRadius;
                 bp.flesh = pgo.AddComponent<FleshDeformer>();
                 // flesh can cave in at most ~a third of the way: deeper and the skin folds inside-out and bones end up outside it
-                bp.flesh.Init(visual, Mathf.Min(s.rx > 0 ? s.rx : s.eRadii.x, s.rz > 0 ? s.rz : s.eRadii.z) * 0.32f, weld);
+                bp.flesh.Init(visual, Mathf.Min(s.rx > 0 ? s.rx : s.eRadii.x, s.rz > 0 ? s.rz : s.eRadii.z) * 0.32f, weld, sk.mesh);
 
-                if (s.capsuleCollider)
-                {
-                    var cc = pgo.AddComponent<CapsuleCollider>();
-                    cc.direction = 1;
-                    cc.radius = (s.rx + s.rz) * 0.5f;
-                    cc.height = s.half * 2f;
-                    bp.col = cc;
-                }
-                else
-                {
-                    var mc = pgo.AddComponent<MeshCollider>();
-                    mc.sharedMesh = coll;
-                    mc.convex = true;
-                    bp.col = mc;
-                }
+                bp.col = partCol;
                 bp.col.sharedMaterial = physMat;
 
                 var rb = pgo.AddComponent<Rigidbody>();
@@ -347,6 +364,16 @@ namespace Carl
 
         static Material xrayOpaque, xrayClear, ghostMat;
 
+        // ---- shapes every Earl has the same of, made once (spawning a wave of them used to stall the game:
+        // ~60 ms each building the same few hundred meshes over again)
+        static readonly Dictionary<PartId, (Mesh mesh, Mesh coll, int[] weld, float min, float max, float radius)> skinCache =
+            new Dictionary<PartId, (Mesh, Mesh, int[], float, float, float)>();
+        static readonly Dictionary<string, Mesh> organCache = new Dictionary<string, Mesh>();
+        static readonly Dictionary<(PartId, int), Mesh> layerCache = new Dictionary<(PartId, int), Mesh>();
+        const MeshColliderCookingOptions CollCooking = MeshColliderCookingOptions.CookForFasterSimulation | MeshColliderCookingOptions.EnableMeshCleaning | MeshColliderCookingOptions.WeldColocatedVertices | MeshColliderCookingOptions.UseFastMidphase;
+        /// <summary>Meshes shared between Earls: anything that changes one for one Earl must copy it first.</summary>
+        public static readonly HashSet<Mesh> SharedMeshes = new HashSet<Mesh>();
+
         void BuildAnatomy()
         {
             if (xrayOpaque == null)
@@ -372,8 +399,22 @@ namespace Carl
                     o.xray = MakeOrganVisual(def, root);
                 }
                 root.gameObject.SetActive(false);
-                BuildRevealAnatomy(bp);
+                // (the anatomy seen through wounds is built the first time this part is opened: EnsureReveal)
             }
+        }
+
+        /// <summary>
+        /// The real tissue under the skin of a part (flesh layers, organs and bones as they look through a wound):
+        /// built the first time the part is opened, broken or torn off - most parts of most Earls never are, and
+        /// building it for every part of every Earl as he appeared was most of what spawning one cost.
+        /// </summary>
+        /// <summary>(Testing) a cached collision shape and skin, if any.</summary>
+        public static (Mesh coll, Mesh skin) AnyCached() { foreach (var kv in skinCache) if (kv.Value.coll != null) return (kv.Value.coll, kv.Value.mesh); return (null, null); }
+
+        public void EnsureReveal(BodyPart bp)
+        {
+            if (bp == null || bp.revealRoot != null || bp.body != this) return;
+            BuildRevealAnatomy(bp);
         }
 
         /// <summary>
@@ -416,10 +457,12 @@ namespace Carl
         {
             var go = new GameObject(def.name);
             go.transform.SetParent(root, false);
-            Mesh mesh;
+            string key = def.name + "|" + def.side + "|" + def.kind + "|" + def.organ + "|" + def.capsule + "|" + def.shell + "|" + def.radii + "|" + def.a + "|" + def.b;
+            organCache.TryGetValue(key, out var mesh);
+            bool make = mesh == null;
             if (def.name == "RIBCAGE")
             {
-                mesh = AnatomyMeshes.Ribcage();
+                if (make) mesh = AnatomyMeshes.Ribcage();
             }
             else if (def.capsule)
             {
@@ -427,7 +470,7 @@ namespace Carl
                 float r = def.radii.x;
                 var rot = Quaternion.FromToRotation(Vector3.up, def.b - def.a);
                 int seed = def.name.Length * 7 + def.side * 3;
-                switch (def.kind)
+                if (make) switch (def.kind)
                 {
                     case TissueKind.Bone: mesh = AnatomyMeshes.LongBone(len * 0.5f, r); break;
                     // the body's front, in the capsule's own space, so the vertebrae face the right way
@@ -443,7 +486,7 @@ namespace Carl
             {
                 var radii = def.shell ? def.radii * 0.95f : def.radii;
                 int seed = Mathf.RoundToInt(def.name.Length * 3.7f);
-                switch (def.organ)
+                if (make) switch (def.organ)
                 {
                     case OrganId.SmallIntestine: mesh = AnatomyMeshes.Intestine(radii); break;
                     case OrganId.Colon: mesh = AnatomyMeshes.Colon(radii); break;
@@ -466,7 +509,7 @@ namespace Carl
                 }
                 go.transform.localPosition = def.a;
             }
-            AnatomyMeshes.EnsureColors(mesh);
+            if (make) { AnatomyMeshes.EnsureColors(mesh); organCache[key] = mesh; SharedMeshes.Add(mesh); }
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = def.alpha < 1f ? xrayClear : xrayOpaque;
@@ -497,8 +540,12 @@ namespace Carl
             if (visor) visor.enabled = !on;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.HumanBody.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             // interior shaders cut holes in part space: keep their transforms current
             foreach (var bp in partList)
             {
@@ -539,7 +586,7 @@ namespace Carl
         /// </summary>
         void BuildFleshLayers(BodyPart bp)
         {
-            var skinMesh = bp.skin.GetComponent<MeshFilter>().sharedMesh;
+            var skinMesh = skinCache.TryGetValue(bp.id, out var srcSkin) && srcSkin.mesh != null ? srcSkin.mesh : bp.skin.GetComponent<MeshFilter>().sharedMesh;
             var sv = skinMesh.vertices; var sn = skinMesh.normals; var st = skinMesh.triangles;
             float R = Mathf.Max(0.02f, bp.uvRadius);
             // real depths under the skin (m): fat, then muscle in layers, as deep as the part allows;
@@ -555,18 +602,23 @@ namespace Carl
             for (int l = 0; l < fr.Length; l++)
             {
                 float inset = fr[l];
-                var v = new Vector3[sv.Length];
-                for (int i = 0; i < sv.Length; i++)
+                if (!layerCache.TryGetValue((bp.id, l), out var m) || m == null || m.vertexCount != sv.Length)
                 {
-                    Vector3 p = sv[i];
-                    // gently uneven (low frequency only: per-vertex lumps made the layers look crumpled and faceted)
-                    float lump = 0.9f + 0.2f * Mathf.PerlinNoise(p.x * 9f + l * 3.1f + p.z * 5f, p.y * 9f + l * 1.7f);
-                    v[i] = p - sn[i].normalized * inset * lump;
+                    var v = new Vector3[sv.Length];
+                    for (int i = 0; i < sv.Length; i++)
+                    {
+                        Vector3 p = sv[i];
+                        // gently uneven (low frequency only: per-vertex lumps made the layers look crumpled and faceted)
+                        float lump = 0.9f + 0.2f * Mathf.PerlinNoise(p.x * 9f + l * 3.1f + p.z * 5f, p.y * 9f + l * 1.7f);
+                        v[i] = p - sn[i].normalized * inset * lump;
+                    }
+                    m = new Mesh { name = bp.name + "_Flesh" + l };
+                    if (v.Length > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+                    m.vertices = v; m.normals = sn; m.triangles = st;
+                    m.RecalculateBounds();
+                    layerCache[(bp.id, l)] = m;
+                    SharedMeshes.Add(m);
                 }
-                var m = new Mesh { name = bp.name + "_Flesh" + l };
-                if (v.Length > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-                m.vertices = v; m.normals = sn; m.triangles = st;
-                m.RecalculateBounds();
                 var go = new GameObject("Layer" + l);
                 go.transform.SetParent(root, false);
                 go.AddComponent<MeshFilter>().sharedMesh = m;

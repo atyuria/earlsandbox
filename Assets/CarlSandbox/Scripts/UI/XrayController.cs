@@ -91,8 +91,12 @@ namespace Carl
 
         bool scannedLast = true;
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.XrayController.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             foreach (var h in HumanBody.All) h.SetXray(on || h.forceXray);
             // the armour pass is only needed while something is being scanned (and one frame after, to put it back)
             bool anyForce = false;

@@ -468,6 +468,7 @@ namespace Carl
 
         void PushHoles()
         {
+            if ((holes.Count > 0 || severed) && revealRoot == null && body != null) body.EnsureReveal(this);
             if (holeTex == null)
                 holeTex = new Texture2D(MaxHoles, 3, TextureFormat.RGBAFloat, false, true) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = name + "_Holes" };
             for (int i = 0; i < MaxHoles; i++)

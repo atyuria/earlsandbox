@@ -46,6 +46,58 @@ namespace Carl
         static readonly Color Muscle = new Color(0.52f, 0.07f, 0.08f);
         const float SkinThickness = 0.003f;
 
+        // what every Earl's copy of the same part starts from (worked out once; read-only after)
+        class Template { public int[] tris; public Vector3[] rest, restNormals; }
+        static readonly System.Collections.Generic.Dictionary<Mesh, Template> templates = new System.Collections.Generic.Dictionary<Mesh, Template>();
+
+        /// <summary>
+        /// Once per shared source shape (HumanBody's part cache): the starting state every copy's deformer needs,
+        /// and the source itself given the blank colours and UV channels, so copies made of it already have them.
+        /// </summary>
+        public static void PrepareSource(Mesh src, int[] weldMap)
+        {
+            var t = new Template { tris = src.triangles, rest = src.vertices };
+            t.restNormals = RestNormals(t.rest, t.tris, weldMap);
+            src.colors = new Color[t.rest.Length];
+            src.SetUVs(2, new Vector4[t.rest.Length]);
+            src.SetUVs(3, new System.Collections.Generic.List<Vector3>(t.rest));
+            templates[src] = t;
+        }
+
+        static Vector3[] RestNormals(Vector3[] rest, int[] tris, int[] weld)
+        {
+            var rn = new Vector3[rest.Length];
+            for (int i = 0; i < tris.Length; i += 3)
+            {
+                int a = tris[i], b = tris[i + 1], c = tris[i + 2];
+                Vector3 n = Vector3.Cross(rest[b] - rest[a], rest[c] - rest[a]);
+                if (weld != null) { a = weld[a]; b = weld[b]; c = weld[c]; }
+                rn[a] += n; rn[b] += n; rn[c] += n;
+            }
+            for (int i = 0; i < rn.Length; i++) rn[i] = rn[weld != null ? weld[i] : i].normalized;
+            return rn;
+        }
+
+        /// <summary>A copy of a prepared source shape: shares its starting state, only the moving parts are its own.</summary>
+        public void Init(Mesh m, float maxDentDepth, int[] weldMap, Mesh source)
+        {
+            if (source == null || !templates.TryGetValue(source, out var t) || t.rest.Length != m.vertexCount) { Init(m, maxDentDepth, weldMap); return; }
+            mesh = m;
+            part = GetComponent<BodyPart>();
+            tris = t.tris;
+            weld = weldMap;
+            normals = new Vector3[t.rest.Length];
+            mesh.MarkDynamic();
+            rest = t.rest;
+            target = (Vector3[])rest.Clone();
+            cur = (Vector3[])rest.Clone();
+            vel = new Vector3[rest.Length];
+            colors = new Color[rest.Length];
+            maxDent = maxDentDepth;
+            exposed = new Vector4[rest.Length];
+            restNormals = t.restNormals;
+        }
+
         public void Init(Mesh m, float maxDentDepth, int[] weldMap = null)
         {
             mesh = m;
@@ -144,7 +196,7 @@ namespace Carl
         public Vector3 DentAt(Vector3 p)
         {
             if (rest == null) return Vector3.zero;
-            int i = Nearest(p);
+            int i = NearestFast(p);
             return target[i] - rest[i];
         }
 
@@ -180,6 +232,32 @@ namespace Carl
             if (rest == null) return localPoint;
             Vector3 d = localDir.sqrMagnitude > 1e-8f ? localDir.normalized : Vector3.forward;
             float best = float.MaxValue, bestAlong = 0f;
+            // through the grid, outward from the point, shell by shell: a vertex D away scores at least D*D/2, so
+            // once the box searched reaches far enough that nothing outside it could do better, that's the answer
+            // (the same answer as looking at every vertex - wound rims did that 48 times a wound)
+            if (grid == null) BuildGrid();
+            Vector3 g = localPoint / CellSize;
+            int cx = Mathf.FloorToInt(g.x), cy = Mathf.FloorToInt(g.y), cz = Mathf.FloorToInt(g.z);
+            for (int ring = 0; ring <= 8; ring++)
+            {
+                for (int x = -ring; x <= ring; x++)
+                    for (int y = -ring; y <= ring; y++)
+                        for (int z = -ring; z <= ring; z++)
+                        {
+                            if (Mathf.Max(Mathf.Abs(x), Mathf.Max(Mathf.Abs(y), Mathf.Abs(z))) != ring) continue;
+                            if (!grid.TryGetValue(CellKey(cx + x, cy + y, cz + z), out var l)) continue;
+                            foreach (int i in l)
+                            {
+                                Vector3 v = rest[i] - localPoint;
+                                float along = Vector3.Dot(v, d);
+                                float score = (v - d * along).sqrMagnitude + 0.5f * along * along;
+                                if (score < best) { best = score; bestAlong = along; }
+                            }
+                        }
+                float reach = ring * CellSize;
+                if (best < float.MaxValue && 0.5f * reach * reach >= best) return localPoint + d * bestAlong;
+            }
+            best = float.MaxValue; bestAlong = 0f;
             for (int i = 0; i < rest.Length; i++)
             {
                 Vector3 v = rest[i] - localPoint;
@@ -347,8 +425,12 @@ namespace Carl
 
         static readonly Unity.Profiling.ProfilerMarker mSim = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Sim"), mUp = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Upload"), mNorm = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Normals");
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.FleshDeformer.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (colorsDirty && mesh)
             {
                 mesh.colors = colors;
@@ -437,6 +519,8 @@ namespace Carl
                 {
                     var m = mf.sharedMesh;
                     if (m == null || m.vertexCount != rest.Length) continue;
+                    // (shared by every Earl until now: this one's own copy, then dent it)
+                    if (HumanBody.SharedMeshes.Contains(m)) { m = Instantiate(m); m.MarkDynamic(); mf.sharedMesh = m; }
                     var mr = mf.GetComponent<MeshRenderer>();
                     float inset = mr && mr.sharedMaterial ? mr.sharedMaterial.GetFloat("_Inset") : 0.01f;
                     layers.Add((m, m.vertices, inset));

@@ -200,8 +200,12 @@ namespace Carl
             Play(g, pos, 0.8f, 1f, 1.5f);
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Sfx.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             for (int i = delayed.Count - 1; i >= 0; i--)
                 if (Time.time >= delayed[i].time)
                 {

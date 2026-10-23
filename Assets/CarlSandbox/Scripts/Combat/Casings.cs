@@ -68,8 +68,12 @@ namespace Carl
             live.Add(c);
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Casing.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (landed < 0f && Time.time - born > 0.25f && rb.linearVelocity.sqrMagnitude < 0.04f) landed = Time.time;
             if ((landed >= 0f && Time.time - landed > LieTime) || Time.time - born > MaxLife) { live.Remove(this); Recycle(); }
         }

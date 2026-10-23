@@ -19,17 +19,22 @@ namespace Carl
 
         /// <summary>The file the next probe writes (perf.txt by default).</summary>
         public static string OutName = "perf.txt";
+        /// <summary>The file this probe writes (the name when it was started: two can run at once).</summary>
+        string myName = "perf.txt";
         public static void Run(int frames = 300)
         {
             var p = new GameObject("PerfProbe").AddComponent<PerfProbe>();
+            p.myName = OutName;
             p.want = frames;
         }
 
         /// <summary>Spikes instead of averages: over the frames, the single worst one, and what it spent its time on.</summary>
-        public static void RunSpike(int frames = 300)
+        public static PerfProbe RunSpike(int frames = 300)
         {
             var p = new GameObject("PerfProbe").AddComponent<PerfProbe>();
+            p.myName = OutName;
             p.want = frames; p.spike = true;
+            return p;
         }
         bool spike;
         double[] worst;
@@ -63,6 +68,7 @@ namespace Carl
         public static PerfProbe RunSplit()
         {
             var p = new GameObject("PerfProbe").AddComponent<PerfProbe>();
+            p.myName = OutName;
             p.split = true; p.want = int.MaxValue;
             return p;
         }
@@ -82,7 +88,7 @@ namespace Carl
                 int i = idx[k];
                 sb.AppendLine($"{Per(1, i) - Per(0, i):+0.000;-0.000} ms   ({Per(0, i):0.000} / {Per(1, i):0.000})  {names[i]}");
             }
-            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, Application.isEditor ? "../Temp/" + OutName : "../" + OutName), sb.ToString());
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, Application.isEditor ? "../Temp/" + myName : "../" + myName), sb.ToString());
             foreach (var r in recs) r.Dispose();
             Destroy(gameObject);
         }
@@ -101,17 +107,40 @@ namespace Carl
             frames++;
             dtSum += Time.unscaledDeltaTime;
             for (int i = 0; i < recs.Count; i++) if (recs[i].Valid) total[i] += recs[i].LastValue;
-            // (spikes: the worst each marker ever took in a single frame)
-            if (spike && frames > 3) for (int i = 0; i < recs.Count; i++) if (recs[i].Valid && recs[i].LastValue > worst[i]) worst[i] = recs[i].LastValue;
+            // (spikes: the single worst frame, and every marker as it was in that frame)
+            if (spike && frames > 3 && !Phase.Contains("not recorded"))
+            {
+                double loop = Time.unscaledDeltaTime * 1e9;
+                if (loop > worstLoop)
+                {
+                    worstLoop = loop;
+                    worstAt = Time.realtimeSinceStartup;
+                    worstWhat = Phase;
+                    for (int i = 0; i < recs.Count; i++) worst[i] = recs[i].Valid ? recs[i].LastValue : 0;
+                }
+            }
             if (frames < want) return;
-            if (spike) { total = worst; frames = 1; }
+            Write();
+        }
+
+        /// <summary>What the game is doing right now (shown with the worst frame).</summary>
+        public static string Phase = "";
+        float worstAt;
+        string worstWhat = "";
+
+        /// <summary>Write the report now (spike mode in the benchmark runs until it says).</summary>
+        public void Write()
+        {
+            if (spike) { total = worst; frames = 1; dtSum = (float)(worstLoop / 1e9); }
             var idx = new List<int>();
             for (int i = 0; i < recs.Count; i++) if (total[i] > 0) idx.Add(i);
             idx.Sort((a, b) => total[b].CompareTo(total[a]));
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"{frames} frames, {dtSum / frames * 1000f:0.0} ms/frame ({frames / dtSum:0} fps), {HumanBody.All.Count} bodies, {EarlGunner.All.Count} gunners");
+            sb.AppendLine($"{frames} frames, {dtSum / frames * 1000f:0.0} ms/frame ({frames / dtSum:0} fps), {HumanBody.All.Count} bodies, {EarlGunner.All.Count} gunners" + (spike ? $"  [worst frame at {worstAt:0.0} s, during: {worstWhat}]" : ""));
             for (int k = 0; k < idx.Count && k < 90; k++) sb.AppendLine($"{total[idx[k]] / frames / 1e6:0.000} ms  {names[idx[k]]}");
-            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, Application.isEditor ? "../Temp/" + OutName : "../" + OutName), sb.ToString());
+            sb.AppendLine("---- every game marker:");
+            foreach (int i in idx) if (names[i].Contains("Carl.")) sb.AppendLine($"{total[i] / frames / 1e6:0.000} ms  {names[i]}");
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, Application.isEditor ? "../Temp/" + myName : "../" + myName), sb.ToString());
             foreach (var r in recs) r.Dispose();
             Destroy(gameObject);
         }

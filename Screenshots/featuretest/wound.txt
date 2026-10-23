@@ -1,0 +1,7 @@
+== wound  (20:41:00)
+before: holes 0, reveal built False
+after a 9 mm into the chest: holes 1, wounds 1, reveal built True active True, organ pieces drawn 14, flesh layers 6
+PASS  a hole opens and the insides show through it
+PASS  an Earl nobody has shot hasn't built any of that
+forearm after up to 12 rifle rounds: severed False, holes 6, reveal built True
+thigh after a 15-round burst: holes 28; tunnels built 20 (0.52 ms each), reused 87

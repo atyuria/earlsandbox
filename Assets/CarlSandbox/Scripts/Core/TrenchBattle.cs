@@ -56,8 +56,12 @@ namespace Carl
             }
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.TrenchBattle.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (Attacking || SandboxGame.Instance == null || SandboxGame.Instance.player == null) return;
             if (Time.time < nextWave) return;
             nextWave = Time.time + Random.Range(40f, 60f);
@@ -65,11 +69,13 @@ namespace Carl
             int alive = 0;
             foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Enemy && g.Fighting) alive++;
             if (alive >= 12) return;
-            int n = TrenchSquad.AddSquad(SandboxGame.Instance.player.transform.position);
-            if (n == 0) return;
-            waves++;
-            Assign();
-            SandboxGame.Instance.Toast($"WAVE {waves + 1}: {n} MORE COMING ACROSS");
+            TrenchSquad.AddSquadSpread(SandboxGame.Instance.player.transform.position, n =>
+            {
+                if (n == 0 || !enabled) return;
+                waves++;
+                Assign();
+                SandboxGame.Instance.Toast($"WAVE {waves + 1}: {n} MORE COMING ACROSS");
+            });
         }
     }
 }

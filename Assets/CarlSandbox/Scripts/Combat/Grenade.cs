@@ -47,8 +47,12 @@ namespace Carl
             return go.AddComponent<Grenade>();
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Grenade.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (WorldFreeze.On) return;
             fuse -= Time.deltaTime;
             armed += Time.deltaTime;

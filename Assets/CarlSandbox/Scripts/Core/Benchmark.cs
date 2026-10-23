@@ -22,7 +22,14 @@ namespace Carl
         }
 
         readonly System.Text.StringBuilder report = new System.Text.StringBuilder();
-        readonly List<float>[] dts = { new List<float>(), new List<float>() };
+        readonly List<float>[] dts = { new List<float>(), new List<float>(), new List<float>(), new List<float>() };
+
+        static string Arg(string name)
+        {
+            var a = System.Environment.GetCommandLineArgs();
+            int i = System.Array.IndexOf(a, name);
+            return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
+        }
 
         IEnumerator Start()
         {
@@ -32,6 +39,8 @@ namespace Carl
             var g = SandboxGame.Instance;
             QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = -1;
+            // -graphics 0/1/2: run at that setting (low / medium / high)
+            if (int.TryParse(Arg("-graphics") ?? "", out int gq)) { GameSettings.Graphics = gq; GameSettings.ApplyGraphics(); }
             Random.InitState(1234);
             report.AppendLine($"EARL SANDBOX BENCHMARK  {System.DateTime.Now}");
             report.AppendLine($"{SystemInfo.processorType}, {SystemInfo.graphicsDeviceName}, {Screen.width}x{Screen.height}, graphics {GameSettings.Graphics}, blood quality {GameSettings.QualityName}");
@@ -42,27 +51,61 @@ namespace Carl
             g.LoadMap(3);
             yield return new WaitForSeconds(4f);
             var w = g.weapons; int ak = w.defs.FindIndex(x => x.name == "AK-47"); w.Give(ak, true); w.Select(ak);
+            // a picture of what is on screen (proof it renders), next to the report
+            ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(Application.dataPath, "../" + System.IO.Path.ChangeExtension(Arg("-out") ?? "benchmark.txt", ".png")));
             HumanBody target = null;
             bool probe = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-probe") >= 0;
             PerfProbe pp = null;
             if (probe) { var _m = Prof.Hit; pp = PerfProbe.RunSplit(); }
+            bool spikeProbe = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-spike") >= 0;
+            // -probepile: the split probe compares the heap with and without firing into it (instead of the battle)
+            bool probePile = System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-probepile") >= 0;
+            PerfProbe spikeP = null;
+            if (spikeProbe) { PerfProbe.OutName = "perf_spike.txt"; spikeP = PerfProbe.RunSpike(int.MaxValue); PerfProbe.OutName = "perf.txt"; }
             yield return null;
             for (int round = 0; round < 3; round++)
             {
                 // not firing
-                WeaponController.ForceFire = false; PerfProbe.Bucket = 0;
+                WeaponController.ForceFire = false; PerfProbe.Bucket = probePile ? -1 : 0; PerfProbe.Phase = "battle";
                 yield return Record(0, 5f, null);
                 // firing: an Earl in front of you (a fresh one if the last went down), trigger held, rounds landing
+                PerfProbe.Phase = "spawning a target (not recorded)";
                 if (target == null || target.Dead || target.ragdoll.IsDown) target = Target(g);
-                WeaponController.ForceFire = true; PerfProbe.Bucket = 1;
+                WeaponController.ForceFire = true; PerfProbe.Bucket = probePile ? -1 : 1; PerfProbe.Phase = "battle, firing";
                 yield return Record(1, 5f, target);
             }
             WeaponController.ForceFire = false; PerfProbe.Bucket = -1;
+            PerfProbe.Phase = "heaping the dead (not recorded)";
+            // after a wave: thirty dead heaped in front of you, the battle still going on
+            var me = g.player.transform.position; var fw = g.player.transform.forward;
+            var pile = new List<HumanBody>();
+            for (int i = 0; i < 30; i++)
+            {
+                Vector3 p = me + fw * Random.Range(3f, 9f) + Vector3.Cross(Vector3.up, fw) * Random.Range(-3f, 3f) + Vector3.up * Random.Range(0.3f, 1.5f);
+                var h = g.SpawnCarl(p, Random.Range(0f, 360f));
+                if (h == null) break;
+                pile.Add(h);
+                if (i % 2 == 0) ArmourSystem.Equip(h, TrenchSquad.RandomKit());
+                h.physio.Kill("BENCHMARK", false);
+            }
+            PerfProbe.Phase = "the pile settling (not recorded)";
+            yield return new WaitForSeconds(6f);
+            for (int round = 0; round < 2; round++)
+            {
+                WeaponController.ForceFire = false; PerfProbe.Phase = "pile"; if (probePile) PerfProbe.Bucket = 0;
+                yield return Record(2, 5f, null);
+                WeaponController.ForceFire = true; PerfProbe.Phase = "pile, firing"; if (probePile) PerfProbe.Bucket = 1;
+                yield return Record(3, 5f, null, pile);
+            }
+            WeaponController.ForceFire = false;
             GameSettings.InfiniteAmmo = inf;
             Report("trench battle, not firing", dts[0]);
             Report("trench battle, firing full auto into an Earl", dts[1]);
+            Report("thirty dead heaped in front of you, battle going on", dts[2]);
+            Report("thirty dead heaped in front of you, firing into them", dts[3]);
             if (pp != null) pp.Finish();
-            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, "../benchmark.txt"), report.ToString());
+            if (spikeP != null) spikeP.Write();
+            System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, "../" + (Arg("-out") ?? "benchmark.txt")), report.ToString());
             yield return null;
             Application.Quit();
         }
@@ -78,12 +121,19 @@ namespace Carl
             return h;
         }
 
-        IEnumerator Record(int bucket, float seconds, HumanBody target)
+        IEnumerator Record(int bucket, float seconds, HumanBody target, List<HumanBody> pile = null)
         {
-            float t0 = Time.realtimeSinceStartup, next = 0f;
+            float t0 = Time.realtimeSinceStartup, next = 0f, switchAt = 0f;
+            int pi = 0;
             yield return null;   // (the frame the switch happened in isn't counted)
             while (Time.realtimeSinceStartup - t0 < seconds)
             {
+                // firing into the heap: on one body, then the next every half second
+                if (pile != null && pile.Count > 0 && Time.time >= switchAt) { switchAt = Time.time + 0.5f; pi = (pi + 1) % pile.Count; target = pile[pi]; }
+                // the gun stays on him: held down, the recoil would walk the rounds up into the sky and hit nothing
+                // (aiming also settles the recoil, as you would pull it back down)
+                if (target != null && target.Chest != null && WeaponController.ForceFire)
+                    SandboxGame.Instance.player.LookAt(target.Chest.transform.position);
                 if (target != null && target.Chest != null && Time.time >= next)
                 {
                     // (recoil walks your own rounds off him: these land, ten a second, like a burst that connects)

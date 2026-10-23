@@ -66,8 +66,11 @@ namespace Carl
                 case "stuck": body = StuckTest(); break;
                 case "battle": body = BattleTest(); break;
                 case "drone": body = DroneTest(); break;
+                case "wound": body = WoundTest(); break;
                 case "gear": body = GearTest(); break;
                 case "walk": body = WalkTest(); break;
+                case "heat": body = HeatTest(); break;
+                case "spacing": body = SpacingTest(); break;
                 default: Line("unknown scenario"); break;
             }
             if (body != null) yield return body;
@@ -433,6 +436,7 @@ namespace Carl
             e = Gunner(spot, Teams.Enemy);
             e.grenades = 2;
             yield return new WaitForSeconds(1.5f);
+            e.GrenadeNow();
             Vector3 hide = me; best = 0f;
             foreach (var n in TrenchNav.Nodes) { float d = Vector3.Distance(n, spot); if (n.y < 0.5f && d > 9f && d < 16f && Vector3.Distance(n, me) > 10f && !EarlGunner.Clear(e.Body.Head.transform.position, n + Vector3.up, e.Body)) { hide = n; break; } }
             e.Learn(hide, 0.9f, false); e.suspectTime = Time.time - 5f;
@@ -466,7 +470,7 @@ namespace Carl
             t0 = Time.time; float nextLog = 2f;
             while (Time.time - t0 < 30f)
             {
-                if (Time.time - t0 > nextLog && b != null) { nextLog += 5f; Line($"  over-the-top: sees {b.SeesEnemy} conf {b.SuspectConf:0.0} {b.StanceName} {b.NavDebug}"); Line($"  trench: sees {a.SeesEnemy} conf {a.SuspectConf:0.0} {a.StanceName} {a.NavDebug}"); }
+                if (Time.time - t0 > nextLog && b != null) { nextLog += 5f; Line($"  over-the-top: sees {b.SeesEnemy} conf {b.SuspectConf:0.0} {b.StanceName} {b.NavDebug} {b.SpacingDebug} [{b.Status}] v {b.Body.Pelvis.rb.linearVelocity.magnitude:0.0} order {b.order}"); Line($"  trench: sees {a.SeesEnemy} conf {a.SuspectConf:0.0} {a.StanceName} {a.NavDebug} {a.SpacingDebug} [{a.Status}] v {a.Body.Pelvis.rb.linearVelocity.magnitude:0.0} order {a.order}"); }
                 if (w != null && w.Body != null) wMax = Mathf.Max(wMax, Vector3.Distance(w.Body.Pelvis.transform.position, w0));
                 if (b != null && b.Body != null) bTop = Mathf.Max(bTop, b.Body.Pelvis.transform.position.y);
                 yield return null;
@@ -594,6 +598,62 @@ namespace Carl
             Check(upT < 5f, "you get back up quickly when you're not hurt");
         }
 
+        IEnumerator WoundTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            var d = Dummy(me + fwd * 4f, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            var d2 = Dummy(me + fwd * 4f + Vector3.Cross(Vector3.up, fwd) * 2f, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            yield return new WaitForSeconds(2f);
+            var nine = AmmoTable.For("GLOCK 17")[0];
+            var chest = d.Chest;
+            Vector3 at = chest.transform.position, from = at + fwd * -3f;
+            Line($"before: holes {chest.holes.Count}, reveal built {chest.revealRoot != null}");
+            Ballistics.Instance.Fire(from, (at - from).normalized, nine.velocity, nine.mass, nine.diameter, HitKind.Bullet, false, null, nine);
+            yield return new WaitForSeconds(0.6f);
+            int organsShown = chest.revealRoot != null ? chest.revealRoot.GetComponentsInChildren<MeshRenderer>().Length : 0;
+            Line($"after a 9 mm into the chest: holes {chest.holes.Count}, wounds {chest.wounds.Count}, reveal built {chest.revealRoot != null} active {(chest.revealRoot != null && chest.revealRoot.gameObject.activeInHierarchy)}, organ pieces drawn {organsShown}, flesh layers {(chest.fleshRoot != null ? chest.fleshRoot.childCount : 0)}");
+            Check(chest.holes.Count > 0 && chest.revealRoot != null && chest.revealRoot.gameObject.activeInHierarchy && organsShown > 0, "a hole opens and the insides show through it");
+            Check(d2.Chest.revealRoot == null, "an Earl nobody has shot hasn't built any of that");
+            Vector3 cam = at - fwd * 0.9f + Vector3.up * 0.1f;
+            AutoTest.Photo("wound_chest", at, cam, null, 40f);
+            // buckshot into the belly from close, and a forearm hit until it comes off
+            Vector3 belly = d[PartId.Abdomen].transform.position;
+            for (int i = 0; i < 9; i++) { Vector3 dd = Quaternion.Euler(Random.Range(-1.5f, 1.5f), Random.Range(-1.5f, 1.5f), 0f) * (belly - (belly - fwd * 2f)).normalized; Ballistics.Instance.Fire(belly - fwd * 2f, dd, 400f, 0.0035f, 0.0084f, HitKind.Bullet, false); }
+            yield return new WaitForSeconds(0.6f);
+            AutoTest.Photo("wound_belly", belly, belly - fwd * 0.9f + Vector3.up * 0.15f, null, 40f);
+            var arm = d2[PartId.ForearmR];
+            for (int i = 0; i < 12 && !arm.severed; i++)
+            {
+                Vector3 a = arm.transform.position, f2 = a - fwd * 2f;
+                Ballistics.Instance.Fire(f2, (a - f2).normalized, 715f, 0.0079f, 0.0078f, HitKind.Bullet, false);
+                yield return new WaitForSeconds(0.15f);
+            }
+            yield return new WaitForSeconds(0.8f);
+            Line($"forearm after up to 12 rifle rounds: severed {arm.severed}, holes {arm.holes.Count}, reveal built {arm.revealRoot != null}");
+            // a burst into one thigh: many holes in one part (each tunnel is made once)
+            var d3 = Dummy(me + fwd * 3f - Vector3.Cross(Vector3.up, fwd) * 2f, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            yield return new WaitForSeconds(1.5f);
+            var thigh = d3[PartId.ThighR];
+            WoundChannels.Built = WoundChannels.Reused = 0; WoundChannels.BuildMs = 0;
+            for (int i = 0; i < 15; i++)
+            {
+                Vector3 a = thigh.transform.position + Random.insideUnitSphere * 0.04f, f2 = a - fwd * 2f + Random.insideUnitSphere * 0.2f;
+                Ballistics.Instance.Fire(f2, (a - f2).normalized, 375f, 0.0075f, 0.009f, HitKind.Bullet, false);
+                yield return new WaitForSeconds(0.07f);
+            }
+            yield return new WaitForSeconds(0.8f);
+            Line($"thigh after a 15-round burst: holes {thigh.holes.Count}; tunnels built {WoundChannels.Built} ({WoundChannels.BuildMs / Mathf.Max(1, WoundChannels.Built):0.00} ms each), reused {WoundChannels.Reused}");
+            Vector3 tp = thigh.transform.position;
+            AutoTest.Photo("wound_thigh_burst", tp, tp - fwd * 0.55f + Vector3.up * 0.1f, d3, 40f);
+            Vector3 cp = d.Chest.transform.position;
+            AutoTest.Photo("wound_chest_now", cp, cp - fwd * 0.6f + Vector3.up * 0.2f, d, 40f);
+            AutoTest.Photo("wound_arm", d2[PartId.UpperArmR].transform.position, d2[PartId.UpperArmR].transform.position - fwd * 1.2f + Vector3.up * 0.3f, null, 40f);
+        }
+
         IEnumerator DroneTest()
         {
             Game.LoadMap(1);
@@ -645,17 +705,21 @@ namespace Carl
             Intel.Shots[0] = Intel.Shots[1] = 0; Intel.OwnSideHits = 0; Intel.SkyShots = 0;
             int frSaw = 0, enSaw = 0, grenades = 0, overTop = 0;
             var saw = new HashSet<EarlGunner>(); var top = new HashSet<EarlGunner>();
-            float t0 = Time.time; float nextLog = 15f; int gBefore = 0;
-            while (Time.time - t0 < 75f)
+            float t0 = Time.time; float nextLog = 15f; int gBefore = EarlGunner.Thrown[0] + EarlGunner.Thrown[1];
+            int carry = 0, armed = 0; foreach (var g in EarlGunner.All) if (g != null && !g.medic) { armed++; if (g.grenades > 0) carry++; }
+            Line($"{carry} of {armed} riflemen carry grenades");
+            Check(armed > 0 && carry >= armed * 0.6f, "most soldiers carry grenades");
+            int gLast = gBefore;
+            while (Time.time - t0 < 150f)
             {
+                if (EarlGunner.Thrown[0] + EarlGunner.Thrown[1] != gLast) { gLast = EarlGunner.Thrown[0] + EarlGunner.Thrown[1]; Line($"    grenade at {Time.time - t0:0} s (ours {EarlGunner.Thrown[0]}, theirs {EarlGunner.Thrown[1]})"); }
                 foreach (var g in EarlGunner.All)
                 {
                     if (g == null || g.Body == null) continue;
                     if (g.SeesEnemy && saw.Add(g)) { if (g.team == 0) frSaw++; else enSaw++; }
                     if (g.Body.Pelvis.transform.position.y > 2.2f && top.Add(g)) overTop++;
                 }
-                if (Grenade.All.Count > gBefore) grenades += Grenade.All.Count - gBefore;
-                gBefore = Grenade.All.Count;
+                grenades = EarlGunner.Thrown[0] + EarlGunner.Thrown[1] - gBefore;
                 if (Time.time - t0 > nextLog)
                 {
                     nextLog += 15f;
@@ -666,9 +730,158 @@ namespace Carl
             }
             Line($"battle: {frSaw} friendlies and {enSaw} enemies got eyes on someone; {grenades} grenades thrown; {overTop} went over the top; own-side hits {Intel.OwnSideHits}");
             Check(Intel.Shots[0] > 10 && Intel.Shots[1] > 10, "both sides fight");
+            Line($"grenades by side: ours {EarlGunner.Thrown[0]}, theirs {EarlGunner.Thrown[1]}");
+            Check(grenades >= 2 && grenades <= 16, "grenades get used, but no barrage (2 to 16 in 150 s)");
             Check(Intel.OwnSideHits <= 2, "(almost) no shooting their own");
             Line($"shots steeply up into the air: {Intel.SkyShots} of {Intel.Shots[0] + Intel.Shots[1]}");
             Check(Intel.SkyShots * 20 <= Intel.Shots[0] + Intel.Shots[1] + 1, "hardly anyone shooting at the sky");
+            Teams.PlayerOutOfIt = false;
+        }
+
+        IEnumerator Tap(UnityEngine.InputSystem.Key k)
+        {
+            keysDown.Add(k); yield return Hold(0.08f); keysDown.Clear(); yield return Hold(0.42f);
+        }
+
+        IEnumerator HeatTest()
+        {
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            var bh = BarrelHeat.I;
+            Check(bh != null, "barrel heat is there");
+            if (bh == null) yield break;
+            int ak = Idx("AK-47");
+            Line($"jam chance per round: cool {BarrelHeat.JamChance(0.1f) * 100f:0.00}%, half {BarrelHeat.JamChance(0.5f) * 100f:0.00}%, 80% {BarrelHeat.JamChance(0.8f) * 100f:0.0}%, at the limit {BarrelHeat.JamChance(1f) * 100f:0.0}%");
+            Check(BarrelHeat.JamChance(0.1f) < 0.001f && BarrelHeat.JamChance(1f) > 0.05f, "rarely jams cool, often at the limit");
+            // full auto, trigger held, for a good while (clearing any jam that comes)
+            GameSettings.InfiniteAmmo = true;
+            Wpn.Give(ak, true); Wpn.loadouts[ak].fireMode = 0;
+            yield return Hold(0.6f);
+            bh.Jams = 0; bh.DeadClicks = 0;
+            float t0 = Time.time, h2 = -1f; int clears = 0;
+            lmb = true;
+            while (Time.time - t0 < 9f)
+            {
+                if (h2 < 0f && Time.time - t0 > 2f) h2 = bh.Heat(ak);
+                if (bh.Jammed(ak))
+                {
+                    if (clears == 0) { yield return Hold(0.4f); yield return GrabView("heat_jammed"); }
+                    Line($"  jammed at {Time.time - t0:0.0} s, heat {bh.Heat(ak) * 100f:0}%: {bh.JamName(ak)}");
+                    lmb = false;
+                    while (bh.Jammed(ak)) { yield return Tap(UnityEngine.InputSystem.Key.J); clears++; if (clears > 40) break; }
+                    lmb = true;
+                }
+                yield return Hold(0.05f);
+            }
+            float hot = bh.Heat(ak), spread = bh.SpreadMul(ak);
+            bool glow = bh.Glowing;
+            yield return GrabView("heat_hot");
+            lmb = false;
+            Line($"held 9 s: heat {h2 * 100f:0}% at 2 s, {hot * 100f:0}% at 9 s; spread x{spread:0.00}; glowing {glow}; jams {bh.Jams}, J presses {clears}, dead clicks {bh.DeadClicks}");
+            Check(h2 > 0.2f && hot > h2 && hot > 0.6f, "the barrel heats up as you keep firing");
+            Check(glow, "a hot barrel glows");
+            Check(spread > 1.4f, "a hot barrel throws rounds wider");
+            Check(bh.Jams >= 1, "keeping it at the limit jams it");
+            // let it cool
+            yield return Hold(8f);
+            float cool = bh.Heat(ak);
+            Line($"8 s off the trigger: {hot * 100f:0}% -> {cool * 100f:0}%, glowing {bh.Glowing}");
+            Check(cool < hot * 0.5f, "it cools when you stop");
+            // single aimed shots barely warm it
+            bh.SetHeat(ak, 0f);
+            Wpn.loadouts[ak].fireMode = 1; yield return Hold(0.3f);
+            for (int i = 0; i < 10; i++) { lmb = true; yield return Hold(0.05f); lmb = false; yield return Hold(0.6f); }
+            Line($"ten aimed shots, 0.65 s apart: heat {bh.Heat(ak) * 100f:0}%");
+            Check(bh.Heat(ak) < 0.25f, "aimed shots don't cook the barrel");
+            Wpn.loadouts[ak].fireMode = 0;
+            // a jammed gun clicks and doesn't fire; J clears it, a step at a time
+            GameSettings.InfiniteAmmo = false;
+            Wpn.Give(ak, true); yield return Hold(0.6f);
+            bh.ForceJam(ak, 3);   // double feed: three steps
+            string before = Wpn.AmmoText; int clicks = bh.DeadClicks;
+            lmb = true; yield return Hold(1f); lmb = false; yield return Hold(0.2f);
+            Line($"jammed, trigger held 1 s: ammo {before} -> {Wpn.AmmoText}, dead clicks {bh.DeadClicks - clicks}");
+            Check(Wpn.AmmoText == before && bh.DeadClicks > clicks, "jammed: the trigger only clicks");
+            yield return Tap(UnityEngine.InputSystem.Key.J);
+            bool still1 = bh.Jammed(ak);
+            yield return Tap(UnityEngine.InputSystem.Key.J);
+            yield return Tap(UnityEngine.InputSystem.Key.J);
+            Line($"double feed: still jammed after one J {still1}, after three {bh.Jammed(ak)}; ammo {Wpn.AmmoText}");
+            Check(still1 && !bh.Jammed(ak), "J clears it (a double feed takes three)");
+            string b2 = Wpn.AmmoText;
+            lmb = true; yield return Hold(0.3f); lmb = false; yield return Hold(0.2f);
+            Check(Wpn.AmmoText != b2, "cleared: it fires again");
+            // the laser moved to O
+            Wpn.Give(ak, true); yield return Hold(0.3f);
+            GameSettings.InfiniteAmmo = true;
+        }
+
+        IEnumerator SpacingTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Teams.PlayerOutOfIt = true;
+            Vector3 me = Game.SpawnPoint;
+            for (int round = 0; round < 2; round++)
+            {
+                int n = TrenchSquad.SpawnFriendlies(me, 5);
+                yield return new WaitForSeconds(1f);
+                var fr = new List<EarlGunner>();
+                foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Friendly) fr.Add(g);
+                // somewhere along the trench well off
+                Vector3 far = me; float best = 0f;
+                for (int i = 0; i < TrenchNav.Nodes.Count; i++) { var p = TrenchNav.Nodes[i]; float d = Vector3.Distance(p, me); if (p.y < 0.5f && !TrenchNav.Field[i] && d > 12f && d < 18f && d > best) { best = d; far = p; } }
+                // round two: one stands in the way, holding an angle; the rest have to get by him
+                EarlGunner holder = null;
+                if (round == 1 && fr.Count > 0)
+                {
+                    holder = fr[0];
+                    Vector3 mid = me; float bm = 99f;
+                    foreach (var p in TrenchNav.Nodes) { float d = Mathf.Abs(Vector3.Distance(p, me) - best * 0.5f) + Mathf.Abs(Vector3.Distance(p, far) - best * 0.5f); if (p.y < 0.5f && d < bm) { bm = d; mid = p; } }
+                    holder.inSquad = true; holder.order = SquadOrder.Move; holder.orderPos = mid;
+                    foreach (var g in fr) if (g != holder) { g.inSquad = true; g.order = SquadOrder.Hold; g.orderPos = g.Body.Pelvis.transform.position - Vector3.up * 0.95f; }
+                    float tw = Time.time;
+                    while (Time.time - tw < 10f && Vector3.Distance(holder.Body.Pelvis.transform.position - Vector3.up * 0.95f, mid) > 1.2f) yield return null;
+                    yield return new WaitForSeconds(1f);
+                    Line($"  holder at the halfway point ({Vector3.Distance(holder.Body.Pelvis.transform.position - Vector3.up * 0.95f, mid):0.0} m off), {holder.Status}");
+                }
+                int k = 0;
+                foreach (var g in fr)
+                {
+                    if (g == holder) continue;
+                    g.inSquad = true; g.order = SquadOrder.Move;
+                    g.orderPos = far + new Vector3((k % 3 - 1) * 0.6f, 0f, (k / 3) * 0.6f); k++;
+                }
+                EarlGunner.PassedMoving = EarlGunner.PassedStill = 0;
+                var fell = new HashSet<EarlGunner>();
+                float t0 = Time.time, minGap = 99f, tr = 2f;
+                while (Time.time - t0 < 40f)
+                {
+                    foreach (var g in fr)
+                    {
+                        if (g == null || g.Body == null) continue;
+                        if (g.Body.ragdoll.IsDown) fell.Add(g);
+                        foreach (var o in fr) if (o != null && o != g && o.Body != null) minGap = Mathf.Min(minGap, Vector3.Distance(g.Body.Pelvis.transform.position, o.Body.Pelvis.transform.position));
+                    }
+                    if (Time.time - t0 > tr) { tr += 10f; foreach (var g in fr) if (g != null && g != holder && g.Body != null) Line($"     {Time.time - t0:0}s #{g.Body.number} at {g.Body.Pelvis.transform.position - Vector3.up * 0.95f} v {g.Body.Pelvis.rb.linearVelocity.magnitude:0.0} {g.Status} {g.SpacingDebug} down {g.Body.ragdoll.IsDown}"); }
+                    if (Time.time - t0 > 6f && Time.time - t0 < 6.1f) { Game.player.Teleport(far + Vector3.up * 2.5f, 0f); Game.player.LookAt(me); yield return GrabView("spacing_" + round); }
+                    yield return null;
+                }
+                int there = 0, movers = 0;
+                foreach (var g in fr) if (g != null && g != holder) { movers++; if (Vector3.Distance(g.Body.Pelvis.transform.position - Vector3.up * 0.95f, far) < 3f) there++; }
+                foreach (var g in fr) if (g != null && g != holder) Line($"   #{g.Body.number}: {Vector3.Distance(g.Body.Pelvis.transform.position - Vector3.up * 0.95f, far):0.0} m off, {g.Status}, {g.NavDebug}, queuing {g.queuing}");
+                Line($"{(round == 0 ? "all walking to the same spot" : "past a man holding an angle")}: {n} spawned, {there}/{movers} got there ({best:0} m), fell {fell.Count}, passed men on the move {EarlGunner.PassedMoving}, passed men standing {EarlGunner.PassedStill}, closest {minGap:0.00} m");
+                Check(there >= movers - 1, "they get there");
+                Check(EarlGunner.PassedMoving <= 1, "nobody pushes past a man who's moving");
+                Check(fell.Count <= 1, "no pile-ups (nobody knocked down)");
+                if (round == 1) Check(EarlGunner.PassedStill >= 1 || there == movers, "they get past a man standing there");
+                ClearEarls();
+                Game.player.Teleport(me, 0f);
+                yield return new WaitForSeconds(0.5f);
+            }
             Teams.PlayerOutOfIt = false;
         }
 
@@ -718,7 +931,7 @@ namespace Carl
             Vector3 far = me; float best = 0f;
             foreach (var p in TrenchNav.Nodes) { float d = Vector3.Distance(p, me); if (p.y < 0.5f && p.z < -15f && d > 12f && d < 16f && d > best) { best = d; far = p; } }
             Game.player.Teleport(far + Vector3.up * 0.05f, 0f);
-            yield return new WaitForSeconds(16f);
+            for (int i = 0; i < 4; i++) { yield return new WaitForSeconds(4f); foreach (var g in new[] { rifle, medic }) Line($"  {(g == medic ? "medic" : "rifle")} #{g.Body.number} at {g.Body.Pelvis.transform.position}: {g.Status} {g.SpacingDebug} going {g.goingSpeed:0.0} q {g.queuing} {g.NavDebug}"); }
             float dm = Vector3.Distance(medic.Body.Center, PlayerAvatar.Body.Center), dr = Vector3.Distance(rifle.Body.Center, PlayerAvatar.Body.Center);
             Line($"after you moved {best:0} m: squad {dr:0.0} m and {dm:0.0} m from you ({rifle.Status} / {medic.Status})");
             Check(dr < 7f && dm < 7f, "the squad follows you");

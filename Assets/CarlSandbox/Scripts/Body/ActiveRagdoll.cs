@@ -444,7 +444,9 @@ namespace Carl
         // last values written to each joint (see "drive muscles")
         readonly float[] lastSpring = { -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f, -1f };
         readonly Quaternion[] lastTarget = new Quaternion[17];
-        bool settledCheap;
+        bool settledCheap, corpse;
+        /// <summary>Dead and gone still: no longer driven at all (the physics engine sleeps it).</summary>
+        public bool IsCorpse => corpse;
 
         // this body's own rigidbodies, for ignoring its own limbs in ground and wall probes (far cheaper than
         // looking up a component on every ray hit)
@@ -460,14 +462,38 @@ namespace Carl
             return ownRbs.Contains(rb);
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_FixedUpdate = new Unity.Profiling.ProfilerMarker("Carl.ActiveRagdoll.FixedUpdate");
+
         void FixedUpdate()
         {
+
+            using var pmScope = PM_FixedUpdate.Auto();
             if (body == null || body.Pelvis == null || body.Chest == null) return;
             // the world is frozen (spawn menu open): everyone but you stands still
             if (WorldFreeze.On && body != PlayerAvatar.Body) return;
             float dt = Time.fixedDeltaTime;
             var pelvis = body.Pelvis.rb;
             var chest = body.Chest.rb;
+            // a corpse past its last twitch has nothing left for this to do: its joints have gone slack (written
+            // below on the way there), and with cheap solving and a readier sleep the physics engine lets the whole
+            // pile go to sleep - nothing simulated, no contacts, no callbacks. A round, a blast or a boot wakes it.
+            if (physio.dead && body.TimeSinceDeath > 3.5f && tone < 0.001f)
+            {
+                if (!corpse)
+                {
+                    corpse = true;
+                    foreach (var bp in body.partList)
+                        if (bp != null && bp.rb != null) { bp.rb.solverIterations = 4; bp.rb.solverVelocityIterations = 1; bp.rb.sleepThreshold = 0.05f; }
+                }
+                return;
+            }
+            if (corpse)
+            {
+                // (brought back)
+                corpse = false; settledCheap = false;
+                foreach (var bp in body.partList)
+                    if (bp != null && bp.rb != null) { bp.rb.solverIterations = 14; bp.rb.solverVelocityIterations = 6; bp.rb.sleepThreshold = 0.005f; }
+            }
             // a corpse that has stopped moving needs far less solver work (the same body, just cheaper to keep still)
             if (physio.dead && !settledCheap && body.TimeSinceDeath > 4f && pelvis.linearVelocity.sqrMagnitude < 0.01f)
             {

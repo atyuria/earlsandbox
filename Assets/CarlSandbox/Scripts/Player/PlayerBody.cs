@@ -258,8 +258,12 @@ namespace Carl
             if (h.lastHit != lastHitSeen && !string.IsNullOrEmpty(h.lastHit)) { lastHitSeen = h.lastHit; Note(h.lastHit.Length > 80 ? h.lastHit.Substring(0, 80) : h.lastHit); hitFlash = 1f; }
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.PlayerBody.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             float dt = Time.deltaTime;
             if (PlayerAvatar.Body != null) SyncFromBody(PlayerAvatar.Body);
             else if (!dead)

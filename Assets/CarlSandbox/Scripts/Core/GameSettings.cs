@@ -68,25 +68,75 @@ namespace Carl
             PlayerPrefs.Save();
         }
 
-        /// <summary>Puts the graphics setting into effect: the render pipeline's resolution and shadows, level of detail.</summary>
+        /// <summary>
+        /// How often the physics runs: ragdolls and their muscles are the biggest cost in the game, and it scales
+        /// with this. 100 Hz on high, 80 on medium, 60 on low (still smooth; joints a touch softer).
+        /// </summary>
+        public static float PhysicsStep => Graphics >= 2 ? 0.01f : Graphics == 1 ? 0.0125f : 1f / 60f;
+
+        /// <summary>
+        /// Puts the graphics setting into effect.
+        ///   LOW (anything): 60 Hz physics, 75% resolution, one shadow cascade at 1024 over 25 m with hard edges,
+        ///     no lamp shadows, no ambient occlusion, no HDR, half-size textures, bodies stop casting shadows
+        ///     past 12 m, blood painted at a lower resolution.
+        ///   MEDIUM (most): 80 Hz physics, 90% resolution, two cascades at 2048 over 40 m, soft (low) shadows,
+        ///     lamp shadows at 1024, ambient occlusion, bodies' shadows out to 25 m.
+        ///   HIGH (a 40-series card): 100 Hz physics, full resolution, four cascades at 2048 over 60 m, soft
+        ///     (high) shadows, lamp shadows at 2048, ambient occlusion, HDR, every shadow.
+        /// The colour-buffer copy (nothing uses it) is off on all three.
+        /// </summary>
         public static void ApplyGraphics()
         {
             Graphics = Mathf.Clamp(Graphics, 0, 2);
+            Time.fixedDeltaTime = PhysicsStep * (Time.timeScale > 0f ? Time.timeScale : 1f);
             if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp)
             {
                 urp.renderScale = Graphics == 0 ? 0.75f : Graphics == 1 ? 0.9f : 1f;
                 urp.shadowDistance = Graphics == 0 ? 25f : Graphics == 1 ? 40f : 60f;
+                urp.shadowCascadeCount = Graphics == 0 ? 1 : Graphics == 1 ? 2 : 4;
+                urp.mainLightShadowmapResolution = Graphics == 0 ? 1024 : 2048;
+                urp.additionalLightsShadowmapResolution = Graphics == 0 ? 512 : Graphics == 1 ? 1024 : 2048;
                 urp.msaaSampleCount = 1;
+                urp.supportsHDR = Graphics == 2;
+                urp.supportsCameraOpaqueTexture = false;
+                SetPrivate(urp, "m_SoftShadowsSupported", Graphics > 0);
+                SetPrivate(urp, "m_SoftShadowQuality", Graphics == 2 ? 3 : 1);          // high / low
+                SetPrivate(urp, "m_AdditionalLightShadowsSupported", Graphics > 0);
+                // ambient occlusion: a full-screen pass, off on low
+                var datas = GetPrivate(urp, "m_RendererDataList") as UnityEngine.Rendering.Universal.ScriptableRendererData[];
+                if (datas != null)
+                    foreach (var d in datas)
+                        if (d != null)
+                            foreach (var f in d.rendererFeatures)
+                                if (f != null && f.GetType().Name.Contains("AmbientOcclusion")) f.SetActive(Graphics > 0);
             }
             QualitySettings.lodBias = Graphics == 0 ? 0.7f : Graphics == 1 ? 1f : 2f;
             QualitySettings.anisotropicFiltering = Graphics == 0 ? AnisotropicFiltering.Disable : AnisotropicFiltering.Enable;
             QualitySettings.globalTextureMipmapLimit = Graphics == 0 ? 1 : 0;   // half-size textures on low
+            QualitySettings.shadowCascades = Graphics == 0 ? 1 : Graphics == 1 ? 2 : 4;
+            BodyLod.Reset();
+        }
+
+        /// <summary>How far away a body still casts a shadow (its 40-odd pieces are drawn again for each cascade).</summary>
+        public static float BodyShadowRange => Graphics == 0 ? 12f : Graphics == 1 ? 25f : 60f;
+
+        static System.Reflection.FieldInfo Field(object o, string name) =>
+            o.GetType().GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+        static object GetPrivate(object o, string name) => Field(o, name)?.GetValue(o);
+
+        static void SetPrivate(object o, string name, object v)
+        {
+            var f = Field(o, name);
+            if (f == null) return;
+            if (f.FieldType.IsEnum) v = System.Enum.ToObject(f.FieldType, v);
+            f.SetValue(o, v);
         }
 
         /// <summary>World blood resolution, pixels per metre.</summary>
-        public static int WorldBloodRes => QualityStep(new[] { 96, 160, 256, 384, 512 });
-        /// <summary>Skin blood canvas resolution per body part.</summary>
-        public static int BodyBloodRes => QualityStep(new[] { 64, 128, 256, 384, 512 });
+        public static int WorldBloodRes => Mathf.Min(QualityStep(new[] { 96, 160, 256, 384, 512 }), Graphics == 0 ? 160 : Graphics == 1 ? 256 : 512);
+        /// <summary>Skin blood canvas resolution per body part (capped by the graphics setting).</summary>
+        public static int BodyBloodRes => Mathf.Min(QualityStep(new[] { 64, 128, 256, 384, 512 }), Graphics == 0 ? 128 : Graphics == 1 ? 256 : 512);
 
         static int QualityStep(int[] steps)
         {

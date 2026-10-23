@@ -150,8 +150,12 @@ namespace Carl
             }
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.HumanBrain.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (body == null || rag == null || body.Pelvis == null || body.Head == null) return;
             if (WorldFreeze.On && body != PlayerAvatar.Body) return;
             float dt = Time.deltaTime;

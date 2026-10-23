@@ -1,11 +1,11 @@
-== ladder  (15:52:46)
-ladders: 12
+== ladder  (19:35:08)
+ladders: 13
 PASS  ladders along the front lines
-cover: sandbag walls 16, wrecks 3, hedgehogs 14, crater rim lumps 283, wire runs 13; revetment 10, duckboards 49
+cover: sandbag walls 16, wrecks 2, hedgehogs 14, crater rim lumps 282, wire runs 14; revetment 10, duckboards 49
 PASS  cover out on the field
 PASS  starts climbing
-after climbing (5.2 s): pelvis (4.98, 3.20, -22.58), top (5.04, 2.16, -23.01), down False
+after climbing (5.1 s): pelvis (10.21, 3.12, -19.05), top (10.45, 2.16, -19.12), down False
 PASS  out on top, on his feet
 PASS  starts climbing down
-down trace (t:y/tilt): 0.0:3.20/4L 0.3:3.11/2L 0.5:3.04/4L 0.8:2.97/6L 1.0:2.92/9L 1.3:2.90/13L 1.5:2.87/19L 1.8:2.64/18L 2.0:2.41/17L 2.3:2.18/12L 2.5:1.98/8L 2.8:1.78/6L 3.0:1.58/4L 3.3:1.38/3L 3.5:1.17/2L 3.8:1.00/2L 
-PASS  back in the trench, standing (pelvis y 0.94)
+down trace (t:y/tilt): 0.0:3.12/32L 0.3:3.09/28L 0.5:3.04/24L 0.8:3.02/7L 1.0:2.98/7L 1.3:2.93/21L 1.5:2.88/18L 1.8:2.85/13L 2.0:2.84/14L 2.3:2.62/10L 2.5:2.39/6L 2.8:2.17/4L 3.0:1.96/2L 3.3:1.76/2L 3.5:1.57/1L 3.8:1.37/1L 4.0:1.15/1L 4.3:0.97/2L 
+PASS  back in the trench, standing (pelvis y 0.88)

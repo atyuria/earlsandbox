@@ -128,7 +128,7 @@ namespace Carl.EditorTools
                 {
                     var scenes = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
                     if (scenes.Length == 0) scenes = new[] { "Assets/sigma project.unity" };
-                    var rep = BuildPipeline.BuildPlayer(scenes, a[0], BuildTarget.StandaloneWindows64, BuildOptions.None);
+                    var rep = BuildPipeline.BuildPlayer(scenes, a[0], BuildTarget.StandaloneWindows64, a.Length > 1 && a[1] == "dev" ? BuildOptions.Development : BuildOptions.None);
                     var errs = rep.steps.SelectMany(s => s.messages).Where(m => m.type == LogType.Error).Select(m => m.content);
                     Write(id, $"build {rep.summary.result} {rep.summary.totalSize / 1048576f:0.0} MB {rep.summary.totalTime.TotalSeconds:0}s\n" + string.Join("\n", errs));
                     break;

@@ -16,6 +16,7 @@ namespace Carl
         public static void Break(Organ o, Vector3 localPoint, float severity)
         {
             if (o != null && o.part != null && severity > 0.25f) Sfx.Play("bonebreak", o.part.transform.TransformPoint(localPoint), Mathf.Lerp(0.12f, 0.25f, severity), 1f, 0.3f, 0.06f, 5f);   // a quiet crunch you only hear up close
+            if (o != null && o.reveal == null && o.part != null && o.part.body != null) o.part.body.EnsureReveal(o.part);
             if (o == null || o.reveal == null || !o.def.capsule || o.def.shell) return;
             if (o.def.kind != TissueKind.Bone && o.def.kind != TissueKind.Spine) return;
             Vector3 a = o.def.a, b = o.def.b, ab = b - a;

@@ -237,8 +237,10 @@ namespace Carl
         }
 
         /// <summary>The camera is in your head: it goes where the head goes (stumbling, falling, lying on the floor).</summary>
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.PlayerAvatar.LateUpdate");
         void LateUpdate()
         {
+            using var pmScope = PM_LateUpdate.Auto();
             if (Body == null || pc == null || Body.Head == null) return;
             var head = Body.Head.transform;
             if (EyeT == null) EyeT = new GameObject("YourEyes").transform;

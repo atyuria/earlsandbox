@@ -15,7 +15,7 @@ namespace Carl
         public static readonly List<EarlGunner> All = new List<EarlGunner>();
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetAll() { All.Clear(); }
+        static void ResetAll() { All.Clear(); teamGrenadeAt[0] = teamGrenadeAt[1] = anyGrenadeAt = 0f; Thrown[0] = Thrown[1] = 0; }
 
         /// <summary>0 your side, 1 theirs.</summary>
         public int team = Teams.Enemy;
@@ -112,7 +112,7 @@ namespace Carl
                 Vector3 at = torso ? c + Vector3.up * 0.05f : hd;
                 if (Haze.Transmit(eye, at) < 0.3f) continue;     // lost in the dust and smoke
                 if (!Visible(h, eye, cand[i].d)) continue;          // at night: nothing gives him away
-                enemy = h; enemyAim = at; sees = true;
+                enemy = h; enemyAim = at; sees = true; headOnly = !torso;
                 break;
             }
             if (sees) { lastSeen = Time.time; lastSeenPos = enemyAim; lastEnemy = enemy; Learn(enemyAim, 1f, true); }
@@ -123,7 +123,7 @@ namespace Carl
         List<TrenchNav.Step> path;
         int pathI;
         Vector3 pathGoal, stuckFrom;
-        float pathAt, stuckT, skipCheck;
+        float pathAt, stuckT, skipCheck, relevelAt;
         int stuckCount;
 
         /// <summary>
@@ -150,6 +150,14 @@ namespace Carl
                 pathI = path.Count > 1 && FlatDist(path[0].at, feet) < 1.5f && TrenchNav.Walkable(feet + Vector3.up * 0.1f, path[1].at) ? 1 : 0;
                 pathGoal = goal; pathAt = Time.time;
                 if (path.Count == 0) { path = null; Vector3 g = Vector3.ProjectOnPlane(goal - me, Vector3.up); rag.moveDir = g.normalized; rag.moveSpeed = g.magnitude > 0.7f ? speed : 0f; return g.magnitude <= 0.7f; }
+            }
+            // the next point is on another level from him (he slid back down into the trench, or got up out of it
+            // where the wall has caved in): a new way from where he actually is
+            if (path[pathI].kind == TrenchNav.Edge.Walk && Mathf.Abs(path[pathI].at.y - feet.y) > 1.3f && Time.time > relevelAt)
+            {
+                relevelAt = Time.time + 1f;
+                path = null;
+                return MoveTo(goal, speed, fieldCost);
             }
             var step = path[pathI];
             if (step.kind != TrenchNav.Edge.Walk && step.ladder != null)
@@ -232,7 +240,8 @@ namespace Carl
 
         enum Stance { None, Peek, Hold, Push, Search }
         Stance stance;
-        float stanceUntil, peekWait, cornerCheck, prefiredFor = -1f, grenadeReady;
+        float stanceUntil, peekWait, cornerCheck, prefiredFor = -1f, grenadeReady, grenadeLook;
+        bool headOnly;
         Vector3? peekSpot;
         Vector3 corner;
         int searchLeft;
@@ -246,6 +255,7 @@ namespace Carl
             bool fresh = newIntel; newIntel = false;
             if (stance == Stance.None || Time.time > stanceUntil || (fresh && stance != Stance.Push && stance != Stance.Search)) Decide(age, Vector3.Distance(me, suspect));
             Vector3 look = suspect + Vector3.up * 1.1f;
+            if (age > 1.5f && SuspectConf > 0.3f && stance != Stance.Search) ConsiderGrenade(suspect, true);
             switch (stance)
             {
                 case Stance.Hold:
@@ -313,8 +323,8 @@ namespace Carl
             peekWait = 0f;
             Vector3 head = body.Head.transform.position;
             // gone quiet in a corner he can't see into: a grenade
-            if (grenades > 0 && Time.time > grenadeReady && age > 3.5f && SuspectConf > 0.35f && dist > 6f && dist < 30f
-                && !Clear(head, suspect + Vector3.up * 0.8f, body) && TryGrenade(suspect))
+            // (deciding how to go at a corner someone has gone quiet in: a grenade first, more often than not)
+            if (age > 1.5f && SuspectConf > 0.3f && ConsiderGrenade(suspect, true, 0.45f))
             {
                 stance = Stance.Hold; stanceUntil = Time.time + 5f;
                 return;
@@ -418,6 +428,42 @@ namespace Carl
 
         // ------------------------------------------------------------ grenades
 
+        /// <summary>Grenades thrown by each side (for the playtests).</summary>
+        public static readonly int[] Thrown = new int[2];
+        // a side lobs one every half minute or so, never two on top of each other: a grenade is for a man you
+        // can't get at with the rifle (behind cover, dug in with his head showing, or a bunch together)
+        static readonly float[] teamGrenadeAt = new float[2];
+        static float anyGrenadeAt;
+
+        /// <summary>For the playtests: this one may throw straight away.</summary>
+        public void GrenadeNow() { grenadeReady = Time.time; grenadeLook = 0f; teamGrenadeAt[Mathf.Clamp(team, 0, 1)] = anyGrenadeAt = 0f; }
+
+        /// <summary>
+        /// Worth a grenade at <paramref name="spot"/>? Someone <paramref name="hidden"/> behind cover is the usual
+        /// reason; a man out in the open gets the rifle instead, unless he's dug in or has mates bunched round him.
+        /// </summary>
+        bool ConsiderGrenade(Vector3 spot, bool hidden, float bonus = 0f)
+        {
+            if (grenades <= 0 || medic || Time.time < grenadeLook || body.ragdoll.IsDown || body.Head == null) return false;
+            grenadeLook = Time.time + 1f;
+            // not in the first moments of a fight: he gets his bearings first
+            if (grenadeReady <= 0f) { grenadeReady = Time.time + Random.Range(5f, 15f); return false; }
+            int t = Mathf.Clamp(team, 0, 1);
+            if (Time.time < grenadeReady || Time.time < teamGrenadeAt[t] || Time.time < anyGrenadeAt) return false;
+            float dist = Vector3.Distance(body.Pelvis.transform.position, spot);
+            if (dist < 9f || dist > 32f) return false;
+            int near = 0;
+            foreach (var h in HumanBody.All)
+                if (h != null && !h.Dead && Teams.Hostile(team, Teams.Of(h)) && Vector3.Distance(h.Center, spot) < 4.5f) near++;
+            // a man down in a trench firing back: the rifle hardly gets at him, a grenade in beside him does
+            bool dugIn = !hidden && TrenchNav.Ready && spot.y < 0.8f && dist > 12f;
+            if (!hidden && near < 2 && !headOnly && !dugIn) return false;
+            float chance = (hidden ? 0.3f : headOnly ? 0.15f : dugIn ? 0.12f : 0.1f) + 0.12f * Mathf.Max(0, near - 1) + bonus;
+            if (Random.value > chance) return false;
+            if (hidden && Clear(body.Head.transform.position, spot + Vector3.up * 0.8f, body)) return false;
+            return TryGrenade(spot);
+        }
+
         /// <summary>Lob one at a spot: low and flat if it can get there, up and over the top if not.</summary>
         bool TryGrenade(Vector3 spot)
         {
@@ -440,7 +486,11 @@ namespace Carl
                     // cooked so it goes off a moment after it lands
                     g.fuse = Mathf.Clamp(t + 1.4f, 2f, 3.5f);
                     grenades--;
-                    grenadeReady = Time.time + Random.Range(12f, 20f);
+                    grenadeReady = Time.time + Random.Range(25f, 45f);
+                    int side = Mathf.Clamp(team, 0, 1);
+                    teamGrenadeAt[side] = Time.time + Random.Range(22f, 40f);
+                    anyGrenadeAt = Time.time + 8f;
+                    Thrown[side]++;
                     Sfx.Play("casing_dirt", from, 0.4f, 1f, 2f);
                     body.ragdoll.faceDir = flat;
                     return true;

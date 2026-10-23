@@ -53,8 +53,12 @@ namespace Carl
 float nextRebuild;
         public void MarkDirty() => dirty = true;   // rebuilt once in LateUpdate, however many wounds a blast adds
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.WoundChannels.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (!dirty || part == null || part.flesh == null) return;
             // at most every eighth of a second: full auto into one part rebuilt the whole channel mesh every hit
             if (Time.time < nextRebuild) return;
@@ -88,6 +92,9 @@ float nextRebuild;
 
         static float Hash(int a, int b) { uint h = (uint)(a * 374761393 + b * 668265263); h = (h ^ (h >> 13)) * 1274126177u; return (h & 0xffff) / 65535f; }
 
+        /// <summary>(Testing) tunnels made fresh / reused, and ms spent making them.</summary>
+        public static int Built, Reused; public static double BuildMs;
+
         void Rebuild()
         {
             verts.Clear(); norms.Clear(); cols.Clear(); tris.Clear(); outside.Clear(); vOwner.Clear();
@@ -108,6 +115,21 @@ float nextRebuild;
                     if (Vector3.Distance(c, part.holes[o]) < (r + ro) * 0.75f) swallowed = true;
                 }
                 if (swallowed) continue;
+                // each hole's tunnel is made once and kept: rebuilding every hole's every time one more was added
+                // (a burst into one part) took tens of milliseconds a time
+                while (vOwner.Count < verts.Count) vOwner.Add(lastOwner);
+                lastOwner = h;
+                Vector4 keyShape = h < part.holeShapes.Count ? part.holeShapes[h] : new Vector4(0f, 0f, 0f, h * 7.3f);
+                if (chunks.TryGetValue(h, out var made) && made.hole == part.holes[h] && made.axis == part.holeAxes[h] && made.shape == keyShape)
+                {
+                    int off = verts.Count;
+                    verts.AddRange(made.v); norms.AddRange(made.n); cols.AddRange(made.c); outside.AddRange(made.o);
+                    foreach (int ti in made.t) tris.Add(ti + off);
+                    Reused++;
+                    continue;
+                }
+                var swBuild = System.Diagnostics.Stopwatch.StartNew();
+                int v0 = verts.Count, t0 = tris.Count;
                 // a big opening (blast, point-blank shotgun, stump) has no tunnel: a tube that wide cannot fit
                 // in the part. You look straight in at the flesh lining the body and the organs inside it.
                 Vector4 ax = part.holeAxes[h];
@@ -140,8 +162,6 @@ float nextRebuild;
                     hitOrgan = true; organCol = oc; depth = d - 0.001f; break;
                 }
 
-                while (vOwner.Count < verts.Count) vOwner.Add(lastOwner);
-                lastOwner = h;
                 int baseIdx = verts.Count;
                 for (int k = 0; k <= Rings; k++)
                 {
@@ -200,6 +220,15 @@ float nextRebuild;
                 int last = baseIdx + Rings * Segs;
                 if (!hitOrgan)
                     for (int s = 0; s < Segs; s++) { tris.Add(last + s); tris.Add(bIdx); tris.Add(last + (s + 1) % Segs); }
+                var ch = new Chunk { hole = part.holes[h], axis = part.holeAxes[h], shape = keyShape };
+                ch.v = verts.GetRange(v0, verts.Count - v0).ToArray();
+                ch.n = norms.GetRange(v0, norms.Count - v0).ToArray();
+                ch.c = cols.GetRange(v0, cols.Count - v0).ToArray();
+                ch.o = outside.GetRange(v0, outside.Count - v0).ToArray();
+                ch.t = new int[tris.Count - t0];
+                for (int i = 0; i < ch.t.Length; i++) ch.t[i] = tris[t0 + i] - v0;
+                chunks[h] = ch;
+                Built++; BuildMs += swBuild.Elapsed.TotalMilliseconds;
             }
             while (vOwner.Count < verts.Count) vOwner.Add(lastOwner);
             DropOutsideWalls();
@@ -215,6 +244,10 @@ float nextRebuild;
         }
 
         readonly List<bool> outside = new List<bool>();
+
+        /// <summary>One hole's tunnel as made (part space), and the hole it was made for.</summary>
+        class Chunk { public Vector4 hole, axis, shape; public Vector3[] v, n; public Color[] c; public bool[] o; public int[] t; }
+        readonly Dictionary<int, Chunk> chunks = new Dictionary<int, Chunk>();
 
         void DropOutsideWalls()
         {

@@ -32,7 +32,8 @@ namespace Carl
         GUIStyle hudCard, hudSmall, hudBig, hudCenter, hudBar, hudBarSel, hudLabel, hudGun, hudHelp;
         Texture2D scopeTex;
         float fpsSmooth = 60f;
-        const float BaseFixedDt = 0.01f;
+        /// <summary>The physics step (set by the graphics setting: 60 Hz on low, 80 medium, 100 high).</summary>
+        static float BaseFixedDt => GameSettings.PhysicsStep;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Bootstrap()
@@ -76,6 +77,7 @@ namespace Carl
             gameObject.AddComponent<MiniEarl>();
             MedKit.Attach(gameObject);
             SquadCommand.Attach(gameObject);
+            BarrelHeat.Attach(gameObject);
             menus = gameObject.AddComponent<Menus>();
             menus.Init(this);
             // the game starts on the main menu: nothing is loaded until you choose a map and press PLAY
@@ -205,6 +207,9 @@ namespace Carl
         public void LoadMap(int index)
         {
             InMenu = false;
+            // (loaded from anywhere but the START button - a hotkey, a test - the main menu page goes too)
+            if (menus != null && menus.open == MenuKind.Main) menus.open = MenuKind.None;
+            BarrelHeat.I?.Clear();
             if (menuCam != null) menuCam.SetActive(false);
             player.gameObject.SetActive(true);
             WorldFreeze.Set(false);
@@ -293,8 +298,13 @@ namespace Carl
             Cursor.visible = !on;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.SandboxGame.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
+            BodyLod.Tick();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
@@ -653,7 +663,7 @@ namespace Carl
                     "ALT + D / ALT + A: gun out round the corner right / left (mouse left-right: how far out · hold RMB + mouse: point it · LMB fire)\n" +
                     "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
-                    "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  J laser  ·  P fly a drone (pick one in G, MISC)\n" +
+                    "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  O laser  ·  J clear a jam  ·  P fly a drone (pick one in G, MISC)\n" +
                     "Friendlies (green armband): look at one, HOLD R to recruit  ·  HOLD MIDDLE MOUSE: squad orders\n" +
                     "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +

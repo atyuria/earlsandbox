@@ -608,8 +608,12 @@ namespace Carl
 
         static readonly Unity.Profiling.ProfilerMarker mUpd1 = new Unity.Profiling.ProfilerMarker("Carl.Blood.EmitDropsRunners"), mTiles = new Unity.Profiling.ProfilerMarker("Carl.Blood.WorldTiles"), mParts = new Unity.Profiling.ProfilerMarker("Carl.Blood.BodyParts"), mNewTile = new Unity.Profiling.ProfilerMarker("Carl.Blood.NewTile");
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.BloodSystem.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             float dt = WorldFreeze.On ? 0f : Time.deltaTime;   // frozen world (spawn menu): the blood stops too
             // blood quality changed: start the world blood again at the new resolution
             if (TileRes != GameSettings.WorldBloodRes)

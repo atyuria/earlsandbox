@@ -399,8 +399,12 @@ namespace Carl
 
         // ---------------------------------------------------------------- simulation
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Physiology.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             float dt = Time.deltaTime;
             if (dt <= 0f || body == null) return;
             if (WorldFreeze.On && body != PlayerAvatar.Body) return;   // frozen world: no bleeding, no clock

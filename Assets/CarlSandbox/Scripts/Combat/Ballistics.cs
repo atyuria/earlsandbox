@@ -97,8 +97,12 @@ namespace Carl
             return lr;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Ballistics.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             float dt = Time.deltaTime;
             if (dt <= 0f || WorldFreeze.On) return;
             using var _prof = Prof.Bullets.Auto();
@@ -631,8 +635,12 @@ namespace Carl
             I.flashes.Add((l, 0f, duration, intensity));
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.Fx.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             for (int i = waves.Count - 1; i >= 0; i--)
             {
                 var w = waves[i];

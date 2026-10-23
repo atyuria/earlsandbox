@@ -36,6 +36,8 @@ namespace Carl
         public bool steel, glass, visor;     // what it is made of (sparks / cracks / fluff)
         public bool plateUnder;              // a cloth carrier with hard plates inside (6B45 front / back / side)
         public Mesh mesh;
+        /// <summary>The mesh (and v) are shared with every other Earl's identical piece until this one is hit.</summary>
+        public bool sharedMesh;
         public Vector3[] v;                  // local space (piece == part frame unless it is a hinged visor)
         public int[] t;
         public Bounds bounds;
@@ -68,8 +70,20 @@ namespace Carl
             return cls * Mathf.Clamp01(1f - w * 0.22f);
         }
 
+        /// <summary>Its own copy of the shape before it gets scuffed or dented (shared until then).</summary>
+        void Own()
+        {
+            if (!sharedMesh) return;
+            sharedMesh = false;
+            mesh = Instantiate(mesh);
+            var mf = GetComponent<MeshFilter>();
+            if (mf != null) mf.sharedMesh = mesh;
+            v = (Vector3[])v.Clone();
+        }
+
         public void AddWear(Vector3 local, float amount)
         {
+            Own();
             wear.Add(new Vector4(local.x, local.y, local.z, amount));
             // light scuffing around the hit; the rip / hole itself is drawn by the shader
             var cols = mesh.colors;
@@ -156,6 +170,7 @@ namespace Carl
 
         void Dent(Vector3 local, Vector3 dirLocal, float radius, float depth)
         {
+            Own();
             dents.Add(new Vector4(local.x, local.y, local.z, depth));
             bool moved = false;
             for (int i = 0; i < v.Length; i++)
@@ -234,8 +249,12 @@ namespace Carl
 
         public void SetHang(Vector3 pivotLocal, float amount) { hangPivot = pivotLocal; swingHang = amount; }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.ArmourPiece.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (fallen || visor || rides || part == null || part.rb == null) return;
             if (!restSet) { restPos = transform.localPosition; restRot = transform.localRotation; restSet = true; }
             float dt = Time.deltaTime;
@@ -334,8 +353,12 @@ namespace Carl
         /// <summary>0 fully down over the face .. 1 fully up (it swings, so this moves smoothly).</summary>
         public float VisorOpen => visor ? Mathf.Clamp01(angle / -105f) : 1f;
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.ArmourPiece.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             if (!visor || Mathf.Approximately(angle, targetAngle) || transform.parent == null) return;
             float prev = angle;
             angle = Mathf.MoveTowards(angle, targetAngle, Time.deltaTime * 420f);
@@ -735,28 +758,43 @@ namespace Carl
                 else up = new Vector3(0, Mathf.Sign(j.y), 0);
             }
 
-            // weld by position so the shell's edges are real edges, not UV seams
-            var key = new Dictionary<Vector3Int, int>();
-            var weld = new int[sv.Length];
-            var wPos = new List<Vector3>(); var wNrm = new List<Vector3>();
-            for (int i = 0; i < sv.Length; i++)
+            // weld by position so the shell's edges are real edges, not UV seams (worked out once per part: every
+            // Earl's skin is the same shape when he puts it on)
+            if (!weldCache.TryGetValue(part.id, out var wc) || wc.n != sv.Length)
             {
-                var k = new Vector3Int(Mathf.RoundToInt(sv[i].x * 2000f), Mathf.RoundToInt(sv[i].y * 2000f), Mathf.RoundToInt(sv[i].z * 2000f));
-                if (!key.TryGetValue(k, out int w)) { w = wPos.Count; key[k] = w; wPos.Add(sv[i]); wNrm.Add(Vector3.zero); }
-                weld[i] = w;
-                wNrm[w] += sn[i];
+                var key = new Dictionary<Vector3Int, int>();
+                var weld0 = new int[sv.Length];
+                var wPos0 = new List<Vector3>(); var wNrm0 = new List<Vector3>();
+                for (int i = 0; i < sv.Length; i++)
+                {
+                    var k = new Vector3Int(Mathf.RoundToInt(sv[i].x * 2000f), Mathf.RoundToInt(sv[i].y * 2000f), Mathf.RoundToInt(sv[i].z * 2000f));
+                    if (!key.TryGetValue(k, out int w)) { w = wPos0.Count; key[k] = w; wPos0.Add(sv[i]); wNrm0.Add(Vector3.zero); }
+                    weld0[i] = w;
+                    wNrm0[w] += sn[i];
+                }
+                for (int i = 0; i < wNrm0.Count; i++) wNrm0[i] = wNrm0[i].normalized;
+                weldCache[part.id] = wc = (sv.Length, weld0, wPos0, wNrm0);
             }
+            var weld = wc.weld; var wPos = wc.pos; var wNrm = wc.nrm;
             var pass = new bool[wPos.Count];
             var lift = new float[wPos.Count];
             for (int i = 0; i < wPos.Count; i++)
             {
-                Vector3 n = wNrm[i].normalized; wNrm[i] = n;
+                Vector3 n = wNrm[i];
                 Vector3 u = new Vector3((wPos[i].x - c.x) / Mathf.Max(1e-4f, e.x), (wPos[i].y - c.y) / Mathf.Max(1e-4f, e.y), (wPos[i].z - c.z) / Mathf.Max(1e-4f, e.z));
                 if (up.z != 0f) u = new Vector3(u.x, u.z * up.z, -u.y * up.z);
                 else if (up.y < 0f) u = new Vector3(u.x, -u.y, -u.z);
                 pass[i] = select(u, n);
                 lift[i] = bulge != null ? bulge(u, n) : 0f;
             }
+            // the same piece cut the same way (same part, same options) has been made before: the same shape
+            ulong hash = 1469598103934665603UL;
+            void Mix(long x) { hash ^= (ulong)x; hash *= 1099511628211UL; }
+            Mix((long)part.id); Mix((label ?? "").GetHashCode()); Mix(Mathf.RoundToInt(offset * 1e5f)); Mix(Mathf.RoundToInt(thickness * 1e5f)); Mix(bulge != null ? 1 : 0);
+            Mix(sv.Length);
+            for (int i = 0; i < pass.Length; i++) { Mix(pass[i] ? 1 : 0); if (pass[i] && bulge != null) Mix(Mathf.RoundToInt(lift[i] * 1e5f)); }
+            if (shellCache.TryGetValue(hash, out var made) && made.mesh != null)
+                return Finish(part, label, cls, mat, made.mesh, made.v, made.t, made.area, true);
             var faces = new List<int>();
             for (int i = 0; i < st.Length; i += 3)
             {
@@ -800,10 +838,7 @@ namespace Carl
                     tris.AddRange(new[] { r0, r0 + 2, r0 + 1, r0, r0 + 3, r0 + 2 });
                 }
             // smooth the shading of the bulged surfaces (the skin's normals no longer match them)
-            var go = new GameObject(label ?? "Trim");
-            go.transform.SetParent(part.transform, false);
-            go.layer = part.gameObject.layer;
-            var mesh = new Mesh { name = go.name };
+            var mesh = new Mesh { name = label ?? "Trim" };
             if (verts.Count > 65000) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             mesh.SetVertices(verts); mesh.SetNormals(norms); mesh.SetTriangles(tris, 0);
             if (bulge != null)
@@ -817,15 +852,33 @@ namespace Carl
             var cols = new Color[verts.Count]; for (int i = 0; i < cols.Length; i++) cols[i] = Color.white;
             mesh.colors = cols;
             mesh.RecalculateBounds();
+            var vArr = mesh.vertices; var tArr = tris.ToArray();
+            shellCache[hash] = (mesh, vArr, tArr, area);
+            return Finish(part, label, cls, mat, mesh, vArr, tArr, area, true);
+        }
+
+        // shapes worked out once and shared (a squad of Earls in the same kit used to have every plate, pouch and
+        // strap built from scratch: ~37 ms each, spawning a wave stalled the game)
+        static readonly Dictionary<PartId, (int n, int[] weld, List<Vector3> pos, List<Vector3> nrm)> weldCache =
+            new Dictionary<PartId, (int, int[], List<Vector3>, List<Vector3>)>();
+        static readonly Dictionary<ulong, (Mesh mesh, Vector3[] v, int[] t, float area)> shellCache =
+            new Dictionary<ulong, (Mesh, Vector3[], int[], float)>();
+
+        /// <summary>The piece itself, on the part, wearing the (shared) shape.</summary>
+        static ArmourPiece Finish(BodyPart part, string label, float cls, Material mat, Mesh mesh, Vector3[] v, int[] t, float area, bool shared)
+        {
+            var go = new GameObject(label ?? "Trim");
+            go.transform.SetParent(part.transform, false);
+            go.layer = part.gameObject.layer;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = mat;
             if (label == null) return null;      // cosmetic only
 
             var piece = go.AddComponent<ArmourPiece>();
-            piece.label = label; piece.part = part; piece.cls = cls; piece.mesh = mesh;
+            piece.label = label; piece.part = part; piece.cls = cls; piece.mesh = mesh; piece.sharedMesh = shared;
             piece.steel = mat == steel || mat == olive || mat == mail;
-            piece.v = mesh.vertices; piece.t = tris.ToArray();
+            piece.v = v; piece.t = t;
             piece.bounds = mesh.bounds; piece.bounds.Expand(0.01f);
             piece.area = area;
             return piece;

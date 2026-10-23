@@ -1,0 +1,56 @@
+== spacing  (21:40:15)
+     2s #17 at (-1.78, -0.05, -21.35) v 1.8 MOVING wait - 0.0s down False
+     2s #18 at (6.58, -0.06, -21.05) v 1.8 MOVING wait - 0.0s down False
+     2s #19 at (8.83, -0.07, -19.92) v 1.1 MOVING wait - 0.0s down False
+     2s #20 at (-4.44, -0.09, -21.13) v 1.4 MOVING wait - 0.0s down False
+     2s #21 at (10.16, -0.11, -20.92) v 2.0 MOVING wait - 0.0s down False
+     12s #17 at (-9.32, -0.13, -18.70) v 1.8 MOVING wait - 0.0s down False
+     12s #18 at (-3.29, -0.03, -21.27) v 1.3 MOVING wait - 0.0s down False
+     12s #19 at (-1.41, -0.03, -21.55) v 1.9 MOVING wait - 0.0s down False
+     12s #20 at (-10.92, 0.00, -13.58) v 0.3 HOLDING wait - 0.0s down False
+     12s #21 at (2.13, -0.06, -21.66) v 0.6 MOVING wait - 0.0s down False
+     22s #17 at (-10.20, -0.07, -14.15) v 0.7 HOLDING wait - 0.0s down False
+     22s #18 at (-9.84, -0.02, -14.70) v 0.7 MOVING wait - 0.0s down False
+     22s #19 at (-8.85, -0.10, -16.73) v 1.3 MOVING wait - 0.0s down False
+     22s #20 at (-10.95, -0.06, -13.07) v 0.1 HOLDING wait - 0.0s down False
+     22s #21 at (-10.13, -0.09, -20.80) v 1.2 MOVING wait - 0.0s down False
+     32s #17 at (-10.62, -0.05, -14.06) v 0.2 HOLDING wait - 0.0s down False
+     32s #18 at (-9.95, 1.55, -14.36) v 0.5 HOLDING wait - 0.0s down False
+     32s #19 at (-10.09, -0.04, -14.38) v 0.2 HOLDING wait - 0.0s down False
+     32s #20 at (-11.20, -0.04, -12.72) v 0.4 HOLDING wait - 0.0s down False
+     32s #21 at (-7.17, 1.87, -13.88) v 2.0 MOVING wait - 0.0s down False
+   #17: 0.3 m off, HOLDING, step 4/4 feet (-10.86, -0.04, -13.45) speed 0.4 obj (-6.98, -0.02, 23.41), queuing False
+   #18: 1.2 m off, HOLDING, step 1/2 next Walk at (-10.59, -0.03, -13.51) feet (-9.95, -0.06, -14.50) speed 0.8 obj (17.85, -0.01, 23.75), queuing False
+   #19: 0.7 m off, HOLDING, step 2/2 feet (-10.55, -0.04, -14.19) speed 0.8 obj (8.12, -0.02, 23.09), queuing False
+   #20: 1.2 m off, HOLDING, step 6/6 feet (-11.34, -0.02, -12.55) speed 0.6 obj (-3.11, -0.02, 22.40), queuing False
+   #21: 4.9 m off, MOVING, step 1/24 next Walk at (-3.50, 1.81, -10.50) feet (-5.98, 1.52, -13.87) speed 3.0 obj (14.55, 0.00, 23.77), queuing False
+all walking to the same spot: 5 spawned, 4/5 got there (18 m), fell 1, passed men on the move 0, passed men standing 12, closest 0.13 m
+PASS  they get there
+PASS  nobody pushes past a man who's moving
+PASS  no pile-ups (nobody knocked down)
+  holder at the halfway point (0.7 m off), HOLDING
+     2s #27 at (6.98, -0.06, -20.95) v 1.7 MOVING wait - 0.0s down False
+     2s #28 at (9.09, -0.08, -19.25) v 1.4 MOVING wait - 0.0s down False
+     2s #29 at (-3.79, -0.03, -21.14) v 2.1 MOVING wait - 0.0s down False
+     2s #30 at (11.24, -0.10, -21.21) v 2.0 MOVING wait - 0.0s down False
+     12s #27 at (-1.80, -0.01, -21.39) v 0.2 MOVING wait #26 0.5s down False
+     12s #28 at (7.64, -0.06, -20.63) v 2.1 MOVING wait - 0.0s down False
+     12s #29 at (-10.41, -0.07, -14.09) v 0.1 HOLDING wait - 0.0s down False
+     12s #30 at (2.24, -0.04, -21.60) v 0.3 MOVING wait - 0.0s down False
+     22s #27 at (-9.22, -0.08, -15.80) v 0.3 MOVING wait #29 0.5s down False
+     22s #28 at (-7.45, -0.09, -21.47) v 2.3 MOVING wait - 0.0s down False
+     22s #29 at (-10.39, -0.07, -14.07) v 0.2 HOLDING wait - 0.0s down False
+     22s #30 at (-10.12, 0.19, -21.29) v 0.4 MOVING wait - 0.0s down False
+     32s #27 at (-10.21, -0.07, -13.87) v 0.1 HOLDING wait - 0.0s down False
+     32s #28 at (-8.78, -0.06, -17.20) v 0.3 MOVING wait #29 0.6s down False
+     32s #29 at (-9.50, -0.03, -14.94) v 0.1 HOLDING wait - 0.0s down False
+     32s #30 at (-10.31, -0.11, -14.21) v 2.1 MOVING wait - 0.0s down False
+   #27: 1.2 m off, HOLDING, step 5/5 feet (-9.89, -0.06, -14.46) speed 0.4 obj (10.06, -0.02, 22.63), queuing False
+   #28: 0.3 m off, HOLDING, step 3/3 feet (-10.44, -0.08, -13.74) speed 0.2 obj (6.17, -0.01, 23.55), queuing False
+   #29: 2.3 m off, HOLDING, step 1/22 next Walk at (-8.57, -0.03, -16.96) feet (-9.31, -0.04, -15.40) speed 0.4 obj (-2.40, -0.04, 22.27), queuing False
+   #30: 0.7 m off, HOLDING, step 3/3 feet (-10.82, -0.07, -12.86) speed 0.7 obj (10.34, -0.03, 20.51), queuing False
+past a man holding an angle: 5 spawned, 4/4 got there (18 m), fell 0, passed men on the move 0, passed men standing 11, closest 0.04 m
+PASS  they get there
+PASS  nobody pushes past a man who's moving
+PASS  no pile-ups (nobody knocked down)
+PASS  they get past a man standing there

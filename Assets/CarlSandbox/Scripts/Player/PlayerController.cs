@@ -84,8 +84,12 @@ namespace Carl
             velocity = Vector3.zero;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.PlayerController.Update");
+
         void Update()
         {
+
+            using var pmScope = PM_Update.Auto();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;

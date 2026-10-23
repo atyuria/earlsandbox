@@ -189,8 +189,12 @@ namespace Carl
 
         // ------------------------------------------------------------ deciding
 
+        static readonly Unity.Profiling.ProfilerMarker PM_LateUpdate = new Unity.Profiling.ProfilerMarker("Carl.EarlGunner.LateUpdate");
+
         void LateUpdate()
         {
+
+            using var pmScope = PM_LateUpdate.Auto();
             if (body == null || weapon == null || dropped || WorldFreeze.On) return;
             var p = body.physio;
             var rag = body.ragdoll;
@@ -255,6 +259,7 @@ namespace Carl
             }
             if (sees)
             {
+                if (enemy != null && enemy.Pelvis != null) ConsiderGrenade(enemy.Pelvis.transform.position - Vector3.up * 0.8f, false);
                 if (!OrderWhileFighting(legs)) GunBehaviour(sees, target, dist, legs);
                 else if (rag.crouch < 0.5f) Shoot(target);
             }
@@ -271,17 +276,22 @@ namespace Carl
         }
 
         /// <summary>
-        /// Never walk into (or over) a mate: someone close in the way means wait for him to move on, and anyone
-        /// right next to you is stepped away from. Two coming at each other: one stands aside.
+        /// Never walk into (or over) a mate. Someone going the same way ahead is followed at his pace, not
+        /// overtaken; someone crossing or coming the other way is let by. Only a man who isn't going anywhere
+        /// (standing, holding an angle) is squeezed past - or one lying there, who is stepped over. Two meeting
+        /// head-on in a trench: one stops and the other squeezes by. Anyone right next to you is stepped away from.
         /// </summary>
         void KeepSpacing()
         {
             if (squeezes.Count > 0 && Time.frameCount % 10 == 0) EndSqueezes();
             var rag = body.ragdoll;
-            if (rag.IsDown || body.Pelvis == null) return;
+            queuing = false; goingSpeed = 0f; yieldDbg = null;
+            if (rag.IsDown || body.Pelvis == null || SpacingOff) return;
             Vector3 me = body.Pelvis.transform.position;
-            Vector3 push = Vector3.zero; bool wait = false, sidestep = false;
-            HumanBody blocker = null;
+            Vector3 push = Vector3.zero;
+            bool yieldNow = false, sidestep = false;
+            float follow = float.MaxValue, goD = 9f, standD = 9f;
+            HumanBody going = null, standing = null;
             foreach (var o in HumanBody.All)
             {
                 if (o == null || o == body || o.Dead || o == PlayerAvatar.Body || o.Pelvis == null) continue;
@@ -295,20 +305,32 @@ namespace Carl
                 if (dist < 1.3f) push -= dn * (1.3f - dist);
                 if (rag.moveSpeed > 0.05f && dist < 2.4f && Vector3.Dot(dn, rag.moveDir) > 0.55f)
                 {
-                    // he is in the way: is he coming this way too?
+                    // he is in the way: is he going somewhere (or waiting in line behind someone who is)?
                     var om = o.ragdoll;
-                    bool headOn = om != null && om.moveSpeed > 0.05f && Vector3.Dot(om.moveDir, -dn) > 0.55f;
-                    bool sameWay = om != null && om.moveSpeed > 0.3f && Vector3.Dot(om.moveDir, rag.moveDir) > 0.6f;
-                    if (sameWay && dist > 1.4f) rag.moveSpeed = Mathf.Min(rag.moveSpeed, om.moveSpeed);   // just keep behind him
-                    else if (headOn && body.number < o.number && !TrenchNav.Ready) sidestep = true;
-                    else { wait = true; blocker = o; }
+                    bool moving = o.gunner != null ? o.gunner.goingSpeed > 0.25f || o.gunner.queuing : om != null && om.moveSpeed > 0.25f;
+                    if (moving)
+                    {
+                        // coming at me - or waiting on me while I wait on him: one of the two has to give way
+                        bool headOn = Vector3.Dot(om.moveDir, -dn) > 0.55f || o.gunner != null && o.gunner.waitingFor == body;
+                        bool sameWay = om.moveSpeed > 0.25f && Vector3.Dot(om.moveDir, rag.moveDir) > 0.3f;
+                        if (headOn && body.number < o.number) { if (TrenchNav.Ready) { yieldNow = true; yieldDbg = o; } else sidestep = true; }
+                        else if (sameWay && dist > 1.5f) follow = Mathf.Min(follow, om.moveSpeed);   // just keep behind him
+                        else if (dist < goD) { goD = dist; going = o; }
+                    }
+                    else if (dist < standD) { standD = dist; standing = o; }
                 }
             }
-            // in a trench there's no stepping aside: after a moment they squeeze past each other
-            if (wait && blocker == waitingFor) waitT += Time.deltaTime; else { waitingFor = blocker; waitT = 0f; }
-            if (wait && waitT > 1.2f) { Squeeze(body, blocker, 3f); wait = false; waitT = 0f; }
+            if (follow < float.MaxValue) rag.moveSpeed = Mathf.Min(rag.moveSpeed, follow);
+            // waiting on a man who's going somewhere: he'll be out of the way in a moment (squeezed past only if
+            // it's jammed solid); a man standing there is squeezed past after a moment
+            HumanBody blocker = yieldNow ? null : going ?? standing;
+            bool wait = yieldNow || blocker != null;
+            queuing = going != null && !yieldNow;
+            if (blocker != null && blocker == waitingFor) waitT += Time.deltaTime; else { waitingFor = blocker; waitT = 0f; }
+            if (blocker != null && waitT > (going != null ? 6f : 0.7f)) { if (going != null) PassedMoving++; else PassedStill++; Squeeze(body, blocker, 3f); wait = false; waitT = 0f; queuing = false; }
             if (sidestep) { rag.moveDir = Quaternion.AngleAxis(75f, Vector3.up) * rag.moveDir; rag.moveSpeed = Mathf.Min(rag.moveSpeed, 0.9f); }
             else if (wait) rag.moveSpeed = 0f;
+            goingSpeed = rag.moveSpeed;   // (where he's trying to go - not being nudged aside below)
             if (push.sqrMagnitude > 1e-4f)
             {
                 Vector3 m = rag.moveDir * Mathf.Max(rag.moveSpeed, 0.01f) + push * 2.5f;
@@ -319,6 +341,16 @@ namespace Carl
 
         HumanBody waitingFor;
         float waitT;
+        /// <summary>Stopped only because someone ahead is on the move (in a line, not standing there).</summary>
+        public bool queuing;
+        /// <summary>How fast he means to go this frame (before being nudged out of someone's way).</summary>
+        public float goingSpeed;
+        /// <summary>For the playtests: squeezes past a man on the move (only when jammed solid) and past one standing there.</summary>
+        public static int PassedMoving, PassedStill;
+        HumanBody yieldDbg;
+        /// <summary>For the playtests: no keeping apart at all (to compare).</summary>
+        public static bool SpacingOff;
+        public string SpacingDebug => $"wait {(waitingFor != null ? "#" + waitingFor.number : "-")} {waitT:0.0}s" + (yieldDbg != null ? $" giving way to #{yieldDbg.number} ({(yieldDbg.gunner != null ? yieldDbg.gunner.Status + " going " + yieldDbg.gunner.goingSpeed.ToString("0.0") + (yieldDbg.gunner.queuing ? " queuing" : "") : "no gun")} at {yieldDbg.Pelvis.transform.position})" : "");
         static readonly List<(HumanBody a, HumanBody b, float until)> squeezes = new List<(HumanBody, HumanBody, float)>();
 
         bool Squeezing(HumanBody o)
@@ -718,8 +750,12 @@ namespace Carl
 
         // ------------------------------------------------------------ hands on the weapon
 
+        static readonly Unity.Profiling.ProfilerMarker PM_FixedUpdate = new Unity.Profiling.ProfilerMarker("Carl.EarlGunner.FixedUpdate");
+
         void FixedUpdate()
         {
+
+            using var pmScope = PM_FixedUpdate.Auto();
             if (body == null || weapon == null || dropped || body.physio.dead || WorldFreeze.On) return;
             var hand = body[PartId.HandR];
             var aim = body.ragdoll.aimDir;
