@@ -99,7 +99,18 @@ namespace Carl
 
         /// <summary>Their front line's band of z (yours is below zero, theirs above).</summary>
         bool InTheirLine(Vector3 p) => team == Teams.Friendly ? p.z > 16f : p.z < -16f;
-        bool TheirLineNode(Vector3 n) => team == Teams.Friendly ? n.z >= 18f && n.z <= 29f : n.z <= -18f && n.z >= -29f;
+        bool TheirLineNode(Vector3 n) => EnemyLineNode(team, n);
+        /// <summary>Is this trench point on the front line of the side <paramref name="team"/> is attacking?</summary>
+        public static bool EnemyLineNode(int team, Vector3 n) => team == Teams.Friendly ? n.z >= 18f && n.z <= 29f : n.z <= -18f && n.z >= -29f;
+
+        /// <summary>
+        /// Going across (TRENCHES): the stretch of their line (its x) his group is going for, so that the attack
+        /// comes in at several places at once instead of everyone piling down the same trench. Unset: whatever is
+        /// roughly across from where he starts.
+        /// </summary>
+        public float? laneX;
+        /// <summary>Which group of the attack he is in (the men in a group go the same way together).</summary>
+        public int group = -1;
 
         /// <summary>On his spot in his own line, gun on no-man's-land.</summary>
         void HoldLine(float legs)

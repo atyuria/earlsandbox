@@ -132,6 +132,7 @@ namespace Carl
                 var hb = hit.collider.GetComponentInParent<HumanBody>();
                 if (hb != null) continue;
                 if (hit.collider.attachedRigidbody != null && !hit.collider.attachedRigidbody.isKinematic) continue;
+                if (FlameTank.IsTank(hit.collider)) continue;      // (the tanks on your back are you, near enough)
                 return false;
             }
             return true;
@@ -193,13 +194,21 @@ namespace Carl
 
         void LateUpdate()
         {
+            Think();
+            if (body == null || weapon == null || dropped || WorldFreeze.On) return;
+            AvoidWalls();
+            PlaceWeapon();
+        }
+
+        void Think()
+        {
 
             using var pmScope = PM_LateUpdate.Auto();
             if (body == null || weapon == null || dropped || WorldFreeze.On) return;
             var p = body.physio;
             var rag = body.ragdoll;
             var brain = body.brain;
-            if (p.dead || ArmHealth(1) <= 0f || body[PartId.HandR] == null || body[PartId.HandR].severed || TaserShock.Active(body)) { Drop(); return; }
+            if (p.dead || ArmHealth(1) <= 0f || body[PartId.HandR] == null || body[PartId.HandR].severed || TaserShock.Active(body) || Burning.Intensity(body) > 0.2f) { Drop(); return; }
             suppression = Mathf.Max(0f, suppression - Time.deltaTime * 0.35f);
             bool able = brain != null && brain.aiEnabled && p.consciousness > 0.35f;
             if (rag.IsDown)
@@ -231,6 +240,8 @@ namespace Carl
 
             // a grenade at his feet comes before everything
             if (!rag.IsDown && FleeGrenade(legs)) { KeepSpacing(); return; }
+            // a drone: shoot it down, or get out from under it
+            if (!rag.IsDown && DroneBehaviour(legs)) { KeepSpacing(); return; }
 
             Vector3 target = sees ? enemyAim : suspect;
             Vector3 to = target - chest;
@@ -757,11 +768,44 @@ namespace Carl
 
             using var pmScope = PM_FixedUpdate.Auto();
             if (body == null || weapon == null || dropped || body.physio.dead || WorldFreeze.On) return;
+            if (!body.ragdoll.aimDir.HasValue) return;
+            // the other hand on the handguard
+            if (TwoHanded && ArmHealth(-1) > 0.3f)
+            {
+                var left = body[PartId.HandL];
+                if (left != null && left.rb != null)
+                {
+                    Vector3 fore = weapon.transform.TransformPoint(Vector3.Lerp(gripLocal, tipLocal, 0.42f));
+                    left.rb.AddForce(Vector3.ClampMagnitude((fore - left.rb.position) * 500f - left.rb.linearVelocity * 25f, 120f) * left.rb.mass * Mathf.Lerp(0.3f, 1f, ArmHealth(-1)), ForceMode.Force);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The weapon in his hand, placed every rendered frame from where the hand is drawn. (It used to be placed
+        /// on the physics step: at the 60 / 80 Hz physics of LOW and MEDIUM graphics, on a faster screen, the gun
+        /// twitched against the hand moving smoothly between steps.) The wrist turns it onto the line he is looking
+        /// down, as far as a wrist bends (less when hurt); whatever the arm can't take up stays as error. A pistol
+        /// with nothing to point it at goes in its holster on the hip, rather than hanging the wrong way round
+        /// behind him from a hand that's busy (a medic at work).
+        /// </summary>
+        void PlaceWeapon()
+        {
+            if (body.physio.dead) return;
             var hand = body[PartId.HandR];
+            if (hand == null) return;
             var aim = body.ragdoll.aimDir;
-            if (hand == null || hand.rb == null || !aim.HasValue) return;
-            // the wrist turns the weapon in the grip onto the line, as far as a wrist bends (less when hurt);
-            // whatever the arm can't take up stays as error
+            var wt = weapon.transform;
+            if (!aim.HasValue)
+            {
+                if (!Handgun || body.Pelvis == null) return;
+                var pv = body.Pelvis.transform;
+                Quaternion hol = Quaternion.LookRotation(-pv.up, pv.forward);
+                wt.rotation = hol;
+                wt.position = pv.position + pv.right * 0.19f - pv.up * 0.04f - hol * gripLocal;
+                holstered = true;
+                return;
+            }
             float strength = Mathf.Lerp(0.25f, 1f, ArmHealth(1)) * Mathf.Clamp01(body.physio.consciousness);
             Vector3 want = aim.Value;
             if (!Gun)
@@ -775,19 +819,13 @@ namespace Carl
             // the weaker the arm (the grip's rest angle was taken with the arm hanging, so it can't lead)
             Quaternion rest = hand.transform.rotation * restLocal;
             Quaternion lim = Quaternion.RotateTowards(Quaternion.LookRotation(want.normalized, Vector3.up), rest, Mathf.Lerp(40f, 2f, strength));
-            weapon.transform.rotation = Quaternion.Slerp(weapon.transform.rotation, lim, Mathf.Clamp01(Time.fixedDeltaTime * 14f));
-            weapon.transform.position = hand.transform.position - weapon.transform.rotation * gripLocal;
-            // the other hand on the handguard
-            if (TwoHanded && ArmHealth(-1) > 0.3f)
-            {
-                var left = body[PartId.HandL];
-                if (left != null && left.rb != null)
-                {
-                    Vector3 fore = weapon.transform.TransformPoint(Vector3.Lerp(gripLocal, tipLocal, 0.42f));
-                    left.rb.AddForce(Vector3.ClampMagnitude((fore - left.rb.position) * 500f - left.rb.linearVelocity * 25f, 120f) * left.rb.mass * Mathf.Lerp(0.3f, 1f, ArmHealth(-1)), ForceMode.Force);
-                }
-            }
+            // (drawn from the holster: straight into the hand)
+            wt.rotation = holstered ? lim : Quaternion.Slerp(wt.rotation, lim, 1f - Mathf.Exp(-Time.deltaTime * 14f));
+            wt.position = hand.transform.position - wt.rotation * gripLocal;
+            holstered = false;
         }
+
+        bool holstered;
 
         void OnDestroy() { All.Remove(this); if (weapon != null && !dropped) Destroy(weapon); }
     }

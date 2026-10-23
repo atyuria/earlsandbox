@@ -491,6 +491,85 @@ namespace Carl
             if (channels != null) channels.MarkDirty();
         }
 
+        // ------------------------------------------------------------ burns
+        // Spots of fire damage on the skin (from a blast or a flamethrower), and how far the whole part has burned
+        // while on fire: drawn by the skin shader (soot, blistered raw skin, char) like the wounds are, nothing
+        // simulated. Kept in the part's own space so they stay put as it moves.
+
+        const int MaxBurns = 24;
+        public readonly List<Vector4> burns = new List<Vector4>();      // centre (local), radius
+        readonly List<Vector4> burnInfo = new List<Vector4>();          // char, blister, seed
+        /// <summary>How far the whole part has burned (0 unmarked .. 1 charred all over).</summary>
+        public float charLevel;
+        float heatShown = -1f, charShown = -1f;
+        Texture2D burnTex;
+        static readonly Color[] burnPixels = new Color[MaxBurns * 2];
+        static readonly int BurnTexId = Shader.PropertyToID("_BurnTex"), BurnCountId = Shader.PropertyToID("_BurnCount"), CharId = Shader.PropertyToID("_Char"), HeatId = Shader.PropertyToID("_Heat");
+
+        /// <summary>A burn on the skin at a point: <paramref name="charA"/> how charred its middle is, <paramref name="blister"/> how raw round it.</summary>
+        public void AddBurn(Vector3 worldPoint, float radius, float charA, float blister)
+        {
+            if (severed && skin == null) return;
+            Vector3 local = transform.InverseTransformPoint(worldPoint);
+            // on top of an old one: that one gets worse (and a little bigger) rather than stacking up
+            for (int i = 0; i < burns.Count; i++)
+            {
+                if (Vector3.Distance(burns[i], local) > burns[i].w * 0.7f) continue;
+                var b = burns[i]; var inf = burnInfo[i];
+                burns[i] = new Vector4(b.x, b.y, b.z, Mathf.Min(0.12f, Mathf.Max(b.w, radius) * 1.05f));
+                burnInfo[i] = new Vector4(Mathf.Min(1f, inf.x + charA * 0.5f), Mathf.Min(1f, inf.y + blister * 0.5f), inf.z, 0f);
+                PushBurns();
+                return;
+            }
+            if (burns.Count >= MaxBurns)
+            {
+                // full: fold it into the nearest
+                int n = 0; float bd = float.MaxValue;
+                for (int i = 0; i < burns.Count; i++) { float d = Vector3.Distance(burns[i], local); if (d < bd) { bd = d; n = i; } }
+                var inf = burnInfo[n];
+                burnInfo[n] = new Vector4(Mathf.Min(1f, inf.x + charA * 0.3f), Mathf.Min(1f, inf.y + blister * 0.3f), inf.z, 0f);
+                PushBurns();
+                return;
+            }
+            burns.Add(new Vector4(local.x, local.y, local.z, radius));
+            burnInfo.Add(new Vector4(charA, blister, Random.Range(0f, 50f), 0f));
+            PushBurns();
+        }
+
+        /// <summary>The whole part burning: how charred it is so far, and how hot (embers glowing in the cracks).</summary>
+        public void SetBurning(float charAll, float heat)
+        {
+            charLevel = Mathf.Clamp01(charAll);
+            if (skinMaterial == null) return;
+            if (Mathf.Abs(charLevel - charShown) > 0.01f) { charShown = charLevel; skinMaterial.SetFloat(CharId, charLevel); }
+            if (Mathf.Abs(heat - heatShown) > 0.02f) { heatShown = heat; skinMaterial.SetFloat(HeatId, heat); }
+        }
+
+        static readonly int BurnStyleId = Shader.PropertyToID("_BurnStyle"), MeltCenterId = Shader.PropertyToID("_MeltCenter");
+
+        /// <summary>How the burnt remains look: x ash, y raw showing, z melted into the floor (w the floor height), and where the melt spreads from.</summary>
+        public void SetBurnStyle(Vector4 style, Vector3 meltCenter)
+        {
+            if (skinMaterial == null) return;
+            skinMaterial.SetVector(BurnStyleId, style);
+            skinMaterial.SetVector(MeltCenterId, meltCenter);
+        }
+
+        void PushBurns()
+        {
+            if (burnTex == null)
+                burnTex = new Texture2D(MaxBurns, 2, TextureFormat.RGBAFloat, false, true) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp, name = name + "_Burns" };
+            for (int i = 0; i < MaxBurns; i++)
+            {
+                Vector4 b = i < burns.Count ? burns[i] : Vector4.zero, a = i < burnInfo.Count ? burnInfo[i] : Vector4.zero;
+                burnPixels[i] = new Color(b.x, b.y, b.z, b.w);
+                burnPixels[MaxBurns + i] = new Color(a.x, a.y, a.z, a.w);
+            }
+            burnTex.SetPixels(burnPixels);
+            burnTex.Apply(false);
+            if (skinMaterial) { skinMaterial.SetTexture(BurnTexId, burnTex); skinMaterial.SetFloat(BurnCountId, burns.Count); }
+        }
+
         /// <summary>Total open-wound area relative to the part's cross-section (used for dismemberment).</summary>
         public float OpenFraction
         {

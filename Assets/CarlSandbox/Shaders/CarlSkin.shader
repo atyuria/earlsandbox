@@ -16,6 +16,10 @@ Shader "Carl/Skin"
         _HoleCount("Hole Count", Float) = 0
         _NbrTex("Neighbour Holes", 2D) = "black" {}
         _NbrCount("Neighbour Hole Count", Float) = 0
+        _BurnTex("Burns", 2D) = "black" {}
+        _BurnCount("Burn Count", Float) = 0
+        _Char("Char", Range(0,1)) = 0
+        _Heat("Heat", Range(0,1)) = 0
     }
     SubShader
     {
@@ -47,6 +51,11 @@ Shader "Carl/Skin"
                 float _HoleCount;
                 float _NbrCount;
                 float4 _ClipPlane;
+                float _BurnCount;
+                float _Char;
+                float _Heat;
+                float4 _BurnStyle;
+                float4 _MeltCenter;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -83,6 +92,36 @@ Shader "Carl/Skin"
             }
             TEXTURE2D(_BloodTex); SAMPLER(sampler_BloodTex);
 
+            // ---- burns: spots of fire damage in the part's own space (row 0 centre + radius, row 1 char, blister,
+            // seed), and _Char: how far the whole part has burned while it was on fire
+            TEXTURE2D_FLOAT(_BurnTex);
+            void Burns(float3 p, out float charA, out float blister)
+            {
+                charA = 0; blister = 0;
+                if (_Char > 0.001)
+                {
+                    // a part on fire doesn't char evenly: blotches spread and join up as it goes on
+                    float g = WoundNoise(p * 22.0) * 0.6 + WoundNoise(p * 70.0 + 5.3) * 0.4;
+                    // (finer, softer blotches than before: it spreads as a crust, not camouflage)
+                    g = WoundNoise(p * 40.0) * 0.55 + WoundNoise(p * 120.0 + 5.3) * 0.45;
+                    charA = smoothstep(0.1, 0.5, _Char * 1.7 + (g - 0.5) * 0.45);
+                    blister = smoothstep(0.0, 0.2, _Char + (g - 0.5) * 0.2) * (1.0 - charA);
+                }
+                int n = (int)_BurnCount;
+                [loop] for (int k = 0; k < n; k++)
+                {
+                    float4 c = LOAD_TEXTURE2D(_BurnTex, int2(k, 0));
+                    float4 a = LOAD_TEXTURE2D(_BurnTex, int2(k, 1));
+                    float d = length(p - c.xyz) / max(c.w, 1e-4);
+                    if (d > 1.6) continue;
+                    float ragged = d + (WoundNoise(p * 55.0 + a.z) - 0.5) * 0.55;
+                    float core = 1.0 - smoothstep(0.3, 0.7, ragged);
+                    float ring = 1.0 - smoothstep(0.7, 1.15, ragged);
+                    charA = max(charA, core * a.x);
+                    blister = max(blister, ring * a.y * (1.0 - core * a.x));
+                }
+            }
+
             struct Attributes { float4 positionOS : POSITION; float3 normalOS : NORMAL; half4 color : COLOR; float2 uv : TEXCOORD0; float4 tissue : TEXCOORD2; float3 restOS : TEXCOORD3; };
             struct Varyings
             {
@@ -99,12 +138,30 @@ Shader "Carl/Skin"
             Varyings vert(Attributes v)
             {
                 Varyings o;
-                VertexPositionInputs p = GetVertexPositionInputs(v.positionOS.xyz);
-                o.positionCS = p.positionCS;
-                o.positionWS = p.positionWS;
+                // badly burned skin shrinks and buckles: pulled in a little, lumpy where it has cooked hardest
+                if (_BurnCount > 0.5 || _Char > 0.001)
+                {
+                    float3 rest = dot(v.restOS, v.restOS) > 1e-8 ? v.restOS : v.positionOS.xyz;
+                    float ch, bl; Burns(rest, ch, bl);
+                    float lump = WoundNoise(rest * 40.0);
+                    // (a part burned right through shrinks to a thin, knotted limb)
+                    // (ashen remains: dried right down, thinner still)
+                    v.positionOS.xyz -= v.normalOS * (ch * (0.006 + 0.012 * lump) + _Char * _Char * (0.012 + 0.012 * _BurnStyle.x) + bl * 0.0015 * lump);
+                }
+                float3 pw = TransformObjectToWorld(v.positionOS.xyz);
+                // melted remains: the body sags down into the floor and spreads out over it where it touches
+                if (_BurnStyle.z > 0.001)
+                {
+                    float m = _BurnStyle.z, d = max(pw.y - _BurnStyle.w, 0.0);
+                    pw.y = _BurnStyle.w + d * (1.0 - 0.72 * m) + 0.004;
+                    pw.xz += (pw.xz - _MeltCenter.xz) * 0.3 * m * saturate(1.0 - d * 2.5);
+                }
+                float4 pcs = TransformWorldToHClip(pw);
+                o.positionCS = pcs;
+                o.positionWS = pw;
                 o.normalWS = TransformObjectToWorldNormal(v.normalOS);
                 o.color = v.color;
-                o.fog = ComputeFogFactor(p.positionCS.z);
+                o.fog = ComputeFogFactor(pcs.z);
                 o.uv = v.uv;
                 o.positionOS = dot(v.restOS, v.restOS) > 1e-8 ? v.restOS : v.positionOS.xyz; // undeformed, so wounds stay pinned
                 o.tissue = v.tissue;
@@ -164,6 +221,34 @@ Shader "Carl/Skin"
                     col = lerp(col, t * light * 0.8 + ml.color * wetSpec, exposed);
                 }
 
+                // ---- burns: sooted, then blistered raw skin, then charred black and cracked (glowing in the cracks
+                // while it's still burning)
+                if (_BurnCount > 0.5 || _Char > 0.001)
+                {
+                    float ch, bl; Burns(i.positionOS, ch, bl);
+                    // scalded: heat-darkened, deep red-brown raw skin with a little wet sheen, sooted over in places
+                    // (no pink, no pale speckle)
+                    half3 rawBurn = lerp(half3(0.3, 0.08, 0.055), half3(0.46, 0.14, 0.09), WoundNoise(i.positionOS * 90.0));
+                    rawBurn = lerp(rawBurn, rawBurn * 0.45, smoothstep(0.55, 0.8, WoundNoise(i.positionOS * 35.0 + 9.2)) * 0.7);
+                    half blSpec = pow(saturate(dot(n, h)), 40.0) * 0.12 * atten;
+                    col = lerp(col, rawBurn * light + ml.color * blSpec, smoothstep(0.1, 0.55, bl) * 0.92);
+                    // soot round the edge of the char, then the char itself: a dry, crusty black-brown crust, rough
+                    // and ashy, with patches of dark raw red showing through where it has split and come away
+                    col = lerp(col, col * 0.35, smoothstep(0.05, 0.35, ch) * 0.7);
+                    float crust = WoundNoise(i.positionOS * 75.0) * 0.6 + WoundNoise(i.positionOS * 220.0 + 2.3) * 0.4;
+                    half3 charC = lerp(half3(0.035, 0.028, 0.022), half3(0.12, 0.085, 0.06), crust);
+                    // the ash on the high points of the crust
+                    charC = lerp(charC, half3(0.22, 0.2, 0.18), smoothstep(0.72, 0.9, WoundNoise(i.positionOS * 160.0 + 7.1)) * 0.6);
+                    // (ashen remains: grey-white ash over much more of it)
+                    charC = lerp(charC, half3(0.17, 0.16, 0.15) * (0.8 + 0.4 * crust), _BurnStyle.x * smoothstep(0.4, 0.65, crust) * 0.7);
+                    // raw patches: blotchy, matte, deep red-brown - not glowing
+                    float patch = smoothstep(0.58 - 0.14 * _BurnStyle.y, 0.7 - 0.14 * _BurnStyle.y, WoundNoise(i.positionOS * 18.0 + 4.4) * 0.7 + WoundNoise(i.positionOS * 60.0) * 0.3);
+                    half3 raw2 = lerp(half3(0.24, 0.045, 0.03), half3(0.42, 0.1, 0.06), WoundNoise(i.positionOS * 110.0));
+                    charC = lerp(charC, raw2, patch * 0.85 * (1.0 - 0.6 * _BurnStyle.x));
+                    half3 charLit = charC * light + ml.color * pow(saturate(dot(n, h)), 12.0) * 0.015 * atten;
+                    col = lerp(col, charLit, smoothstep(0.35, 0.75, ch));
+                }
+
                 // ---- skin of this part that lies inside a neighbouring part's wound (parts overlap at joints):
                 // it is inside the body there, so it shows as meat, not as skin
                 // (cut away, so the wounded part's own flesh and organs show there)
@@ -210,6 +295,11 @@ Shader "Carl/Skin"
                 float _HoleCount;
                 float _NbrCount;
                 float4 _ClipPlane;
+                float _BurnCount;
+                float _Char;
+                float _Heat;
+                float4 _BurnStyle;
+                float4 _MeltCenter;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -259,6 +349,11 @@ Shader "Carl/Skin"
                 float _HoleCount;
                 float _NbrCount;
                 float4 _ClipPlane;
+                float _BurnCount;
+                float _Char;
+                float _Heat;
+                float4 _BurnStyle;
+                float4 _MeltCenter;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -289,6 +384,11 @@ Shader "Carl/Skin"
                 float _HoleCount;
                 float _NbrCount;
                 float4 _ClipPlane;
+                float _BurnCount;
+                float _Char;
+                float _Heat;
+                float4 _BurnStyle;
+                float4 _MeltCenter;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -315,6 +415,11 @@ Shader "Carl/Skin"
                 float _HoleCount;
                 float _NbrCount;
                 float4 _ClipPlane;
+                float _BurnCount;
+                float _Char;
+                float _Heat;
+                float4 _BurnStyle;
+                float4 _MeltCenter;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"

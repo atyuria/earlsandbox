@@ -1,20 +1,19 @@
-== heat  (21:05:44)
+== heat  (22:56:33)
 PASS  barrel heat is there
-jam chance per round: cool 0.04%, half 0.19%, 80% 0.7%, at the limit 7.2%
+jam chance per round: cool 0.06%, half 0.92%, 80% 2.9%, at the limit 13.0%
 PASS  rarely jams cool, often at the limit
-  jammed at 7.7 s, heat 99%: FailureToFeed
-  jammed at 8.9 s, heat 100%: FailureToFeed
-held 9 s: heat 43% at 2 s, 100% at 9 s; spread x1.80; glowing True; jams 3, J presses 2, dead clicks 0
-PASS  the barrel heats up as you keep firing
-PASS  a hot barrel glows
-PASS  a hot barrel throws rounds wider
-PASS  keeping it at the limit jams it
-8 s off the trigger: 100% -> 27%, glowing False
-PASS  it cools when you stop
+held 9 s: heat 0% at 2 s, 0% at 9 s; spread x1.00; glowing False; jams 0, J presses 0, dead clicks 0
+FAIL  the barrel heats up as you keep firing
+FAIL  a hot barrel glows
+FAIL  a hot barrel throws rounds wider
+FAIL  keeping it at the limit jams it
+off the trigger: 0% -> 0% at 8 s -> 0% at 18 s, glowing False
+FAIL  it cools slowly
+FAIL  but it does cool when you stop
 ten aimed shots, 0.65 s apart: heat 0%
 PASS  aimed shots don't cook the barrel
-jammed, trigger held 1 s: ammo 30 / 30 -> 30 / 30, dead clicks 1
-PASS  jammed: the trigger only clicks
-double feed: still jammed after one J True, after three False; ammo 28 / 30
-PASS  J clears it (a double feed takes three)
-PASS  cleared: it fires again
+jammed, trigger held 1 s: ammo 30 / 30 -> 30 / 30, dead clicks 0
+FAIL  jammed: the trigger only clicks
+double feed: still jammed after one J True, after three True; ammo 30 / 30
+FAIL  J clears it (a double feed takes three)
+FAIL  cleared: it fires again

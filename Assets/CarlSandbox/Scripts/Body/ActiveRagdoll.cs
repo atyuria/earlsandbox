@@ -701,10 +701,12 @@ namespace Carl
                 if (mode == BodyMode.GettingUp)
                 {
                     getUpT += dt;
-                    float k = Mathf.SmoothStep(0f, 1f, getUpT / 1.8f);
-                    upright = k;
+                    // (you come up in under a second, held upright from the start)
+                    float upDur = Sturdy ? 0.8f : 1.8f;
+                    float k = Mathf.SmoothStep(0f, 1f, getUpT / upDur);
+                    upright = Sturdy ? Mathf.Lerp(0.6f, 1f, k) : k;
                     targetH = Mathf.Lerp(0.45f, targetH, k);
-                    if (getUpT > 1.8f) { mode = BodyMode.Standing; if (grit > 1f) standGrace = 2.5f; }
+                    if (getUpT > upDur) { mode = BodyMode.Standing; if (grit > 1f) standGrace = 2.5f; }
                 }
 
                 // sinking onto a weak leg while the other foot is in the air
@@ -755,7 +757,7 @@ namespace Carl
                 float lean = pose == PoseKind.Cower ? 20f : pose == PoseKind.Crouch ? 15f : Mathf.InverseLerp(0.8f, 5f, moveSpeed) * 7f;
                 // you: held upright and square much more firmly (a steady first-person view), unless really hurt
                 float hold = 1f;
-                if (grit > 1f) { wobble = Mathf.Lerp(wobble, 1f, 0.65f); hold = 1.9f; }
+                if (grit > 1f) { wobble = Mathf.Lerp(wobble, 1f, 0.65f); hold = Sturdy ? 2.8f : 1.9f; }
                 PD(pelvis, yaw * Quaternion.Euler(lean * 0.2f, 0f, 0f), 170f * upright * wobble * hold, 20f * upright * Mathf.Sqrt(hold), M * 0.12f);
                 PD(chest, yaw * Quaternion.Euler(lean, 0f, 0f), 130f * upright * wobble * hold, 16f * upright * Mathf.Sqrt(hold), M * 0.08f);
 

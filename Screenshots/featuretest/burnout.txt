@@ -1,0 +1,4 @@
+== burnout  (00:10:54)
+three set alight all over: out after 21 s; dead 2; with remains 2
+PASS  the fire burns out once there's nothing left to burn
+FAIL  each leaves burnt remains

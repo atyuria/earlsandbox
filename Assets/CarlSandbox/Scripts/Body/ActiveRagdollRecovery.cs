@@ -24,6 +24,8 @@ namespace Carl
             getUpHeading = Vector3.ProjectOnPlane(ct.up, Vector3.up);
             if (getUpHeading.sqrMagnitude < 0.01f) getUpHeading = Vector3.ProjectOnPlane(ct.forward, Vector3.up);
             getUpHeading.Normalize();
+            // you, not badly hurt: straight up off the floor, none of the roll-over-and-kneel business
+            if (SturdyHolds && Steadiness > 0.3f) getUpPhase = 3;
         }
 
         float HeightAboveGround(Vector3 p)

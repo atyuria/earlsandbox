@@ -1,0 +1,5 @@
+== sprint  (00:09:17)
+25 s sprinting with a rifle, turning hard: 0 falls
+PASS  sprinting never puts you on the floor
+knocked down: back on your feet in 1.2 s
+PASS  you get back up quickly, on your own

@@ -212,6 +212,7 @@ namespace Carl
         {
             InitMaterials();
             Ladder.All.Clear(); TrenchSpots.Clear(); TrenchNav.Clear();
+            trenchBuilt = index == 3;
             var root = new GameObject("Map_" + Names[index]).transform;
             if (index == 0) BuildLab(root, out playerSpawn, out playerYaw, out carlSpawns);
             else if (index == 1) BuildYard(root, out playerSpawn, out playerYaw, out carlSpawns);
@@ -303,6 +304,12 @@ namespace Carl
             public readonly System.Collections.Generic.List<(Vector2 c, float r)> craters = new System.Collections.Generic.List<(Vector2, float)>();
         }
         static TrenchData trenchData;
+        static bool trenchBuilt;
+
+        /// <summary>The trench centre lines of the map now up (TRENCHES only, else null): for drawing the map.</summary>
+        public static System.Collections.Generic.List<(int kind, Vector2[] pts)> TrenchLinesNow => trenchBuilt && trenchData != null ? trenchData.lines : null;
+        /// <summary>The shell holes of the map now up (TRENCHES only, else null).</summary>
+        public static System.Collections.Generic.List<(Vector2 c, float r)> CratersNow => trenchBuilt && trenchData != null ? trenchData.craters : null;
 
         /// <summary>
         /// The Blender terrain: three parts (cut earth walls, mud floors, leaf litter on top) and the layout it was

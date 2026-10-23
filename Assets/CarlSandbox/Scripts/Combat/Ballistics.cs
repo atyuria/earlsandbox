@@ -232,6 +232,18 @@ namespace Carl
                     continue;
                 }
 
+                // a drone in the air: a hit can bring it down (or set off what it's carrying)
+                var drone = hit.collider.GetComponentInParent<FpvDrone>();
+                if (drone != null && !drone.Ended)
+                {
+                    drone.Shot(hit.point, dir);
+                    p.alive = false;
+                    break;
+                }
+
+                // the flamethrower's fuel tanks on your back: the round may set them off (and then it's a metal hit)
+                if (FlameTank.IsTank(hit.collider)) FlameTank.HitAt(hit.point, dir);
+
                 // world impact
                 p.ignore = null;
                 float momentum = p.mass * p.vel.magnitude;
@@ -425,6 +437,77 @@ namespace Carl
             I.fire = I.MakeSystem("Fire", Mats.SoftParticle(true), 0.25f, false, -0.2f);
             I.debris = I.MakeSystem("Debris", Mats.SoftParticle(false), 1.2f, true, 1f);
             I.flame = I.MakeSystem("Flame", Mats.SoftParticle(true), 0.06f, false, 0f);
+            // dust that jumps off and then hangs: thrown out fast, the air stops it within a metre or two, and it
+            // floats there, spreading and settling slowly
+            I.cloud = I.MakeSystem("DustCloud", Mats.SoftParticle(false), 4f, false, -0.015f);
+            Drag(I.cloud, 3.2f, AnimationCurve.EaseInOut(0f, 0.35f, 1f, 2.4f));
+            // burning fuel: a jet that slows and climbs as it burns, and flames licking up off whatever's on fire
+            I.jet = I.MakeSystem("FlameJet", Mats.SoftParticle(true), 0.7f, false, -0.35f);
+            Drag(I.jet, 2.2f, AnimationCurve.EaseInOut(0f, 0.3f, 1f, 2.2f));
+            // the smoke of a big blast: it hangs and climbs slowly for the best part of half a minute
+            I.plume = I.MakeSystem("Plume", Mats.SoftParticle(false), 20f, false, -0.02f);
+            Drag(I.plume, 0.35f, AnimationCurve.EaseInOut(0f, 0.5f, 1f, 3.2f));
+            I.burn = I.MakeSystem("BurnFlame", Mats.SoftParticle(true), 0.5f, false, -0.6f);
+            Drag(I.burn, 1.2f, AnimationCurve.EaseInOut(0f, 1f, 1f, 0.25f));
+        }
+
+        static void Drag(ParticleSystem ps, float drag, AnimationCurve size)
+        {
+            var lv = ps.limitVelocityOverLifetime;
+            lv.enabled = true;
+            lv.limit = 1000f;
+            lv.drag = drag;
+            lv.multiplyDragByParticleSize = false;
+            var sz = ps.sizeOverLifetime;
+            sz.enabled = true;
+            sz.size = new ParticleSystem.MinMaxCurve(1f, size);
+        }
+
+        ParticleSystem cloud, jet, burn, plume;
+
+        /// <summary>
+        /// Dust that jumps off a surface and then floats: puffs thrown out of it and up, quickly stopped by the air,
+        /// then hanging, spreading and slowly sinking for a few seconds.
+        /// </summary>
+        public static void DustCloud(Vector3 pos, Vector3 normal, float power, Color c)
+        {
+            if (I == null) return;
+            int n = 3 + (int)(5f * power);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 v = (normal * Random.Range(1.5f, 4f) + Vector3.up * Random.Range(1.5f, 4.5f) + Random.insideUnitSphere * 1.5f) * Mathf.Sqrt(power);
+                var ci = c * Random.Range(0.88f, 1.08f); ci.a = c.a * Random.Range(0.6f, 1f);
+                Emit(I.cloud, pos + normal * 0.05f + Random.insideUnitSphere * 0.05f, v, Random.Range(0.18f, 0.4f) * Mathf.Sqrt(power), ci, Random.Range(2.5f, 5f));
+            }
+        }
+
+        /// <summary>A tick of the flamethrower: burning fuel thrown out along the line, rolling and climbing as it slows.</summary>
+        public static void FlameJet(Vector3 pos, Vector3 dir, float speed)
+        {
+            if (I == null) return;
+            for (int i = 0; i < 14; i++)
+            {
+                Vector3 v = (dir + Random.insideUnitSphere * 0.07f).normalized * speed * Random.Range(0.8f, 1.1f);
+                float hot = Random.value;
+                var c = Color.Lerp(new Color(1f, 0.45f, 0.1f, 0.9f), new Color(1f, 0.85f, 0.45f, 1f), hot);
+                Emit(I.jet, pos + dir * Random.Range(0f, 0.15f), v, Random.Range(0.12f, 0.22f), c, Random.Range(0.45f, 0.8f));
+            }
+            for (int i = 0; i < 2; i++)
+                Emit(I.smoke, pos + dir * Random.Range(2f, 5f), dir * speed * 0.15f + Vector3.up * Random.Range(1f, 2f), Random.Range(0.4f, 0.8f), new Color(0.12f, 0.11f, 0.1f, 0.35f), Random.Range(1.5f, 3f));
+        }
+
+        /// <summary>Flames licking up off something burning (a body, the ground), with black smoke and the odd ember.</summary>
+        public static void BurnFlames(Vector3 pos, float k, float radius = 0.12f)
+        {
+            if (I == null || k <= 0.01f) return;
+            // (tongues of flame licking off it, not a ball hiding it: the body shows through)
+            if (Random.value < 0.3f + 0.45f * k)
+            {
+                var c = Color.Lerp(new Color(1f, 0.38f, 0.08f, 0.7f), new Color(1f, 0.75f, 0.35f, 0.85f), Random.value);
+                Emit(I.burn, pos + Random.insideUnitSphere * radius, Vector3.up * Random.Range(0.6f, 1.4f) + Random.insideUnitSphere * 0.25f, Random.Range(0.05f, 0.12f) * (0.7f + k * 0.6f), c, Random.Range(0.25f, 0.5f));
+            }
+            if (Random.value < 0.08f * k) Emit(I.smoke, pos + Vector3.up * 0.25f, Vector3.up * Random.Range(0.8f, 1.6f) + Random.insideUnitSphere * 0.2f, Random.Range(0.15f, 0.3f), new Color(0.1f, 0.09f, 0.085f, 0.3f), Random.Range(2f, 3.5f));
+            if (Random.value < 0.15f * k) Emit(I.sparks, pos, Vector3.up * Random.Range(1f, 3f) + Random.insideUnitSphere, 0.006f, new Color(1f, 0.6f, 0.2f), Random.Range(0.5f, 1.2f));
         }
 
         ParticleSystem MakeSystem(string name, Material m, float life, bool stretch, float gravity)
@@ -502,6 +585,8 @@ namespace Carl
             }
             for (int i = 0; i < 12 + (int)(14f * power); i++)
                 Emit(I.debris, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(1.5f, 4.5f) * Mathf.Sqrt(power), Random.Range(0.005f, 0.016f), new Color(0.27f, 0.21f, 0.15f), Random.Range(0.5f, 1.1f));
+            // the puff that jumps off the wall and then hangs there, drifting
+            DustCloud(pos, normal, power, new Color(0.5f, 0.42f, 0.33f, 0.55f));
             // and the cloud it leaves hanging
             Haze.DirtHit(pos, normal, power);
         }
@@ -563,8 +648,38 @@ namespace Carl
                 Emit(I.debris, pos, d * Random.Range(4f, 14f), Random.Range(0.015f, 0.05f), new Color(0.2f, 0.18f, 0.16f, 1f), Random.Range(0.6f, 1.4f));
             }
             Sparks(pos, Vector3.up, 90);
+            // the ground thrown up: a ring of dust shot out along it that stops a few metres off and hangs, a
+            // column of earth and smoke jumping straight up and spreading at the top, clods arcing out and falling
+            for (int i = 0; i < 40; i++)
+            {
+                float a = i / 40f * Mathf.PI * 2f + Random.value * 0.2f;
+                Vector3 d = new Vector3(Mathf.Cos(a), Random.Range(0.02f, 0.25f), Mathf.Sin(a));
+                Emit(I.cloud, pos + d * 0.4f, d * Random.Range(10f, 18f), Random.Range(0.5f, 0.9f), new Color(0.5f, 0.43f, 0.35f, Random.Range(0.4f, 0.65f)), Random.Range(5f, 9f));
+            }
+            for (int i = 0; i < 26; i++)
+                Emit(I.cloud, pos + Random.insideUnitSphere * 0.5f, new Vector3(Random.Range(-1.5f, 1.5f), Random.Range(8f, 16f), Random.Range(-1.5f, 1.5f)), Random.Range(0.6f, 1.1f), new Color(0.3f, 0.27f, 0.24f, Random.Range(0.45f, 0.7f)), Random.Range(5f, 10f));
+            for (int i = 0; i < 50; i++)
+            {
+                Vector3 d = Random.onUnitSphere; d.y = Mathf.Abs(d.y) * 1.5f + 0.4f;
+                Emit(I.debris, pos, d.normalized * Random.Range(6f, 20f), Random.Range(0.03f, 0.08f), new Color(0.22f, 0.17f, 0.13f, 1f), Random.Range(1.2f, 2.4f));
+            }
+            // embers: long glowing arcs
+            for (int i = 0; i < 40; i++)
+            {
+                Vector3 d = Random.onUnitSphere; d.y = Mathf.Abs(d.y) + 0.2f;
+                Emit(I.sparks, pos, d.normalized * Random.Range(6f, 16f), 0.012f, new Color(1f, 0.55f, 0.15f), Random.Range(0.8f, 1.8f));
+            }
+            // and the smoke that's left: a dark cloud that hangs over the spot and climbs, slowly, spreading and
+            // thinning as it goes, for 15-25 s
+            for (int i = 0; i < 28; i++)
+            {
+                Vector3 at = pos + Vector3.up * Random.Range(0.5f, 3f) + Random.insideUnitSphere * 1.2f;
+                Vector3 v = new Vector3(Random.Range(-0.4f, 0.4f), Random.Range(1.2f, 3f), Random.Range(-0.4f, 0.4f));
+                float shade = Random.Range(0.14f, 0.26f);
+                Emit(I.plume, at, v, Random.Range(1.2f, 2.2f), new Color(shade, shade * 0.95f, shade * 0.9f, Random.Range(0.35f, 0.55f)), Random.Range(15f, 25f));
+            }
             Haze.Blast(pos);
-            Flash(pos, 26f, 22f, 0.35f);
+            Flash(pos, 40f, 30f, 0.45f);
             Shockwave(pos);
         }
 

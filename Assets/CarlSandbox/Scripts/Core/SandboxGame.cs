@@ -78,7 +78,9 @@ namespace Carl
             MedKit.Attach(gameObject);
             SquadCommand.Attach(gameObject);
             BarrelHeat.Attach(gameObject);
-            menus = gameObject.AddComponent<Menus>();
+            Radio.Attach(gameObject);
+            FlameTank.Attach(gameObject);
+            menus =gameObject.AddComponent<Menus>();
             menus.Init(this);
             // the game starts on the main menu: nothing is loaded until you choose a map and press PLAY
             ToMainMenu();
@@ -121,12 +123,14 @@ namespace Carl
             }
             else
             {
-                // a half moon: faint, blue, high; everything else near black
+                // a half moon: faint, blue, high. Dark, but not black: people are grey-blue shapes you can make
+                // out once your eyes are used to it (they were pitch-black cut-outs), with their colours coming
+                // back under a lamp or a torch
                 sun.transform.rotation = Quaternion.Euler(40f, 150f, 0f);
-                sun.intensity = 0.07f; sun.color = new Color(0.62f, 0.72f, 1f); sun.shadowStrength = 0.6f;
-                RenderSettings.ambientSkyColor = new Color(0.035f, 0.042f, 0.065f);
-                RenderSettings.ambientEquatorColor = new Color(0.025f, 0.028f, 0.04f);
-                RenderSettings.ambientGroundColor = new Color(0.012f, 0.012f, 0.015f);
+                sun.intensity = 0.16f; sun.color = new Color(0.62f, 0.72f, 1f); sun.shadowStrength = 0.6f;
+                RenderSettings.ambientSkyColor = new Color(0.11f, 0.13f, 0.19f);
+                RenderSettings.ambientEquatorColor = new Color(0.08f, 0.09f, 0.12f);
+                RenderSettings.ambientGroundColor = new Color(0.045f, 0.045f, 0.055f);
             }
             Night = t == 2;
             EarlGunner.Lamps.Clear();
@@ -210,6 +214,10 @@ namespace Carl
             // (loaded from anywhere but the START button - a hotkey, a test - the main menu page goes too)
             if (menus != null && menus.open == MenuKind.Main) menus.open = MenuKind.None;
             BarrelHeat.I?.Clear();
+            Radio.I?.Clear();
+            foreach (var j in FindObjectsByType<Jet>()) Destroy(j.gameObject);
+            foreach (var b in FindObjectsByType<Bomb>()) Destroy(b.gameObject);
+            foreach (var b in FindObjectsByType<Barrage>()) Destroy(b.gameObject);
             if (menuCam != null) menuCam.SetActive(false);
             player.gameObject.SetActive(true);
             WorldFreeze.Set(false);
@@ -313,6 +321,8 @@ namespace Carl
 
             // the main menu (what you boot into): nothing else answers the keys until you press PLAY
             if (menus.open == MenuKind.Main) { WorldFreeze.Set(false); WorldFreeze.Tick(); return; }
+            // the radio's map is up: its keys are its own (ESC backs out of it, not into the settings)
+            if (Radio.Open || Radio.ClosedFrame >= Time.frameCount - 1) return;
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (menus.IsOpen && menus.open != MenuKind.Settings) menus.Toggle(menus.open);
@@ -323,7 +333,9 @@ namespace Carl
             WorldFreeze.Set(menus.open == MenuKind.Spawn);
             WorldFreeze.Tick();
             if (kb.gKey.wasPressedThisFrame && menus.open != MenuKind.Settings) menus.Toggle(MenuKind.Gun);
-            if (!menus.IsOpen)
+            // (not while a list of your own is up - the wound list, the radio: that click is for the list, and
+            // locking the mouse on it meant the click never reached the button)
+            if (!menus.IsOpen && !MedKit.Busy && !Menus.Blocking)
             {
                 if (Cursor.lockState != CursorLockMode.Locked && mouse.leftButton.wasPressedThisFrame && medical.selected == null) LockCursor(true);
                 if (Cursor.lockState != CursorLockMode.Locked && mouse.leftButton.wasPressedThisFrame && mouse.position.ReadValue().x > 520f) LockCursor(true);
@@ -560,7 +572,7 @@ namespace Carl
             float W = Screen.width, H = Screen.height;
 
             // flying a drone: its goggles draw their own picture, none of yours
-            bool drone = FpvDrone.Piloting != null;
+            bool drone = FpvDrone.Piloting != null || Radio.Open;
             if (drone) { }
             else if (weapons != null && weapons.Scoped)
             {
@@ -662,14 +674,15 @@ namespace Carl
                     "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
                     "ALT + D / ALT + A: gun out round the corner right / left (mouse left-right: how far out · hold RMB + mouse: point it · LMB fire)\n" +
                     "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
-                    "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
+                    "F spawn menu  ·  G gun menu  ·  V free camera on/off  ·  T slow-mo  ·  K end it\n" +
                     "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  O laser  ·  J clear a jam  ·  P fly a drone (pick one in G, MISC)\n" +
                     "Friendlies (green armband): look at one, HOLD R to recruit  ·  HOLD MIDDLE MOUSE: squad orders\n" +
                     "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
-                    "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse";
-                GUI.Box(new Rect(12, 12, 620, 196), GUIContent.none, hudCard);
-                GUI.Label(new Rect(26, 22, 600, 180), help, (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 }));
+                    "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse\n" +
+                    "RADIO (G menu, MISC): hold it + LMB, or M - map from above: 1 bombing run · 2 gun run · 3 artillery, LMB on the circle";
+                GUI.Box(new Rect(12, 12, 620, 212), GUIContent.none, hudCard);
+                GUI.Label(new Rect(26, 22, 600, 196), help, (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 }));
             }
         }
     }

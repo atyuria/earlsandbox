@@ -137,6 +137,58 @@ namespace Carl
             });
         }
 
+        GUIStyle invHand, invAmmo, invSlot;
+
+        /// <summary>
+        /// With the visor down its frame hides your hands and the weapon bar at the bottom of the screen, so what
+        /// you're carrying is shown on the inside of the glass, just above the frame: what's in your hand and its
+        /// rounds (and heat) big in the middle, the rest of what you carry in a row under it.
+        /// </summary>
+        void Inventory(float W, float H, float open, float y)
+        {
+            var w = SandboxGame.Instance != null ? SandboxGame.Instance.weapons : null;
+            if (w == null || w.owned == null || FpvDrone.Piloting != null) return;
+            float a = Mathf.Clamp01((1f - open) * 1.5f - 0.3f);
+            if (a <= 0.01f) return;
+            if (invHand == null)
+            {
+                invHand = new GUIStyle { fontSize = 20, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                invAmmo = new GUIStyle { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                invSlot = new GUIStyle { fontSize = 11, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            }
+            var green = new Color(0.55f, 1f, 0.6f, 0.9f * a);
+            var dim = new Color(0.55f, 1f, 0.6f, 0.4f * a);
+            invHand.normal.textColor = green; invAmmo.normal.textColor = green;
+            string hand = w.Armed ? w.Current.name : "EMPTY HANDS";
+            string ammo = w.Armed ? w.AmmoText : "";
+            var bh = BarrelHeat.I;
+            if (bh != null && w.Armed && w.Current.type == WeaponType.Gun)
+            {
+                float h = bh.Heat(w.current);
+                if (h > 0.05f) ammo += $"   HEAT {h * 100f:0}%";
+                if (bh.Jammed(w.current)) ammo += "   JAMMED (J)";
+            }
+            GUI.color = new Color(0f, 0f, 0f, 0.35f * a);
+            GUI.DrawTexture(new Rect(W / 2 - 230, y - 4, 460, 52), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(W / 2 - 230, y, 460, 24), "IN HAND  ·  " + hand, invHand);
+            if (ammo != "") GUI.Label(new Rect(W / 2 - 230, y + 24, 460, 20), ammo, invAmmo);
+            // the rest of the kit, numbered as the keys pick them
+            var parts = new List<string>();
+            int n = 0;
+            for (int i = 0; i < w.defs.Count; i++)
+            {
+                if (!w.owned[i]) continue;
+                n++;
+                parts.Add((i == w.current ? "[" : "") + n + " " + w.defs[i].name + (i == w.current ? "]" : ""));
+            }
+            if (parts.Count > 0)
+            {
+                invSlot.normal.textColor = dim;
+                GUI.Label(new Rect(W / 2 - 400, y + 50, 800, 18), string.Join("   ", parts), invSlot);
+            }
+        }
+
         void LateUpdate()
         {
             // a visor down over your face covers your ears: everything you hear is duller and quieter
@@ -150,7 +202,7 @@ namespace Carl
             Down = 0f; Frost = 0f;
             var me = PlayerAvatar.Body;
             var game = SandboxGame.Instance;
-            if (me == null || me.Dead || game == null || game.player == null || game.player.flying) return;
+            if (me == null || me.Dead || game == null || game.player == null || game.player.flying || Radio.Open) return;
             var vis = ArmourSystem.VisorOf(me, out var glass);
             if (vis == null) return;
             float open = vis.VisorOpen;
@@ -166,6 +218,7 @@ namespace Carl
             if (knight)
             {
                 GUI.DrawTexture(r, knightPlate, ScaleMode.StretchToFill);
+                Inventory(W, H, open, r.y + H * 0.66f);
                 return;
             }
             GUI.DrawTexture(r, altynGlass, ScaleMode.StretchToFill);
@@ -193,6 +246,7 @@ namespace Carl
                 GUI.color = Color.white;
             }
             GUI.DrawTexture(r, altynFrame, ScaleMode.StretchToFill);
+            Inventory(W, H, open, r.y + r.height * 0.69f);
             if (Frost > 0.6f && open < 0.05f)
             {
                 if (hint == null) hint = new GUIStyle { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(1f, 0.85f, 0.6f) } };

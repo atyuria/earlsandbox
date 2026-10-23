@@ -675,13 +675,14 @@ namespace Carl
             Vector3 here = body.Pelvis.transform.position;
             if (objective == null)
             {
-                // a point along their front line, roughly across from where he is
+                // a point along their front line: his group's stretch of it, or (on his own) roughly across from him
                 Vector3? best = null; float bd = float.MaxValue;
+                float aimX = laneX ?? here.x, jitter = laneX.HasValue ? 3f : 12f;
                 for (int i = 0; i < TrenchNav.Nodes.Count; i++)
                 {
                     var n = TrenchNav.Nodes[i];
                     if (TrenchNav.Field[i] || !TheirLineNode(n)) continue;
-                    float d = Mathf.Abs(n.x - here.x + Random.Range(-12f, 12f)) + Random.Range(0f, 6f);
+                    float d = Mathf.Abs(n.x - aimX + Random.Range(-jitter, jitter)) + Random.Range(0f, laneX.HasValue ? 2f : 6f);
                     if (d < bd) { bd = d; best = n; }
                 }
                 objective = best;

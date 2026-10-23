@@ -54,6 +54,62 @@ namespace Carl
                 else if (!g.assault) g.overTheTop = false;
                 if (g.defend && g.holdPoint == Vector3.zero && g.Body != null) g.holdPoint = g.Body.Pelvis.transform.position - Vector3.up * 0.95f;
             }
+            SplitIntoGroups();
+        }
+
+        static int nextGroup;
+
+        /// <summary>
+        /// The men going across who haven't been told where yet are split into little groups of two to four, each
+        /// sent at a different stretch of the other side's line (and so down a different trench to get there), so
+        /// the attack comes in at several places at once. A group goes over the top together, or not at all.
+        /// </summary>
+        void SplitIntoGroups()
+        {
+            for (int team = 0; team < 2; team++)
+            {
+                var fresh = new System.Collections.Generic.List<EarlGunner>();
+                foreach (var g in EarlGunner.All)
+                    if (g != null && g.team == team && g.assault && g.group < 0 && g.Body != null && g.Fighting) fresh.Add(g);
+                if (fresh.Count == 0) continue;
+                // how wide their line is
+                float minX = float.MaxValue, maxX = float.MinValue;
+                if (TrenchNav.Ready)
+                    for (int i = 0; i < TrenchNav.Nodes.Count; i++)
+                    {
+                        var n = TrenchNav.Nodes[i];
+                        if (TrenchNav.Field[i] || !EarlGunner.EnemyLineNode(team, n)) continue;
+                        minX = Mathf.Min(minX, n.x); maxX = Mathf.Max(maxX, n.x);
+                    }
+                if (minX > maxX) { minX = -30f; maxX = 30f; }
+                // neighbours together: ordered along the line, then cut into groups
+                fresh.Sort((a, b) => a.Body.Center.x.CompareTo(b.Body.Center.x));
+                var lanes = new System.Collections.Generic.List<float>();
+                int groups = Mathf.Max(1, Mathf.CeilToInt(fresh.Count / 3f));
+                int laneCount = Mathf.Max(groups, 3);
+                for (int l = 0; l < laneCount; l++) lanes.Add(Mathf.Lerp(minX + 4f, maxX - 4f, (l + 0.5f) / laneCount));
+                // a random start so one wave after another doesn't always pick the same stretches
+                int start = Random.Range(0, laneCount);
+                bool topTaken = false;
+                int idx = 0;
+                for (int k = 0; k < groups; k++)
+                {
+                    int size = k == groups - 1 ? fresh.Count - idx : Mathf.Clamp(Random.Range(2, 5), 1, fresh.Count - idx);
+                    if (size <= 0) break;
+                    float lane = lanes[(start + k * Mathf.Max(1, laneCount / groups)) % laneCount] + Random.Range(-3f, 3f);
+                    // one group in a while goes straight across the open; the rest by the trenches
+                    bool top = !topTaken && groups > 1 && Random.value < 0.45f;
+                    if (top) topTaken = true;
+                    int id = nextGroup++;
+                    for (int m = 0; m < size && idx < fresh.Count; m++, idx++)
+                    {
+                        var g = fresh[idx];
+                        g.group = id;
+                        g.laneX = lane;
+                        g.overTheTop = top;
+                    }
+                }
+            }
         }
 
         static readonly Unity.Profiling.ProfilerMarker PM_Update = new Unity.Profiling.ProfilerMarker("Carl.TrenchBattle.Update");

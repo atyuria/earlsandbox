@@ -30,6 +30,10 @@ namespace Carl
         public static Transform EyeT;
         bool wasFlying;
 
+        /// <summary>Dropped down on purpose (Y): stay down until Y or SPACE again.</summary>
+        bool stayDown;
+        int downFrame;
+
         public static PlayerAvatar Attach(PlayerController pc)
         {
             var a = pc.gameObject.AddComponent<PlayerAvatar>();
@@ -47,6 +51,9 @@ namespace Carl
             h.brain.aiEnabled = false;
             h.brain.playerControlled = true;
             h.ragdoll.grit = 1.8f;           // the main character: harder to put down, quicker back up
+            // and lighter on his feet: the same muscles moving a quarter less weight run, turn and recover far easier
+            foreach (var bp in h.partList) if (bp != null && bp.rb != null) bp.rb.mass *= 0.75f;
+            h.totalMass *= 0.75f;
             // a plain, even walk (Earls each get a quirky one)
             h.ragdoll.SetPlainStyle();
             Body = h;
@@ -128,8 +135,12 @@ namespace Carl
         }
 
         /// <summary>Called by PlayerController every frame with what the keys say. Returns false if there is no body.</summary>
+        /// <summary>Playtests: run this way (sprinting) as if the keys were held.</summary>
+        public static Vector3? TestRun;
+
         public bool Drive(Vector3 wishWorld, bool sprint, Keyboard kb, float dt)
         {
+            if (TestRun.HasValue) { wishWorld = TestRun.Value; sprint = true; }
             var h = Body;
             if (h == null) return false;
             var rag = h.ragdoll;
@@ -137,7 +148,7 @@ namespace Carl
             pc.down = rag.IsDown;
             if (p.dead) { rag.moveSpeed = 0f; return true; }
             // (flying the free camera, your body stands still and keeps looking where it was; the keys fly the camera)
-            bool keys = !pc.flying && FpvDrone.Piloting == null;
+            bool keys = !pc.flying && FpvDrone.Piloting == null && !Radio.Open;
             Transform eyes = pc.flying && EyeT != null ? EyeT : pc.cam.transform;
             Vector3 look = eyes.forward;
             // (ALT + A / D: your head glances after the gun, but your body stays square behind the cover)
@@ -210,10 +221,14 @@ namespace Carl
                 Intel.Noise(h.Pelvis.transform.position, Teams.Friendly, crouch ? 2.5f : sprint ? 16f : 7f);
             }
             // Z: go down / try to get up. On the ground: hold space to get up, keys to crawl
-            if (keys && kb.yKey.wasPressedThisFrame && !rag.IsDown) rag.Fall("player");
+            if (keys && kb.yKey.wasPressedThisFrame && !rag.IsDown) { rag.Fall("player"); stayDown = true; downFrame = Time.frameCount; }
+            if (!rag.IsDown) stayDown = false;
             if (rag.IsDown)
             {
-                rag.wantStand = !keys || kb.spaceKey.isPressed || kb.yKey.wasPressedThisFrame || rag.helpUp > 0.3f;   // (or a mate is helping you up)
+                // you get up on your own, straight away - unless you're crawling (keys held) or chose to drop (Y)
+                if (keys && kb.yKey.wasPressedThisFrame && downFrame != Time.frameCount) stayDown = !stayDown;
+                rag.wantStand = !keys || kb.spaceKey.isPressed || rag.helpUp > 0.3f || (!stayDown && wishWorld.sqrMagnitude < 0.01f);
+                if (kb.spaceKey.isPressed) stayDown = false;
                 rag.wantCrawl = wishWorld.sqrMagnitude > 0.01f;
                 rag.crawlDir = rag.wantCrawl ? wishWorld.normalized : Vector3.zero;
             }

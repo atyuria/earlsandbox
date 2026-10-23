@@ -708,7 +708,7 @@ namespace Carl
             var L = w.loadouts[gunTab];
             // showcase
             var showR = new Rect(listR.xMax + 14, panel.y + 16, panel.xMax - listR.xMax - 30, Mathf.Min(260f, panel.height * 0.42f));
-            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {w.MagSize(gunTab)} RDS  ·  {(w.IsAuto(gunTab) ? "FULL AUTO" : "SEMI")}" :d.type == WeaponType.Knife ? "STAB · SLASH" : d.type == WeaponType.Tool ? "HOLD LMB GRAB · RMB THROW · SCROLL DISTANCE" : d.type == WeaponType.Medical ? (d.name == "BANDAGE" ? "3 S · SLOWS BLEEDING" : "12 S · SEWS DEEP WOUNDS SHUT") : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
+            string detail = d.type == WeaponType.Gun ? $"{SightName(L.sight)}  ·  {(L.grip == GripKind.None ? "NO GRIP" : L.grip == GripKind.Vertical ? "VERTICAL GRIP" : "ANGLED GRIP")}  ·  {w.MagSize(gunTab)} RDS  ·  {(w.IsAuto(gunTab) ? "FULL AUTO" : "SEMI")}" :d.type == WeaponType.Knife ? "STAB · SLASH" : d.type == WeaponType.Tool ? "HOLD LMB GRAB · RMB THROW · SCROLL DISTANCE" : d.type == WeaponType.Medical ? (d.name == "BANDAGE" ? "3 S · SLOWS BLEEDING" : WeaponController.IsRadio(d) ? "BOMBS · GUN RUN · ARTILLERY" : "12 S · SEWS DEEP WOUNDS SHUT") : $"{(L.fuse == 0 ? "IMPACT" : (L.fuse + 1) + " SEC")} FUSE  ·  {L.shrapnel} FRAGMENTS";
             Showcase(showR, d.name, detail);
 
             var optR = new Rect(showR.x, showR.yMax + 10, showR.width, panel.yMax - showR.yMax - 26);
@@ -786,8 +786,12 @@ namespace Carl
                 GUILayout.EndHorizontal();
                 GUILayout.Label("Suppressed shots carry about a third as far and barely flash. The light lights what you point at; the laser dot sits where the barrel points.", small);
             }
-            if (d.type == WeaponType.Medical)
+            if (WeaponController.IsRadio(d))
+                GUILayout.Label("Hold it and LEFT CLICK (or press M): a picture of the map from above comes up. Pick 1 BOMBING RUN (six heavy bombs along the arrow), 2 GUN RUN (cannon along the arrow) or 3 ARTILLERY (20 s of shells all over the circle), move the circle with the mouse (SCROLL zoom, WASD move the map, Q / E turn the arrow) and LEFT CLICK. ESC or M backs out. A red smoke goes down and it arrives some seconds later; each needs time before you can call it again.", small);
+            else if (d.type == WeaponType.Medical)
                 GUILayout.Label(d.name == "BANDAGE" ? "Hold it and LEFT CLICK: pick a wound and bandage it. Quick (3 s), slows the bleeding a lot but does not stop a deep wound or an artery." : "Hold it and LEFT CLICK: pick a deep wound and sew it shut. Slow (12 s), but it stops that wound bleeding outside. It can't reach bleeding inside the body.", small);
+            if (WeaponController.IsFlamer(d))
+                GUILayout.Label("Hold the trigger: burning fuel out to about 5 m. Anyone it touches catches fire (they scream, run and burn), and it keeps burning where it lands for a few seconds. A full tank is 30 seconds of flame; R straps on a new one.", small);
             if (d.name == "TASER")
                 GUILayout.Label("Two barbed probes on 7.6 m wires. Both in the same man and far enough apart: five seconds of lock-up per trigger pull. Pull again while the wires are in him for another five. R swaps the cartridge.", small);
             if (d.type == WeaponType.Grenade)

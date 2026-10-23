@@ -19,10 +19,10 @@ namespace Carl
 
         enum Jam { None, Stovepipe, FailureToFeed, DoubleFeed, StuckCase }
 
-        readonly float[] heat = new float[16];
-        readonly float[] lastShot = new float[16];
-        readonly Jam[] jam = new Jam[16];
-        readonly int[] stepsLeft = new int[16];
+        readonly float[] heat = new float[32];
+        readonly float[] lastShot = new float[32];
+        readonly Jam[] jam = new Jam[32];
+        readonly int[] stepsLeft = new int[32];
         float stepBusyUntil, lastClick, smokeAt;
         GameObject glow;
         Material glowMat;
@@ -45,12 +45,18 @@ namespace Carl
                 case "MOSSBERG 590": return 0.05f;
                 case "AWP": return 0.045f;
                 case ".50 CAL": return 0.06f;
-                default: return d.name == "TASER" ? 0f : 0.02f;
+                default: return d.name == "TASER" || d.name == "FLAMETHROWER" ? 0f : 0.02f;
             }
         }
 
         /// <summary>Chance a round jams, by how hot the barrel is: next to nothing cool, likely at the limit.</summary>
-        public static float JamChance(float h) => 0.0004f + 0.012f * h * h * h + (h > 0.92f ? 0.06f : 0f);
+        public static float JamChance(float h) => 0.0004f + 0.02f * h * h + 0.03f * h * h * h + (h > 0.85f ? 0.08f : 0f);
+
+        /// <summary>
+        /// How much harder a round works the gun for how soon it follows the last: a burst or a mag dump heats it
+        /// far faster than shots taken one at a time (and is likelier to jam), so single, aimed shots pay.
+        /// </summary>
+        static float Cadence(float gap) => gap < 0.13f ? 1.6f : gap < 0.3f ? 1.1f : 0.6f;
 
         public float Heat(int idx) => idx >= 0 && idx < heat.Length ? heat[idx] : 0f;
         public bool Jammed(int idx) => idx >= 0 && idx < jam.Length && jam[idx] != Jam.None;
@@ -75,9 +81,10 @@ namespace Carl
             if (idx < 0 || idx >= heat.Length) return;
             float add = PerShot(d);
             if (add <= 0f) return;
-            heat[idx] = Mathf.Min(1f, heat[idx] + add);
+            float cadence = Cadence(Time.time - lastShot[idx]);
+            heat[idx] = Mathf.Min(1f, heat[idx] + add * 1.35f * cadence);
             lastShot[idx] = Time.time;
-            if (Random.value >= JamChance(heat[idx])) return;
+            if (Random.value >= JamChance(heat[idx]) * (cadence > 1.5f ? 1.5f : 1f)) return;
             // what went wrong: cool, it's nearly always a case or a round that didn't make it; hot, the bad ones
             float h = heat[idx], r = Random.value;
             Jam j = h > 0.8f && r < 0.3f ? Jam.StuckCase : h > 0.5f && r < 0.55f ? Jam.DoubleFeed : r < 0.6f ? Jam.Stovepipe : Jam.FailureToFeed;
@@ -122,9 +129,10 @@ namespace Carl
             for (int i = 0; i < heat.Length; i++)
             {
                 if (heat[i] <= 0f) continue;
-                // it cools all the time, much faster once you stop firing and the hotter it is
-                bool resting = Time.time - lastShot[i] > 0.4f;
-                heat[i] = Mathf.Max(0f, heat[i] - dt * (resting ? 0.03f + 0.11f * heat[i] : 0.015f));
+                // it cools all the time, faster once you stop firing and the hotter it is - but slowly: a barrel
+                // you've cooked takes the best part of half a minute to come back down
+                bool resting = Time.time - lastShot[i] > 0.6f;
+                heat[i] = Mathf.Max(0f, heat[i] - dt * (resting ? 0.012f + 0.045f * heat[i] : 0.004f));
             }
             var w = W;
             float h = w != null && w.Armed && w.Current.type == WeaponType.Gun ? Heat(w.current) : 0f;

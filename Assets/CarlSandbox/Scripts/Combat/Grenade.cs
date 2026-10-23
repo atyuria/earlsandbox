@@ -112,6 +112,17 @@ namespace Carl
                     bool mayLoseLimb = lk < 0 || (closestInLimb.TryGetValue(lk, out var cl) && cl.bp == bp);
                     h.damage.ApplyBlast(bp, c, intensity, ds, mayLoseLimb);
                     if (d < 1.6f) knocked = true;
+                    // the flash and the hot gas: small scorches and blistered patches on the skin facing it
+                    if (ds < 1.5f && bp.col != null)
+                    {
+                        float heat = 1f - ds / 1.5f;
+                        int marks = 1 + (int)(heat * 3f);
+                        for (int m = 0; m < marks; m++)
+                        {
+                            Vector3 at = bp.col.ClosestPoint(c + Random.insideUnitSphere * 0.25f);
+                            bp.AddBurn(at, Random.Range(0.015f, 0.035f) + heat * 0.03f, Random.Range(0.4f, 0.9f) * heat, Random.Range(0.4f, 0.8f));
+                        }
+                    }
                 }
                 if (knocked) h.ragdoll.Fall();
             }

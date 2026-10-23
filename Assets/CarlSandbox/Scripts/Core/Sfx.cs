@@ -369,6 +369,12 @@ namespace Carl
             }
             v.wasDead = false;
             bool talking = v.src.isPlaying;
+            // on fire: screaming and begging ("I'm burning! Stop!"), one after another, for as long as he can
+            if (Burning.Intensity(h) > 0.12f && p.consciousness > 0.3f)
+            {
+                if (!talking) Say(h, v, Random.value < 0.6f ? "burn" : "scream", 1f, Random.Range(1f, 1.1f));
+                return;
+            }
             // a sudden new injury: an instant scream, cutting off whatever they were saying
             if (spike > 0.18f && p.consciousness > 0.35f && (!talking || v.src.time > 0.4f))
             {

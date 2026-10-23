@@ -54,13 +54,24 @@ namespace Carl
             // medical: hold it and click to treat one of your wounds (MedKit)
             new WeaponDef { name = "BANDAGE", type = WeaponType.Medical },
             new WeaponDef { name = "SURGERY KIT", type = WeaponType.Medical },
+            // the radio: hold it and click to call in air support (Radio) - carried in the fist like the kits
+            new WeaponDef { name = "RADIO", type = WeaponType.Medical },
+            // a backpack-tank flamethrower: hold the trigger and it throws burning fuel ~5 m; a full tank is 30 s of
+            // flame (the "magazine" is tenths of a second of it), R swaps the tank (Flamethrower)
+            new WeaponDef { name = "FLAMETHROWER", type = WeaponType.Gun, auto = true, rpm = 600, muzzleVelocity = 16, bulletMass = 0.001f, diameter = 0.01f, magazine = 300, reloadTime = 4.5f, recoil = 0f, spread = 0f, zoomFov = 62, loudness = 35, tracer = false },
         };
+
+        /// <summary>Is this the flamethrower (a gun in the hands, but it throws fire, not rounds)?</summary>
+        public static bool IsFlamer(WeaponDef d) => d != null && d.name == "FLAMETHROWER";
+
+        /// <summary>Is this the radio (held like a medical item, but it calls in air support instead)?</summary>
+        public static bool IsRadio(WeaponDef d) => d != null && d.name == "RADIO";
 
         public int current;
         public bool reloading;
         public float aimT;
         bool pointOn;            // point aim toggled on (B)
-        readonly int[] ammo = new int[16];
+        readonly int[] ammo = new int[32];
         /// <summary>What you are carrying: you start with nothing and take weapons in the G menu.</summary>
         public bool[] owned;
         public bool Armed => owned != null && current >= 0 && current < owned.Length && owned[current];
@@ -149,6 +160,7 @@ namespace Carl
                 case "AR-15": return new[] { "AUTO", "BURST", "SEMI" };
                 case "GLOCK 17": return loadouts != null && loadouts[i].autoSwitch ? new[] { "AUTO", "SEMI" } : new[] { "SEMI" };
                 case "MOSSBERG 590": return new[] { "PUMP" };
+                case "FLAMETHROWER": return new[] { "AUTO" };
                 case "AWP": return new[] { "BOLT" };
                 default: return new[] { "SEMI" };
             }
@@ -190,14 +202,14 @@ namespace Carl
             if (d.type != WeaponType.Gun) return new SightKind[0];
             if (d.scope) return new[] { SightKind.Scope8x, SightKind.Scope4x };
             if (d.name == "GLOCK 17") return new[] { SightKind.Iron, SightKind.RedDot };     // MOS cut: an RMR on the slide
-            if (d.name == "BERETTA M9" || d.name == "TASER") return new[] { SightKind.Iron };
+            if (d.name == "BERETTA M9" || d.name == "TASER" || IsFlamer(d)) return new[] { SightKind.Iron };
             if (d.name == "MOSSBERG 590") return new[] { SightKind.Iron };                     // ghost rings: the receiver has no optic rail
             return new[] { SightKind.Iron, SightKind.RedDot, SightKind.Holo, SightKind.Scope4x };
         }
-        public static bool GripsFor(WeaponDef d) => d.type == WeaponType.Gun && !IsPistol(d) && d.name != "MOSSBERG 590";
-        public static bool SuppressorFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && d.name != "MOSSBERG 590";
-        public static bool LightFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !d.scope;
-        public static bool LaserFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER";
+        public static bool GripsFor(WeaponDef d) => d.type == WeaponType.Gun && !IsPistol(d) && d.name != "MOSSBERG 590" && !IsFlamer(d);
+        public static bool SuppressorFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && d.name != "MOSSBERG 590" && !IsFlamer(d);
+        public static bool LightFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !d.scope && !IsFlamer(d);
+        public static bool LaserFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !IsFlamer(d);
         /// <summary>L and J: the weapon light (or, with none fitted, a head torch) and the laser, on and off.</summary>
         public static bool LightOn = true, LaserOn = true, TorchOn;
         /// <summary>Your gun light or head torch is shining now.</summary>
@@ -235,7 +247,9 @@ namespace Carl
                 if (!Armed) return "UNARMED";
                 if (Current.type == WeaponType.Knife) return "—";
                 if (Current.type == WeaponType.Grenade || Current.type == WeaponType.Tool) return "∞";
+                if (IsRadio(Current)) return Radio.Open ? "PICK THE TARGET" : "LMB CALL IN";
                 if (Current.type == WeaponType.Medical) return MedKit.Busy ? "TREATING" : "LMB TREAT";
+                if (IsFlamer(Current)) return reloading ? "NEW TANK" : $"FUEL {ammo[current] * 100 / Mathf.Max(1, MagSize(current))}%";
                 return reloading ? "RELOADING" : $"{ammo[current]:00} / {MagSize(current)}";
             }
         }
@@ -330,7 +344,52 @@ namespace Carl
         static GameObject Barrel(Transform p, Vector3 pos, float d, float len, Color c) =>
             Part(p, PrimitiveType.Cylinder, pos, new Vector3(d, len * 0.5f, d), c, new Vector3(90, 0, 0), 0.5f, 0.7f);
 
-        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery" };
+        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery", "Med_Radio", "Gun_Flamer" };
+
+        /// <summary>
+        /// The flamethrower (no sculpted model of it either): the wand - a pistol grip and a fore grip on a long tube
+        /// with the igniter under the nozzle - and the hose running back to the tanks on your back. Grip at the origin.
+        /// </summary>
+        static Vector3[] FlamerModel(Transform root)
+        {
+            var g = new GameObject("Gun_Flamer").transform;
+            g.SetParent(root, false);
+            Color steel = new Color(0.2f, 0.21f, 0.2f), olive = new Color(0.26f, 0.29f, 0.2f), brass = new Color(0.55f, 0.45f, 0.22f), black = new Color(0.05f, 0.05f, 0.05f);
+            var tube = Part(g, PrimitiveType.Cylinder, new Vector3(0f, 0.05f, 0.2f), new Vector3(0.035f, 0.33f, 0.035f), steel, new Vector3(90f, 0f, 0f), 0.4f, 0.6f);
+            tube.name = "Gun_FlamerTube";
+            Part(g, PrimitiveType.Cylinder, new Vector3(0f, 0.05f, 0.55f), new Vector3(0.045f, 0.03f, 0.045f), brass, new Vector3(90f, 0f, 0f), 0.6f, 0.8f);     // the nozzle
+            Part(g, PrimitiveType.Cylinder, new Vector3(0f, 0.02f, 0.5f), new Vector3(0.016f, 0.05f, 0.016f), black, new Vector3(90f, 0f, 0f));                   // the igniter
+            Part(g, PrimitiveType.Cube, new Vector3(0f, -0.04f, 0f), new Vector3(0.03f, 0.11f, 0.045f), olive, new Vector3(-16f, 0f, 0f));                         // pistol grip
+            Part(g, PrimitiveType.Cube, new Vector3(0f, -0.03f, 0.3f), new Vector3(0.03f, 0.09f, 0.04f), olive, new Vector3(-8f, 0f, 0f));                          // fore grip
+            Part(g, PrimitiveType.Cube, new Vector3(0f, 0.03f, 0.05f), new Vector3(0.05f, 0.05f, 0.12f), steel, default, 0.4f, 0.5f);                              // valve block
+            Part(g, PrimitiveType.Cylinder, new Vector3(0.03f, -0.02f, -0.12f), new Vector3(0.022f, 0.14f, 0.022f), black, new Vector3(60f, 0f, 20f), 0.2f, 0f);  // the hose, back over your hip
+            var mesh = tube.GetComponent<MeshFilter>().sharedMesh.vertices;
+            var v = new Vector3[mesh.Length];
+            for (int k = 0; k < v.Length; k++) v[k] = root.InverseTransformPoint(tube.transform.TransformPoint(mesh[k]));
+            return v;
+        }
+
+        /// <summary>The grip and muzzle points of the weapons built here rather than in the model library.</summary>
+        static Dictionary<string, Vector3> BuiltPoints(string name) => name == "Gun_Flamer"
+            ? new Dictionary<string, Vector3> { ["Grip"] = Vector3.zero, ["Muzzle"] = new Vector3(0f, 0.05f, 0.58f), ["Fore"] = new Vector3(0f, -0.03f, 0.3f) }
+            : new Dictionary<string, Vector3>();
+
+        /// <summary>The radio handset (there's no sculpted model of it: a box, a keypad, an antenna), its grip at the origin.</summary>
+        static Vector3[] RadioModel(Transform root)
+        {
+            var g = new GameObject("Gun_Radio").transform;
+            g.SetParent(root, false);
+            Color olive = new Color(0.2f, 0.23f, 0.17f), black = new Color(0.06f, 0.06f, 0.07f);
+            var body = Part(g, PrimitiveType.Cube, new Vector3(0f, 0.045f, 0.01f), new Vector3(0.06f, 0.15f, 0.035f), olive, new Vector3(-15f, 0f, 0f), 0.3f, 0.1f);
+            Part(g, PrimitiveType.Cube, new Vector3(0f, 0.07f, 0.03f), new Vector3(0.045f, 0.05f, 0.004f), black, new Vector3(-15f, 0f, 0f), 0.6f, 0f);    // the screen and keys
+            Part(g, PrimitiveType.Cylinder, new Vector3(0.018f, 0.16f, -0.02f), new Vector3(0.008f, 0.06f, 0.008f), black, new Vector3(-15f, 0f, 0f));      // the antenna
+            Part(g, PrimitiveType.Cylinder, new Vector3(-0.014f, 0.128f, -0.01f), new Vector3(0.012f, 0.008f, 0.012f), black, new Vector3(-15f, 0f, 0f));   // a knob
+            body.name = "Gun_RadioBody";
+            var mesh = body.GetComponent<MeshFilter>().sharedMesh.vertices;
+            var v = new Vector3[mesh.Length];
+            for (int k = 0; k < v.Length; k++) v[k] = root.InverseTransformPoint(body.transform.TransformPoint(mesh[k]));
+            return v;
+        }
 
         readonly List<float> ironY = new List<float>(), scopeY = new List<float>();
 
@@ -358,18 +417,22 @@ namespace Carl
             {
                 var root = new GameObject(name + "_VM").transform;
                 root.SetParent(vmRoot, false);
-                ModelLibrary.Spawn(name, root, ModelLibrary.GunMaterial, false);
                 var model = ModelLibrary.Get(name);
-                Vector3 grip = model.points.TryGetValue("Grip", out var g) ? g : Vector3.zero;
-                Vector3 muzzle = model.points.TryGetValue("Muzzle", out var mz) ? mz : new Vector3(0, 0, 0.3f);
+                // (anything without a model in the library is built here: the radio)
+                Vector3[] built = null;
+                if (model != null) ModelLibrary.Spawn(name, root, ModelLibrary.GunMaterial, false);
+                else built = name == "Gun_Flamer" ? FlamerModel(root) : RadioModel(root);
+                var points = model != null ? model.points : BuiltPoints(name);
+                Vector3 grip = points.TryGetValue("Grip", out var g) ? g : Vector3.zero;
+                Vector3 muzzle = points.TryGetValue("Muzzle", out var mz) ? mz : new Vector3(0, 0, 0.3f);
                 AddArm(root, grip, skinMat, name);
                 AddModel(root.gameObject, muzzle);
-                var mv = model.mesh.vertices;
+                var mv = model != null ? model.mesh.vertices : built;
                 Vector3 fore;
-                if (!model.points.TryGetValue("Fore", out fore))
+                if (!points.TryGetValue("Fore", out fore))
                     fore = new Vector3(0f, grip.y + 0.05f, Mathf.Lerp(grip.z, muzzle.z, 0.5f));
                 gripPts.Add(grip); forePts.Add(fore);
-                ejectPts.Add(model.points.TryGetValue("Eject", out var ej) ? ej : new Vector3(0.015f, 0.01f, 0f));
+                ejectPts.Add(points.TryGetValue("Eject", out var ej) ? ej : new Vector3(0.015f, 0.01f, 0f));
                 supportCup.Add(null); supportGrip.Add(null);
                 AddSupportHand(root, grip, fore, mv, skinMat, name, supportCup.Count - 1);
                 // rail and handguard mount points from the gun's shape
@@ -385,9 +448,9 @@ namespace Carl
                 float zF = Mathf.Lerp(grip.z, muzzle.z, 0.7f), iron = float.MinValue;
                 foreach (var v in mv) if (v.z > zF && Mathf.Abs(v.x) < 0.006f) iron = Mathf.Max(iron, v.y);
                 // a model can say exactly where its sight line runs (a hooded front post's top isn't the hood's)
-                if (model.points.TryGetValue("Iron", out var ir)) iron = ir.y;
+                if (points.TryGetValue("Iron", out var ir)) iron = ir.y;
                 ironY.Add(iron == float.MinValue ? 0.05f : iron);
-                scopeY.Add(model.points.TryGetValue("Scope", out var sc) ? sc.y : (iron == float.MinValue ? 0.08f : iron + 0.04f));
+                scopeY.Add(points.TryGetValue("Scope", out var sc) ? sc.y : (iron == float.MinValue ? 0.08f : iron + 0.04f));
                 mountUnder.Add(new Vector3(0f, under == float.MaxValue ? -0.03f : under, (zC + zD) * 0.5f));
             }
         }
@@ -415,6 +478,7 @@ namespace Carl
             ["Gun_Grenade"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
             ["Med_Bandage"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
             ["Med_Surgery"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),  // held in a fist
+            ["Med_Radio"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
         };
         static bool PistolModel(string weapon) => weapon == "Gun_Glock" || weapon == "Gun_Beretta" || weapon == "Gun_Taser";
         /// <summary>The left hand round a rifle's handguard: fist along the barrel, forearm back, down and to the left.</summary>
@@ -745,8 +809,8 @@ namespace Carl
 
         // ------------------------------------------------------------ rails and muzzle devices
         readonly List<Vector3> baseMuzzle = new List<Vector3>();
-        readonly Light[] lights = new Light[16];
-        readonly Transform[] laserEmit = new Transform[16];
+        readonly Light[] lights = new Light[32];
+        readonly Transform[] laserEmit = new Transform[32];
         GameObject laserDot;
 
         /// <summary>Where each gun takes a light: under a pistol's dust cover, on the right of a rifle's handguard.</summary>
@@ -936,10 +1000,10 @@ namespace Carl
             float dt = Time.unscaledDeltaTime;
 
             // number keys pick the n-th weapon you carry (the slots are numbered in the order you hold them)
-            if (!SquadCommand.Open)
+            if (!SquadCommand.Open && !Radio.Open)
                 for (int n = 0; n < 9; n++)
                     if (kb[Key.Digit1 + n].wasPressedThisFrame) { SelectSlot(n); break; }
-            float scroll = SquadCommand.Open ? 0f : mouse.scroll.ReadValue().y;   // (the squad list uses the wheel)
+            float scroll = SquadCommand.Open || Radio.Open ? 0f : mouse.scroll.ReadValue().y;   // (the squad list uses the wheel)
             if (!Grabbing && Mathf.Abs(scroll) > 0.1f && !swingFree)
                 for (int s = 1; s < defs.Count; s++) { int k = (current + (scroll < 0 ? s : defs.Count - s)) % defs.Count; if (owned[k]) { Select(k); break; } }
 
@@ -1006,7 +1070,7 @@ namespace Carl
             float mag = ScopeView.Magnification(this);
             if (mag > 1.5f) pc.sensitivityScale = Mathf.Lerp(pc.sensitivityScale, 1.4f / mag, Mathf.SmoothStep(0f, 1f, aimT));
 
-            if (reloading && Time.unscaledTime >= reloadEnd) { reloading = false; ammo[current] = MagSize(current); }
+            if (reloading && Time.unscaledTime >= reloadEnd) { reloading = false; ammo[current] = MagSize(current); if (IsFlamer(d)) FlameTank.Refit(); }
             if (GameSettings.InfiniteAmmo && d.type == WeaponType.Gun) ammo[current] = MagSize(current);
             if (d.type == WeaponType.Gun && ammo[current] > MagSize(current)) ammo[current] = MagSize(current);   // extended mag taken off
             // Z: fire mode
@@ -1432,6 +1496,8 @@ namespace Carl
                 case "GRENADE": return 0.4f;
                 case "BANDAGE": return 0.12f;
                 case "SURGERY KIT": return 0.6f;
+                case "RADIO": return 0.8f;
+                case "FLAMETHROWER": return 4f;      // (the wand: the tanks are on your back)
                 case "PHYSICS GUN": return 1.8f;
                 default: return d.bulletMass > 0.5f ? d.bulletMass : 1f;
             }
@@ -1899,11 +1965,11 @@ namespace Carl
             float rush = PlayerBody.I != null ? PlayerBody.I.Rush : 0f;
             float tremor = (Mathf.Max(0f, (PlayerBody.I != null ? PlayerBody.I.Tremor : 0f) - rush * 0.75f) + (1f - ga) * 0.4f) * (1f - 0.5f * ads);
             float t = Time.time;
-            acc += new Vector3(Mathf.PerlinNoise(t * 7f, 3f) - 0.5f, Mathf.PerlinNoise(5f, t * 7f) - 0.5f, 0f) * tremor * 22f;
-            angAcc += new Vector3(Mathf.PerlinNoise(t * 6f, 11f) - 0.5f, Mathf.PerlinNoise(13f, t * 6f) - 0.5f, 0f) * tremor * 16f;
+            acc += new Vector3(Mathf.PerlinNoise(t * 7f, 3f) - 0.5f, Mathf.PerlinNoise(5f, t * 7f) - 0.5f, 0f) * tremor * 14f;
+            angAcc += new Vector3(Mathf.PerlinNoise(t * 6f, 11f) - 0.5f, Mathf.PerlinNoise(13f, t * 6f) - 0.5f, 0f) * tremor * 10f;
             // adrenaline: a fast, jittery shake in the hands that aiming down the sights doesn't steady - the
             // tighter hold only makes the muzzle buzz harder on the target
-            float jitter = rush * (1f + 3.5f * ads);
+            float jitter = rush * (0.35f + 0.9f * ads);
             acc += new Vector3(Mathf.PerlinNoise(t * 14f, 21f) - 0.5f, Mathf.PerlinNoise(23f, t * 14f) - 0.5f, 0f) * jitter * 30f;
             angAcc += new Vector3(Mathf.PerlinNoise(t * 12f, 31f) - 0.5f, Mathf.PerlinNoise(37f, t * 12f) - 0.5f, Mathf.PerlinNoise(t * 9f, 41f) - 0.5f) * jitter * 34f;
             offVel = Vector3.ClampMagnitude(offVel + acc * dt, 4f);
@@ -2396,6 +2462,17 @@ namespace Carl
                 FireTaser(d);
                 return;
             }
+            if (IsFlamer(d))
+            {
+                // a tenth of a second of flame: no round, no kick, the tank going down
+                if (FlameTank.Gone) { ammo[current] = 0; SandboxGame.Instance?.Toast("NO FUEL TANK  ·  R FOR A NEW ONE"); return; }
+                if (!GameSettings.InfiniteAmmo) ammo[current]--;
+                var mz = muzzles[current];
+                Vector3 fdir = (AimPoint - mz.position).sqrMagnitude > 0.25f ? (AimPoint - mz.position).normalized : mz.forward;
+                Flamethrower.Spray(mz.position, Vector3.Slerp(mz.forward, fdir, 0.5f), PlayerAvatar.Body);
+                if (ammo[current] <= 0) SandboxGame.Instance?.Toast("TANK EMPTY  ·  R FOR A NEW ONE");
+                return;
+            }
             if (!GameSettings.InfiniteAmmo) ammo[current]--;
             var am = CurrentAmmo;
             int pellets = am != null ? am.pellets : d.pellets;
@@ -2442,12 +2519,14 @@ namespace Carl
             burstShot++;
             // held by your body most of the kick goes into the gun and your arms (they throw the muzzle about);
             // the rest moves your view
-            float camK = (held ? 0.5f : 1f) * (1f - 0.7f * blindT);   // (round the corner it isn't at your eye)
+            float camK = (held ? 0.62f : 1f) * (1f - 0.7f * blindT);   // (round the corner it isn't at your eye)
             pc.AddRecoil(camK * kickDeg.y, camK * kickDeg.x);
+            // and it rocks your view a little with every shot, more for a harder gun
+            pc.Rock((0.012f + 0.009f * d.recoil) * ammoK * suppK * Mathf.Lerp(1f, 0.75f, aimT));
             if (held && gunRb != null)
             {
                 // the gun is driven back into the hands, the muzzle flips up and jumps sideways, and it rolls
-                float r = d.recoil * ammoK * gripK * suppK * Mathf.Lerp(1f, 0.6f, aimT) * blindK;
+                float r = 1.3f * d.recoil * ammoK * gripK * suppK * Mathf.Lerp(1f, 0.6f, aimT) * blindK;
                 KickGun(-(gRot * Vector3.forward) * (0.55f * r * Mathf.Sqrt(oneK)) + Vector3.up * (0.1f * r),
                     (gRot * Vector3.right) * (-kickDeg.y * rec.flip * 0.9f) + (gRot * Vector3.up) * (kickDeg.x * rec.flip * 0.8f) + (gRot * Vector3.forward) * (Random.Range(-1f, 1f) * kickDeg.y * 0.35f));
             }

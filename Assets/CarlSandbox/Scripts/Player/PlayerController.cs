@@ -66,6 +66,15 @@ namespace Carl
             lastRecoil = Time.time;
         }
         float settle, lastRecoil;
+        bool flyToggle;
+
+        /// <summary>A shot rocks the view: a quick tilt to one side and a bump, springing back.</summary>
+        public void Rock(float amount)
+        {
+            // (about half a degree of tilt for a rifle, nearer two for the .50)
+            rockVel += new Vector2(Random.Range(-1f, 1f) * amount * 300f, amount * 200f);
+        }
+        Vector2 rock, rockVel;   // (x roll, y pitch bump, degrees)
 
         public void Shake(float amount) => shake = Mathf.Max(shake, amount);
 
@@ -94,8 +103,8 @@ namespace Carl
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
             float dt = Time.unscaledDeltaTime;
-            // flying a drone: your body stands where you left it, the mouse and keys are the drone's
-            if (FpvDrone.Piloting != null)
+            // flying a drone, or on the radio's map: your body stands where you left it, the mouse and keys are theirs
+            if (FpvDrone.Piloting != null || Radio.Open)
             {
                 var av0 = GetComponent<PlayerAvatar>();
                 if (av0 != null && PlayerAvatar.Body != null) av0.Drive(Vector3.zero, false, kb, dt);
@@ -124,6 +133,9 @@ namespace Carl
             else if (settle > 25f) settle = 25f;
 
             shake = Mathf.Max(0f, shake - dt * 1.5f);
+            // the rock from a shot: a stiff spring back to level
+            rockVel += (-rock * 160f - rockVel * 16f) * dt;
+            rock += rockVel * dt;
             Vector3 shakeOff = shake > 0f ? Random.insideUnitSphere * shake * 1.2f : Vector3.zero;
             var body = PlayerBody.I;
             // a damaged cerebellum or a lot of lost blood: the world swims and the aim drifts
@@ -136,14 +148,17 @@ namespace Carl
             }
             float roll = (Mathf.PerlinNoise(t * 0.4f, 5f) - 0.5f) * wob * 25f + (down && PlayerAvatar.Body == null ? 14f : 0f);   // in a body the head lies how it lies
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x, shakeOff.y, shakeOff.z + roll)
+            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x - rock.y, shakeOff.y, shakeOff.z + roll + rock.x)
                 * Quaternion.Euler(-WeaponController.BlindLook.y, WeaponController.BlindLook.x, 0f);   // (ALT + A / D: looking where the gun is pointing round the corner)
             var avatar = GetComponent<PlayerAvatar>();
             bool hasBody = avatar != null && PlayerAvatar.Body != null;
             // dead or out cold: no control at all
             if (body != null && (body.dead || body.passedOut)) { if (hasBody) { avatar.Drive(Vector3.zero, false, kb, dt); return; } down = true; Settle(dt); return; }
             // hold V: free camera (let go and you are back in your body)
-            bool wantFly = kb.vKey.isPressed && (body == null || !body.Paralysed);
+            // V: free camera on / off (press again to be back in your body)
+            if (kb.vKey.wasPressedThisFrame && Cursor.lockState == CursorLockMode.Locked) flyToggle = !flyToggle;
+            bool wantFly = flyToggle && (body == null || !body.Paralysed);
+            if (!wantFly) flyToggle = false;
             if (wantFly != flying) { flying = wantFly; cc.enabled = !flying && !hasBody; velocity = Vector3.zero; }
 
             Vector3 input = Vector3.zero;

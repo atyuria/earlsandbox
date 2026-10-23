@@ -59,9 +59,9 @@ namespace Carl
         public float MoveScale => Mathf.Clamp01(Mathf.Min(legL, legR) * 0.7f + 0.3f) * (spine == 3 ? 0.5f : 1f) * Mathf.Lerp(0.5f, 1f, Consciousness);
         /// <summary>Shaking hands: injured arms, pain, blood loss, a damaged cerebellum - and adrenaline: in a
         /// fight (shooting at people, rounds cracking past, getting hit) the hands and arms shake with it.</summary>
-        public float Tremor => Mathf.Clamp01((2f - armL - armR) * 0.35f + pain * 0.25f + (1f - blood / NormalBlood) * 1.2f + cerebellum * 0.8f + Rush * 0.75f);
+        public float Tremor => Mathf.Clamp01((2f - armL - armR) * 0.35f + pain * 0.25f + (1f - blood / NormalBlood) * 1.2f + cerebellum * 0.8f + Rush * 0.3f);
         /// <summary>Adrenaline above calm (0 calm .. 1 flooded).</summary>
-        public float Rush => Mathf.Clamp01((adrenaline - 0.12f) / 0.7f);
+        public float Rush => Mathf.Clamp01((adrenaline - 0.15f) / 1.1f);
         public float adrenaline = 0.05f;
         float dark, lastConsc = 1f, helmetRing;
         public float Dark => dark;
@@ -362,7 +362,7 @@ namespace Carl
             Fill(all, white, new Color(0.35f, 0.35f, 0.38f, loss * 0.35f));
             Fill(new Rect(-W * loss * 0.3f, -H * loss * 0.3f, W * (1f + loss * 0.6f), H * (1f + loss * 0.6f)), vignette, new Color(0, 0, 0, loss));
             // pain: red edges when hit
-            Fill(all, vignette, new Color(0.6f, 0f, 0f, hitFlash * 0.7f + pain * 0.15f));
+            Fill(all, vignette, new Color(0.6f, 0f, 0f, hitFlash * 0.45f + pain * 0.07f));
             // occipital: tunnel vision and dark blind spots
             if (occipital > 0.02f)
             {

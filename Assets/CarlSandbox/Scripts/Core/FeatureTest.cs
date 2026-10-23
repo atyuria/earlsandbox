@@ -66,6 +66,10 @@ namespace Carl
                 case "stuck": body = StuckTest(); break;
                 case "battle": body = BattleTest(); break;
                 case "drone": body = DroneTest(); break;
+                case "antidrone": body = AntiDroneTest(); break;
+                case "fire": body = FireTest(); break;
+                case "sprint": body = SprintTest(); break;
+                case "burnout": body = BurnOutTest(); break;
                 case "wound": body = WoundTest(); break;
                 case "gear": body = GearTest(); break;
                 case "walk": body = WalkTest(); break;
@@ -692,6 +696,189 @@ namespace Carl
             Check(Game.player.cam.enabled && FpvDrone.Piloting == null, "E ends it, back in your body");
         }
 
+        /// <summary>
+        /// An Earl against your drones: one hanging still in front of him is shot down; one jinking about takes
+        /// far longer to hit; a dropper high overhead goes mostly unseen.
+        /// </summary>
+        IEnumerator AntiDroneTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Vector3 at = me + fwd * 32f;
+            if (Physics.Raycast(at + Vector3.up * 20f, Vector3.down, out var gh, 40f, ~0, QueryTriggerInteraction.Ignore)) at = gh.point;
+            var g = Gunner(at, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            yield return new WaitForSeconds(2f);
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            // hovering still, 16 m in front of him and a few metres up
+            var d = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            Vector3 hover = at - fwd * 16f + Vector3.up * 5f;
+            float t0 = Time.time; int shots0 = EarlGunner.DroneShots;
+            while (d != null && !d.Ended && Time.time - t0 < 20f) { d.autopilot = Vector3.ClampMagnitude((hover - d.transform.position) * 2f, 8f); yield return null; }
+            float still = Time.time - t0;
+            Line($"hovering: down after {still:0.0} s ({EarlGunner.DroneShots - shots0} rounds at it), ended {d == null || d.Ended}");
+            Check(d == null || d.Ended, "a drone hanging still in front of him gets shot down");
+            yield return new WaitForSeconds(1.5f);
+            // jinking: side to side and up and down, changing every half second or so
+            var j = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            t0 = Time.time; shots0 = EarlGunner.DroneShots;
+            Vector3 vel = Vector3.zero; float change = 0f;
+            while (j != null && !j.Ended && Time.time - t0 < 30f)
+            {
+                if (Time.time > change) { change = Time.time + Random.Range(0.35f, 0.7f); vel = side * Random.Range(-1f, 1f) * 9f + Vector3.up * Random.Range(-1f, 1f) * 4f; }
+                Vector3 pull = (hover - j.transform.position) * 0.8f;
+                j.autopilot = vel + pull;
+                yield return null;
+            }
+            float moving = Time.time - t0;
+            Line($"jinking: lasted {moving:0.0} s ({EarlGunner.DroneShots - shots0} rounds at it), ended {j == null || j.Ended}");
+            Check(moving > still * 1.5f, "dodging about keeps it up much longer");
+            if (j != null && !j.Ended) j.End("TEST OVER");
+            yield return new WaitForSeconds(1.5f);
+            // high overhead: a speck he rarely picks out
+            var h = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            Vector3 high = at - fwd * 6f + Vector3.up * 32f;
+            // (straight up there, the same frame: launched in front of him at head height he'd have seen it go up)
+            var hrb = h.GetComponent<Rigidbody>();
+            hrb.position = high; h.transform.position = high; hrb.linearVelocity = Vector3.zero;
+            h.autopilot = Vector3.zero;
+            shots0 = EarlGunner.DroneShots; t0 = Time.time;
+            while (h != null && !h.Ended && Time.time - t0 < 10f) { h.autopilot = Vector3.ClampMagnitude((high - h.transform.position) * 2f, 6f); yield return null; }
+            Line($"high up (32 m): {EarlGunner.DroneShots - shots0} rounds at it in 10 s");
+            Check(EarlGunner.DroneShots - shots0 < 15, "a dropper high up mostly goes unseen");
+            if (h != null && !h.Ended) h.End("TEST OVER");
+        }
+
+        /// <summary>You, sprinting with a rifle up through the trenches, turning hard: you should never go over.</summary>
+        IEnumerator SprintTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(2f);
+            ClearEarls();
+            Wpn.Give(Idx("AK-47"), true);
+            yield return new WaitForSeconds(0.5f);
+            var me = PlayerAvatar.Body;
+            int falls = 0; bool wasDown = false;
+            float t0 = Time.time;
+            Vector3 dir = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            float turnAt = 0f;
+            while (Time.time - t0 < 25f)
+            {
+                // hard turns every second or so, back and forth along the trench
+                if (Time.time > turnAt) { turnAt = Time.time + Random.Range(0.6f, 1.4f); dir = Quaternion.Euler(0f, Random.Range(-150f, 150f), 0f) * dir; }
+                PlayerAvatar.TestRun = dir;
+                bool down = me.ragdoll.IsDown;
+                if (down && !wasDown) falls++;
+                wasDown = down;
+                yield return null;
+            }
+            PlayerAvatar.TestRun = null;
+            Line($"25 s sprinting with a rifle, turning hard: {falls} falls");
+            Check(falls == 0, "sprinting never puts you on the floor");
+            // and going down on purpose, you're straight back up
+            me.ragdoll.Fall("test");
+            float t1 = Time.time;
+            while (me.ragdoll.IsDown || me.ragdoll.mode != BodyMode.Standing) { if (Time.time - t1 > 8f) break; yield return null; }
+            Line($"knocked down: back on your feet in {Time.time - t1:0.0} s");
+            Check(Time.time - t1 < 3f, "you get back up quickly, on your own");
+        }
+
+        /// <summary>Three dummies set alight all over: the fire must burn out, and each leaves remains of some kind.</summary>
+        IEnumerator BurnOutTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            var bodies = new List<HumanBody>();
+            for (int i = 0; i < 3; i++) bodies.Add(Dummy(me + fwd * 6f + side * (i - 1) * 2.5f, 0f));
+            yield return new WaitForSeconds(1.5f);
+            foreach (var h in bodies) foreach (var bp in h.partList) if (bp != null) Burning.Ignite(bp, bp.transform.position, 1f);
+            yield return new WaitForSeconds(1f);
+            float t0 = Time.time;
+            while (Time.time - t0 < 45f)
+            {
+                bool any = false;
+                foreach (var h in bodies) if (Burning.Intensity(h) > 0f) any = true;
+                if (!any) break;
+                yield return new WaitForSeconds(0.5f);
+            }
+            float took = Time.time - t0;
+            int remains = 0; foreach (var h in bodies) if (h.GetComponent<BurntRemains>() != null) remains++;
+            Line($"three set alight all over: out after {took:0} s; dead {bodies.FindAll(h => h.Dead).Count}; with remains {remains}");
+            Check(took < 40f, "the fire burns out once there's nothing left to burn");
+            Check(remains >= bodies.FindAll(h => h.Dead).Count && remains > 0, "the ones it burned to death leave burnt remains");
+            // let a melted one sag down, then look
+            yield return new WaitForSeconds(22f);
+            var cg = new GameObject("TestCloseCam");
+            var c = cg.AddComponent<Camera>();
+            c.depth = 50f; c.fieldOfView = 50f; c.nearClipPlane = 0.05f;
+            Vector3 mid = (bodies[0].Center + bodies[1].Center + bodies[2].Center) / 3f;
+            cg.transform.position = mid + Vector3.up * 3.2f - fwd * 2.5f;
+            cg.transform.LookAt(mid);
+            yield return new WaitForSeconds(0.3f);
+            yield return GrabView("burnout_remains");
+            Destroy(cg);
+        }
+
+        /// <summary>The flamethrower on a dummy (he catches, burns, chars) and a grenade beside another (scorches).</summary>
+        IEnumerator FireTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            var target = Dummy(me + fwd * 3.2f, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            var other = Dummy(me + fwd * 5f + side * 2.5f, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            yield return new WaitForSeconds(1.5f);
+            // two seconds of flame onto him
+            for (float t = 0f; t < 4f; t += 0.1f)
+            {
+                Vector3 from = Game.player.cam.transform.position - Vector3.up * 0.3f + fwd * 0.5f;
+                Flamethrower.Spray(from, (target.Center - from).normalized, PlayerAvatar.Body);
+                yield return new WaitForSeconds(0.1f);
+            }
+            // a grenade at the other one's feet
+            var g = Grenade.Throw(other.Pelvis.transform.position - Vector3.up * 0.8f + side * 1.1f, Vector3.zero);
+            g.fuse = 0.05f;
+            yield return new WaitForSeconds(1f);
+            float lit = Burning.Intensity(target);
+            Line($"after the flame: alight {lit:0.00}");
+            Check(lit > 0.1f, "the flamethrower sets him alight");
+            yield return GrabView("fire_burning");
+            yield return new WaitForSeconds(6f);
+            yield return GrabView("fire_6s");
+            yield return new WaitForSeconds(10f);
+            float charAvg = 0f; int n = 0;
+            foreach (var bp in target.partList) if (bp != null) { charAvg += bp.charLevel; n++; }
+            charAvg /= Mathf.Max(1, n);
+            int scorch = 0;
+            foreach (var bp in other.partList) if (bp != null) scorch += bp.burns.Count;
+            Line($"16 s on: char {charAvg:0.00}, alight {Burning.Intensity(target):0.00}, dead {target.Dead}; grenade scorches on the other: {scorch}");
+            Check(charAvg > 0.15f, "he's charred where he burned");
+            Check(scorch > 0, "the grenade left burn marks");
+            // up close: over to him (wherever he ran), and the one the grenade went off beside
+            foreach (var (who, tag) in new[] { (target, "fire_close"), (other, "fire_scorch") })
+            {
+                // a camera of its own, above and to the side, looking down on him
+                Vector3 at = who.Center;
+                var cg = new GameObject("TestCloseCam");
+                var c = cg.AddComponent<Camera>();
+                c.depth = 50f; c.fieldOfView = 45f; c.nearClipPlane = 0.05f;
+                cg.transform.position = at + Vector3.up * 1.4f + side * 1.2f - fwd * 0.6f;
+                cg.transform.LookAt(at);
+                yield return new WaitForSeconds(0.3f);
+                yield return GrabView(tag);
+                Destroy(cg);
+            }
+        }
+
         IEnumerator BattleTest()
         {
             Game.LoadMap(3);
@@ -785,10 +972,14 @@ namespace Carl
             Check(spread > 1.4f, "a hot barrel throws rounds wider");
             Check(bh.Jams >= 1, "keeping it at the limit jams it");
             // let it cool
+            // (slowly: a cooked barrel takes a good while to come down, so spraying has a real cost)
             yield return Hold(8f);
+            float warm = bh.Heat(ak);
+            yield return Hold(10f);
             float cool = bh.Heat(ak);
-            Line($"8 s off the trigger: {hot * 100f:0}% -> {cool * 100f:0}%, glowing {bh.Glowing}");
-            Check(cool < hot * 0.5f, "it cools when you stop");
+            Line($"off the trigger: {hot * 100f:0}% -> {warm * 100f:0}% at 8 s -> {cool * 100f:0}% at 18 s, glowing {bh.Glowing}");
+            Check(warm > hot * 0.45f, "it cools slowly");
+            Check(cool < hot * 0.5f, "but it does cool when you stop");
             // single aimed shots barely warm it
             bh.SetHeat(ak, 0f);
             Wpn.loadouts[ak].fireMode = 1; yield return Hold(0.3f);

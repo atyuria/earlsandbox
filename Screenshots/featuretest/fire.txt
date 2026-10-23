@@ -1,0 +1,6 @@
+== fire  (00:11:43)
+after the flame: alight 0.91
+PASS  the flamethrower sets him alight
+16 s on: char 0.50, alight 0.00, dead False; grenade scorches on the other: 14
+PASS  he's charred where he burned
+PASS  the grenade left burn marks

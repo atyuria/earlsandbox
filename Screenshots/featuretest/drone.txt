@@ -1,6 +1,6 @@
-== drone  (15:56:04)
+== drone  (22:55:31)
 PASS  kamikaze drone up, you're seeing through it
-kamikaze: hit after 1.6 s; Earl dead True, wounds 46; back in your eyes True
+kamikaze: hit after 1.6 s; Earl dead True, wounds 51; back in your eyes True
 PASS  it blows up on him, you're back in your body
 dropper: dropped from 7 m above; wounds 0 -> 38
 PASS  a dropped grenade hurts whoever it lands by

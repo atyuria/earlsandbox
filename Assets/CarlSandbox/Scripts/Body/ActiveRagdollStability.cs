@@ -57,9 +57,19 @@ namespace Carl
         /// Balance was lost (a hit, a trip, a slip). Usually they stagger - a few hurried catch-steps along the
         /// push - and keep going; the less steady (more hurt, bleeding, scared) the likelier it ends on the floor.
         /// </summary>
+        /// <summary>
+        /// You: never brought down by your own footing - running, sprinting with a gun up, a lurch over a lip, a
+        /// stumble. Only something real puts you on the floor: legs too hurt to hold you, a wound that drops anyone,
+        /// passing out, a blast, or choosing to (Y). And you're straight back up.
+        /// </summary>
+        public bool Sturdy => grit >= 1.8f;
+        bool SturdyHolds => Sturdy && !physio.dead && physio.consciousness > 0.5f && physio.CanStand && !CriticalCollapse
+                            && Mathf.Min(physio.LegSupport(-1), physio.LegSupport(1)) > 0.35f;
+
         public void LoseBalance(Vector3 dir, float severity, string reason)
         {
             if (mode != BodyMode.Standing || sinking) return;
+            if (SturdyHolds) { stumbleTimer = Mathf.Max(stumbleTimer, 0.3f); balance = Mathf.Max(balance, 0.1f); return; }
             Vector3 flat = Vector3.ProjectOnPlane(dir, Vector3.up);
             if (flat.sqrMagnitude < 1e-4f) flat = Vector3.ProjectOnPlane(body.Chest.transform.forward, Vector3.up);
             flat.Normalize();
@@ -127,6 +137,8 @@ namespace Carl
         public void Topple(string reason, float quick = 0f)
         {
             if (mode == BodyMode.Down || sinking) return;
+            // you: your footing doesn't put you down (only what Sturdy says can)
+            if (SturdyHolds && reason != "cannot stand" && reason != "critical injury") { unstableTimer = 0f; lowTimer = 0f; balance = Mathf.Max(balance, 0.1f); return; }
             // on a ladder the climb holds them (a hit that kills or knocks them out still drops them off it)
             if (OnLadder && !physio.dead && physio.consciousness > 0.3f) return;
             // unconscious, dying or seizing bodies just drop
@@ -387,7 +399,7 @@ namespace Carl
         // ----------------------------------------------------------------- getting up
 
         /// <summary>How long they lie there before trying to get up: quick if barely hurt, longer if hurt.</summary>
-        float GetUpDelay => grit > 1f ? Mathf.Lerp(2.4f, 0.45f, Steadiness) + getUpPenalty * 0.35f - helpUp * 1.5f : (Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty) / grit - helpUp * 2f;
+        float GetUpDelay => Sturdy && Steadiness > 0.3f ? 0.35f - helpUp * 0.2f : grit > 1f ? Mathf.Lerp(2.4f, 0.45f, Steadiness) + getUpPenalty * 0.35f - helpUp * 1.5f : (Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty) / grit - helpUp * 2f;
 
         /// <summary>Someone is helping this body up (an Earl's hands under the arms): quicker, stronger, can't fail. Decays.</summary>
         [HideInInspector] public float helpUp;
@@ -395,6 +407,7 @@ namespace Carl
         void UpdateGetUpAttempt(float dt)
         {
             if (mode != BodyMode.GettingUp || sinking) return;
+            if (SturdyHolds) return;     // (you don't fail getting up unless you're really hurt)
             // a hurt person's attempt can fail partway up
             helpUp = Mathf.Max(0f, helpUp - dt * 0.5f);
             if (getUpT > 0.4f && helpUp < 0.2f && !(grit > 1f && Steadiness > 0.6f) && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit) * (grit > 1f ? 0.2f : 1f))
