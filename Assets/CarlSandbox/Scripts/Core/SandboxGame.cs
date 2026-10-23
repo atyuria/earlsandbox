@@ -119,7 +119,9 @@ namespace Carl
             {
                 Physics.SyncTransforms();
                 int n = TrenchSquad.Populate(spawn);
-                Toast($"{n} HOSTILE EARLS IN THE TRENCHES");
+                // and your own side round you in your trench (green armbands; HOLD R on one to recruit him)
+                int f = TrenchSquad.SpawnFriendlies(spawn, 6);
+                Toast($"{n} HOSTILE EARLS IN THE TRENCHES  ·  {f} FRIENDLIES WITH YOU");
             }
             Toast("MAP: " + MapBuilder.Names[index]);
         }

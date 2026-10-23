@@ -554,6 +554,7 @@ namespace Carl
             float spread = (kind == EarlWeapon.Shotgun ? ammo.spread : Rifle ? 0.9f : 1.4f) + shake * 1.1f;
             int pellets = Mathf.Max(1, ammo.pellets);
             Ballistics.FiringBody = body;
+            if (weapon.transform.forward.y > 0.45f) Intel.SkyShots++;
             for (int i = 0; i < pellets; i++)
             {
                 Vector3 dir = Quaternion.AngleAxis(Random.Range(0f, 360f), weapon.transform.forward) * Quaternion.AngleAxis(Random.Range(0f, spread), weapon.transform.up) * weapon.transform.forward;

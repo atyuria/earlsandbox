@@ -69,7 +69,7 @@ namespace Carl
 
         /// <summary>Counters for the playtests: shots fired by each side, and rounds that hit someone on the shooter's own side.</summary>
         public static readonly int[] Shots = new int[2];
-        public static int OwnSideHits;
+        public static int OwnSideHits, SkyShots;
 
         /// <summary>A gunshot at <paramref name="pos"/> by someone on <paramref name="team"/>, heard out to <paramref name="radius"/>.</summary>
         public static void Gunshot(Vector3 pos, int team, float radius, HumanBody shooter, Vector3? shootingAt)

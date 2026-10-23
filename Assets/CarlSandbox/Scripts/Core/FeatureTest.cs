@@ -639,9 +639,10 @@ namespace Carl
             Vector3 me = Game.SpawnPoint;
             // you: well out of it, up in the air in the free camera's place (so the fight is between them)
             Teams.PlayerOutOfIt = true;
-            int en = 0; foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Enemy) en++;
-            int fr = TrenchSquad.SpawnFriendlies(me, 6);
-            Intel.Shots[0] = Intel.Shots[1] = 0; Intel.OwnSideHits = 0;
+            int en = 0, fr = 0; foreach (var g in EarlGunner.All) if (g != null) { if (g.team == Teams.Enemy) en++; else fr++; }
+            Line($"the map came up with {en} enemies and {fr} friendlies");
+            Check(fr >= 4, "friendlies are there in your trench when the map loads");
+            Intel.Shots[0] = Intel.Shots[1] = 0; Intel.OwnSideHits = 0; Intel.SkyShots = 0;
             int frSaw = 0, enSaw = 0, grenades = 0, overTop = 0;
             var saw = new HashSet<EarlGunner>(); var top = new HashSet<EarlGunner>();
             float t0 = Time.time; float nextLog = 15f; int gBefore = 0;
@@ -666,6 +667,8 @@ namespace Carl
             Line($"battle: {frSaw} friendlies and {enSaw} enemies got eyes on someone; {grenades} grenades thrown; {overTop} went over the top; own-side hits {Intel.OwnSideHits}");
             Check(Intel.Shots[0] > 10 && Intel.Shots[1] > 10, "both sides fight");
             Check(Intel.OwnSideHits <= 2, "(almost) no shooting their own");
+            Line($"shots steeply up into the air: {Intel.SkyShots} of {Intel.Shots[0] + Intel.Shots[1]}");
+            Check(Intel.SkyShots * 20 <= Intel.Shots[0] + Intel.Shots[1] + 1, "hardly anyone shooting at the sky");
             Teams.PlayerOutOfIt = false;
         }
 

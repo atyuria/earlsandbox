@@ -47,9 +47,29 @@ namespace Carl
         {
             if (conf >= SuspectConf * 0.8f || Time.time - suspectTime > 3f)
             {
+                // kept as where they stand (a muzzle, a chest, a head is a metre or more up: everything that
+                // aims at "where he is" adds the height of a man to this)
+                pos = Feet(pos);
                 if (!seen && Vector3.Distance(pos, suspect) > 3f) newIntel = true;
                 suspect = pos; suspectTime = Time.time; suspectConf = conf;
             }
+        }
+
+        static readonly RaycastHit[] feetBuf = new RaycastHit[12];
+
+        /// <summary>The floor under a point (through any bodies, a couple of metres down at most).</summary>
+        static Vector3 Feet(Vector3 p)
+        {
+            int n = Physics.RaycastNonAlloc(p + Vector3.up * 0.2f, Vector3.down, feetBuf, 2.6f, ~0, QueryTriggerInteraction.Ignore);
+            float best = float.MaxValue; Vector3 at = p - Vector3.up * 1.3f;
+            for (int i = 0; i < n; i++)
+            {
+                var h = feetBuf[i];
+                if (h.collider is CharacterController || h.collider.GetComponentInParent<HumanBody>() != null) continue;
+                if (h.rigidbody != null && !h.rigidbody.isKinematic) continue;
+                if (h.distance < best) { best = h.distance; at = h.point; }
+            }
+            return at;
         }
 
         /// <summary>Rounds coming close: he keeps his head down more.</summary>
@@ -355,7 +375,11 @@ namespace Carl
             float age = Time.time - suspectTime;
             if (age > 6f || SuspectConf < 0.45f) return;
             Vector3 at = suspect + Vector3.up * 1.0f;
-            if (!Clear(body.Head.transform.position, at, body)) return;
+            Vector3 head = body.Head.transform.position;
+            if (!Clear(head, at, body)) return;
+            // (not up into the air over the lip of a trench: nobody's standing on nothing)
+            Vector3 up = at - head;
+            if (up.y > 0f && up.y / Mathf.Max(0.1f, new Vector2(up.x, up.z).magnitude) > 0.35f) return;
             prefiredFor = suspectTime;
             if (Random.value > chance * Mathf.Lerp(0.5f, 1f, aggression)) return;
             prefireAt = at + Random.insideUnitSphere * 0.3f;
