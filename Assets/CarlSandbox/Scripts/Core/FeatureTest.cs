@@ -69,6 +69,8 @@ namespace Carl
                 case "antidrone": body = AntiDroneTest(); break;
                 case "fire": body = FireTest(); break;
                 case "sprint": body = SprintTest(); break;
+                case "sprintkeys": body = SprintKeysTest(); break;
+                case "underfire": body = UnderFireTest(); break;
                 case "burnout": body = BurnOutTest(); break;
                 case "wound": body = WoundTest(); break;
                 case "gear": body = GearTest(); break;
@@ -783,6 +785,97 @@ namespace Carl
             while (me.ragdoll.IsDown || me.ragdoll.mode != BodyMode.Standing) { if (Time.time - t1 > 8f) break; yield return null; }
             Line($"knocked down: back on your feet in {Time.time - t1:0.0} s");
             Check(Time.time - t1 < 3f, "you get back up quickly, on your own");
+        }
+
+        /// <summary>
+        /// The real controls, as a player uses them: SHIFT + W held with a rifle out, the mouse swinging you round,
+        /// on the trench map (lips, duckboards, ladders, bodies) and the yard. Every fall is logged with its reason,
+        /// and how long getting back up took.
+        /// </summary>
+        IEnumerator SprintKeysTest()
+        {
+            // (the editor drops queued input while it isn't the focused window: take it anyway for this)
+            var bg = UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior;
+            UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior = UnityEngine.InputSystem.InputSettings.BackgroundBehavior.IgnoreFocus;
+            foreach (int map in new[] { 3, 1 })
+            {
+                Game.LoadMap(map);
+                Cursor.lockState = CursorLockMode.Locked;
+                yield return new WaitForSeconds(2f);
+                ClearEarls();
+                Wpn.Give(Idx("AK-47"), true);
+                yield return Hold(0.5f);
+                var me = PlayerAvatar.Body;
+                int falls = 0; bool wasDown = false; float downAt = 0f, worstUp = 0f;
+                float t0 = Time.time, turn = 0f, turnUntil = 0f;
+                var kb = UnityEngine.InputSystem.Keyboard.current; var mouse = UnityEngine.InputSystem.Mouse.current;
+                while (Time.time - t0 < 30f)
+                {
+                    if (Time.time > turnUntil) { turnUntil = Time.time + Random.Range(0.5f, 1.5f); turn = Random.Range(-600f, 600f); }
+                    bool shift = !(me != null && me.ragdoll.IsDown);
+                    UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(shift ? new[] { UnityEngine.InputSystem.Key.W, UnityEngine.InputSystem.Key.LeftShift } : new[] { UnityEngine.InputSystem.Key.W }));
+                    UnityEngine.InputSystem.InputSystem.QueueStateEvent(mouse, new UnityEngine.InputSystem.LowLevel.MouseState { delta = new Vector2(turn * Time.deltaTime, 0f) });
+                    bool down = me != null && me.ragdoll.IsDown;
+                    if (down && !wasDown) { falls++; downAt = Time.time; Line($"  fell at {Time.time - t0:0.0} s: {me.ragdoll.LastFall}"); }
+                    if (!down && wasDown) { worstUp = Mathf.Max(worstUp, Time.time - downAt); Line($"  back up after {Time.time - downAt:0.0} s"); }
+                    if (down && Time.time - downAt > 6f && wasDown) { Line("  STILL DOWN after 6 s"); worstUp = 99f; downAt = Time.time; }
+                    wasDown = down;
+                    yield return null;
+                }
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+                yield return GrabView("sprintkeys_" + map);
+                Line($"{MapBuilder.Names[map]}: 30 s holding SHIFT + W with an AK, turning: {falls} falls, slowest back up {worstUp:0.0} s; moved {Vector3.Distance(Game.SpawnPoint, me.Center):0} m from spawn");
+                Check(falls == 0, MapBuilder.Names[map] + ": sprinting doesn't put you on the floor");
+            }
+            UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior = bg;
+        }
+
+        /// <summary>
+        /// Sprinting with the real controls while two Earls shoot at you and shells land 7-10 m off every few seconds
+        /// (INVINCIBLE on so you last): every fall and its reason, how long back up.
+        /// </summary>
+        IEnumerator UnderFireTest()
+        {
+            var bg = UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior;
+            UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior = UnityEngine.InputSystem.InputSettings.BackgroundBehavior.IgnoreFocus;
+            bool inv = GameSettings.Invincible; GameSettings.Invincible = true;
+            Game.LoadMap(1);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(2f);
+            ClearEarls();
+            Wpn.Give(Idx("AK-47"), true);
+            var me = PlayerAvatar.Body;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Gunner(me.Center - Vector3.up * 0.9f + fwd * 25f + Vector3.Cross(Vector3.up, fwd) * 8f, Teams.Enemy, 180f);
+            Gunner(me.Center - Vector3.up * 0.9f + fwd * 30f - Vector3.Cross(Vector3.up, fwd) * 8f, Teams.Enemy, 180f);
+            yield return Hold(0.5f);
+            int falls = 0; bool wasDown = false; float downAt = 0f, worstUp = 0f, nextShell = 0f;
+            float t0 = Time.time, turn = 0f, turnUntil = 0f;
+            var kb = UnityEngine.InputSystem.Keyboard.current; var mouse = UnityEngine.InputSystem.Mouse.current;
+            while (Time.time - t0 < 30f)
+            {
+                if (Time.time > turnUntil) { turnUntil = Time.time + Random.Range(0.5f, 1.5f); turn = Random.Range(-400f, 400f); }
+                if (Time.time > nextShell)
+                {
+                    nextShell = Time.time + Random.Range(2.5f, 4f);
+                    Vector2 r = Random.insideUnitCircle.normalized * Random.Range(7f, 10f);
+                    Vector3 at = me.Center + new Vector3(r.x, 0f, r.y);
+                    if (Physics.Raycast(at + Vector3.up * 10f, Vector3.down, out var gh, 30f, ~0, QueryTriggerInteraction.Ignore)) Barrage.Fire(gh.point, 0.1f, 0f, 0.3f);
+                }
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.W, UnityEngine.InputSystem.Key.LeftShift));
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(mouse, new UnityEngine.InputSystem.LowLevel.MouseState { delta = new Vector2(turn * Time.deltaTime, 0f) });
+                bool down = me.ragdoll.IsDown;
+                if (down && !wasDown) { falls++; downAt = Time.time; Line($"  fell at {Time.time - t0:0.0} s: {me.ragdoll.LastFall}"); }
+                if (!down && wasDown) { worstUp = Mathf.Max(worstUp, Time.time - downAt); Line($"  back up after {Time.time - downAt:0.0} s"); }
+                wasDown = down;
+                yield return null;
+            }
+            UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+            Line($"30 s sprinting under fire, shells landing 7-10 m off: {falls} falls, slowest back up {worstUp:0.0} s; dead {me.Dead}");
+            Check(falls == 0, "rounds and shells near you don't put you down");
+            Check(!me.Dead, "INVINCIBLE: you don't die");
+            GameSettings.Invincible = inv;
+            UnityEngine.InputSystem.InputSystem.settings.backgroundBehavior = bg;
         }
 
         /// <summary>Three dummies set alight all over: the fire must burn out, and each leaves remains of some kind.</summary>

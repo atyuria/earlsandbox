@@ -86,7 +86,7 @@ namespace Carl
         /// <summary>A round, fragment or blade reaches you. point/dir world space; energy J.</summary>
         public void Hit(Vector3 point, Vector3 dir, float energy, HitKind kind, float diameter = 0.008f)
         {
-            if (dead) return;
+            if (dead || GameSettings.Invincible) return;
             float scale = cc != null ? 1.8f / Mathf.Max(0.4f, cc.height) : 1f;
             Vector3 l = transform.InverseTransformPoint(point);
             float h = l.y * scale, x = l.x;

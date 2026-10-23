@@ -80,6 +80,7 @@ namespace Carl
             BarrelHeat.Attach(gameObject);
             Radio.Attach(gameObject);
             FlameTank.Attach(gameObject);
+            AmbientArtillery.Attach(gameObject);
             menus =gameObject.AddComponent<Menus>();
             menus.Init(this);
             // the game starts on the main menu: nothing is loaded until you choose a map and press PLAY
@@ -218,6 +219,7 @@ namespace Carl
             foreach (var j in FindObjectsByType<Jet>()) Destroy(j.gameObject);
             foreach (var b in FindObjectsByType<Bomb>()) Destroy(b.gameObject);
             foreach (var b in FindObjectsByType<Barrage>()) Destroy(b.gameObject);
+            foreach (var m in FindObjectsByType<Missile>()) Destroy(m.gameObject);
             if (menuCam != null) menuCam.SetActive(false);
             player.gameObject.SetActive(true);
             WorldFreeze.Set(false);
@@ -680,7 +682,7 @@ namespace Carl
                     "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
                     "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse\n" +
-                    "RADIO (G menu, MISC): hold it + LMB, or M - map from above: 1 bombing run · 2 gun run · 3 artillery, LMB on the circle";
+                    "RADIO (G menu, MISC): hold it + LMB, or M - map from above: 1 bombing run · 2 gun run · 3 artillery · 4 missile, LMB on the circle";
                 GUI.Box(new Rect(12, 12, 620, 212), GUIContent.none, hudCard);
                 GUI.Label(new Rect(26, 22, 600, 196), help, (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 }));
             }

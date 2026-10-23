@@ -411,6 +411,7 @@ namespace Carl
                 Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
                 Check("CROSSHAIR", ref GameSettings.Crosshair);
                 GUILayout.EndHorizontal();
+                Check("INVINCIBLE", ref GameSettings.Invincible);
             }
             GUILayout.EndScrollView();
             GUILayout.EndArea();
@@ -456,7 +457,8 @@ namespace Carl
             Section("GAME");
             GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
             GUILayout.Space(4);
-            Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
+            Check("INFINITE AMMO (AND RADIO STRIKES)", ref GameSettings.InfiniteAmmo);
+            Check("INVINCIBLE (NOTHING HURTS YOU)", ref GameSettings.Invincible);
             Check("CROSSHAIR", ref GameSettings.Crosshair);
             Graphics();
             Section("AUDIO");
@@ -787,7 +789,7 @@ namespace Carl
                 GUILayout.Label("Suppressed shots carry about a third as far and barely flash. The light lights what you point at; the laser dot sits where the barrel points.", small);
             }
             if (WeaponController.IsRadio(d))
-                GUILayout.Label("Hold it and LEFT CLICK (or press M): a picture of the map from above comes up. Pick 1 BOMBING RUN (six heavy bombs along the arrow), 2 GUN RUN (cannon along the arrow) or 3 ARTILLERY (20 s of shells all over the circle), move the circle with the mouse (SCROLL zoom, WASD move the map, Q / E turn the arrow) and LEFT CLICK. ESC or M backs out. A red smoke goes down and it arrives some seconds later; each needs time before you can call it again.", small);
+                GUILayout.Label("Hold it and LEFT CLICK (or press M): a picture of the map from above comes up. Pick 1 BOMBING RUN (six heavy bombs along the arrow), 2 GUN RUN (cannon along the arrow) 3 ARTILLERY (20 s of shells all over the circle) or 4 MISSILE (one precise hit, small blast), move the circle with the mouse (SCROLL zoom, WASD move the map, Q / E turn the arrow) and LEFT CLICK. ESC or M backs out. A red smoke goes down and it arrives some seconds later; each needs time before you can call it again.", small);
             else if (d.type == WeaponType.Medical)
                 GUILayout.Label(d.name == "BANDAGE" ? "Hold it and LEFT CLICK: pick a wound and bandage it. Quick (3 s), slows the bleeding a lot but does not stop a deep wound or an artery." : "Hold it and LEFT CLICK: pick a deep wound and sew it shut. Slow (12 s), but it stops that wound bleeding outside. It can't reach bleeding inside the body.", small);
             if (WeaponController.IsFlamer(d))

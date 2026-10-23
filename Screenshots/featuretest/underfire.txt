@@ -1,0 +1,4 @@
+== underfire  (00:43:02)
+30 s sprinting under fire, shells landing 7-10 m off: 0 falls, slowest back up 0.0 s; dead False
+PASS  rounds and shells near you don't put you down
+PASS  INVINCIBLE: you don't die

@@ -62,8 +62,12 @@ namespace Carl
         public static float ProjectileExpand = 1f;
 
         /// <summary>A round stopped by armour: bruising, pain and a shove - big rounds can still crack bone behind the plate.</summary>
+        /// <summary>You, with INVINCIBLE on: nothing here touches you.</summary>
+        bool Immune => GameSettings.Invincible && body != null && body == PlayerAvatar.Body;
+
         public void ApplyArmourTrauma(BodyPart part, Vector3 point, Vector3 dir, float energy)
         {
+            if (Immune) return;
             float k = Mathf.Clamp01(energy / 4000f);
             var lp = part.transform.InverseTransformPoint(point);
             lp = part.flesh.SnapToSkin(lp, part.transform.InverseTransformDirection(dir));
@@ -84,6 +88,7 @@ namespace Carl
         {
             exited = false;
             exitPoint = entry;
+            if (Immune) return 0f;     // (stopped, harmlessly)
             if (part.severed && part.parent == null) { }
             dir.Normalize();
 
@@ -299,6 +304,7 @@ namespace Carl
 
         public void ApplyStab(BodyPart part, Vector3 entry, Vector3 dir, float depth)
         {
+            if (Immune) return;
             dir.Normalize();
             Vector3 p0 = part.transform.InverseTransformPoint(entry);
             Vector3 p1 = part.transform.InverseTransformPoint(entry + dir * depth);
@@ -366,6 +372,7 @@ namespace Carl
 
         public void ApplySlash(BodyPart part, Vector3 point, Vector3 surfaceNormal, Vector3 sweep)
         {
+            if (Immune) return;
             Vector3 inward = -surfaceNormal.normalized;
             Vector3 a = point - sweep * 0.05f + inward * 0.012f;
             Vector3 b = point + sweep * 0.05f + inward * 0.012f;
@@ -435,6 +442,7 @@ namespace Carl
 
         public void ApplyImpact(BodyPart part, Vector3 point, Vector3 normal, float speed, bool fromBody)
         {
+            if (Immune) return;
             if (part.severed && part.parent == null) return;
             // footsteps and knees knocking the floor while upright are not injuries
             if (Anatomy.IsLeg(part.id) && body.ragdoll.mode != BodyMode.Down && speed < 9f) return;
@@ -503,6 +511,7 @@ namespace Carl
 
         public void ApplyBlast(BodyPart part, Vector3 origin, float intensity, float surfaceDist = 10f, bool mayLoseLimb = true)
         {
+            if (Immune) return;
             if (intensity <= 0.02f) return;
             if (surfaceDist < 0.35f && !part.severed) { PointBlank(part, origin, surfaceDist, mayLoseLimb); return; }
             Vector3 dir = (part.transform.position - origin).normalized;
@@ -641,6 +650,7 @@ namespace Carl
 
         public void Sever(BodyPart part, Vector3 dir, float force)
         {
+            if (Immune) return;
             if (part.severed || part.id == PartId.Pelvis || part.joint == null) return;
             var parent = part.parent;
             // where the joint is on the parent (its rest position there): the limb itself may already have been

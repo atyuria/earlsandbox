@@ -10,6 +10,8 @@ namespace Carl
         /// <summary>0 = no blood at all, 0.5 = realistic, 1 = unlimited.</summary>
         public static float BloodAmount = 0.5f;
         public static bool InfiniteAmmo;
+        /// <summary>You can't be hurt: rounds, blades, blasts, falls and fire do nothing to you.</summary>
+        public static bool Invincible;
         public static float MouseSensitivity = 1f;
         public static float Volume = 0.8f;
         /// <summary>The Earls' screams, moans and begging. Off = silent dummies.</summary>
@@ -39,6 +41,7 @@ namespace Carl
             BloodQuality = PlayerPrefs.GetFloat("earl.bloodQuality", 0.66f);
             BloodAmount = PlayerPrefs.GetFloat("earl.bloodAmount", 0.5f);
             InfiniteAmmo = PlayerPrefs.GetInt("earl.infiniteAmmo", 0) == 1;
+            Invincible = PlayerPrefs.GetInt("earl.invincible", 0) == 1;
             MouseSensitivity = PlayerPrefs.GetFloat("earl.sens", 1f);
             Volume = PlayerPrefs.GetFloat("earl.volume", 0.8f);
             DummyVoices = PlayerPrefs.GetInt("earl.voices", 1) == 1;
@@ -56,6 +59,7 @@ namespace Carl
             PlayerPrefs.SetFloat("earl.bloodQuality", BloodQuality);
             PlayerPrefs.SetFloat("earl.bloodAmount", BloodAmount);
             PlayerPrefs.SetInt("earl.infiniteAmmo", InfiniteAmmo ? 1 : 0);
+            PlayerPrefs.SetInt("earl.invincible", Invincible ? 1 : 0);
             PlayerPrefs.SetFloat("earl.sens", MouseSensitivity);
             PlayerPrefs.SetFloat("earl.volume", Volume);
             PlayerPrefs.SetInt("earl.voices", DummyVoices ? 1 : 0);

@@ -1,0 +1,5 @@
+== sprintkeys  (00:43:37)
+TRENCHES: 30 s holding SHIFT + W with an AK, turning: 0 falls, slowest back up 0.0 s; moved 2 m from spawn
+PASS  TRENCHES: sprinting doesn't put you on the floor
+THE YARD: 30 s holding SHIFT + W with an AK, turning: 0 falls, slowest back up 0.0 s; moved 24 m from spawn
+PASS  THE YARD: sprinting doesn't put you on the floor

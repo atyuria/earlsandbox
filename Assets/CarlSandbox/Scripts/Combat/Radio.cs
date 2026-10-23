@@ -25,15 +25,15 @@ namespace Carl
         public static int ClosedFrame = -10;
         public static void Attach(GameObject g) => I = g.AddComponent<Radio>();
 
-        public enum Strike { Bombs, GunRun, Artillery }
+        public enum Strike { Bombs, GunRun, Artillery, Missile }
         bool open;
         Strike pick;
-        readonly float[] ready = new float[3];
+        readonly float[] ready = new float[4];
         GUIStyle card, title, line, lineOn, small, tag;
-        static readonly float[] Cooldown = { 80f, 40f, 90f };
-        static readonly string[] Names = { "BOMBING RUN (6 BOMBS)", "GUN RUN (CANNON)", "ARTILLERY (20 S)" };
+        static readonly float[] Cooldown = { 80f, 40f, 90f, 30f };
+        static readonly string[] Names = { "BOMBING RUN (6 BOMBS)", "GUN RUN (CANNON)", "ARTILLERY (20 S)", "MISSILE (PRECISE)" };
         /// <summary>How big the circle is on the ground (m): about what each covers.</summary>
-        static readonly float[] Radius = { 20f, 14f, 24f };
+        static readonly float[] Radius = { 20f, 14f, 24f, 5f };
 
         // the map (MapPainter draws it): the bit of it in view
         Vector3 centre;
@@ -89,6 +89,7 @@ namespace Carl
             if (kb.digit1Key.wasPressedThisFrame) pick = Strike.Bombs;
             if (kb.digit2Key.wasPressedThisFrame) pick = Strike.GunRun;
             if (kb.digit3Key.wasPressedThisFrame) pick = Strike.Artillery;
+            if (kb.digit4Key.wasPressedThisFrame) pick = Strike.Missile;
             float dt = Time.unscaledDeltaTime;
             // pan, zoom, turn the run
             Vector3 pan = Vector3.zero;
@@ -172,13 +173,20 @@ namespace Carl
         public void Call(Strike s, Vector3 at, Vector3 along)
         {
             var g = SandboxGame.Instance;
-            ready[(int)s] = Time.time + Cooldown[(int)s];
+            // (with INFINITE AMMO there's always another aircraft, another battery: no wait at all)
+            ready[(int)s] = GameSettings.InfiniteAmmo ? 0f : Time.time + Cooldown[(int)s];
             float delay;
             if (s == Strike.Artillery)
             {
                 delay = Random.Range(9f, 12f);
                 Barrage.Fire(at, Radius[2], delay, 20f);
                 MarkerSmoke.Drop(at, delay + 4f);
+            }
+            else if (s == Strike.Missile)
+            {
+                delay = Random.Range(5f, 6f);
+                Missile.Inbound(at, along, delay);
+                MarkerSmoke.Drop(at, delay + 3f);
             }
             else
             {
@@ -187,7 +195,7 @@ namespace Carl
                 MarkerSmoke.Drop(at, delay + 6f);
             }
             float dist = PlayerAvatar.Body != null ? Vector3.Distance(PlayerAvatar.Body.Center, at) : 999f;
-            string who = s == Strike.Bombs ? "VIPER 1-1: COPY, BOMBS" : s == Strike.GunRun ? "HOG 2-1: COPY, GUN RUN" : "STEEL RAIN: SHOT OVER, SPLASH";
+            string who = s == Strike.Bombs ? "VIPER 1-1: COPY, BOMBS" : s == Strike.GunRun ? "HOG 2-1: COPY, GUN RUN" : s == Strike.Missile ? "REAPER 3-1: COPY, ONE MISSILE" : "STEEL RAIN: SHOT OVER, SPLASH";
             g?.Toast($"{who} ON THE RED SMOKE, {Mathf.RoundToInt(delay)} SECONDS" + (dist < Radius[(int)s] + 20f ? "  ·  DANGER CLOSE" : ""));
             Sfx.Play("reload_magin", Ears, 0.4f, 0f, 1f, 0.05f);
         }
@@ -329,15 +337,15 @@ namespace Carl
                 GUI.Label(new Rect(c.x + r + 10, c.y - 9, 260, 18), $"{dYou:0} M FROM YOU" + (close ? "  ·  DANGER CLOSE" : ""), tag);
             }
             // the card: what to call, what's ready, the keys
-            var cr = new Rect(W - 390, 20, 370, 196);
+            var cr = new Rect(W - 390, 20, 370, 218);
             GUI.Box(cr, GUIContent.none, card);
             GUI.Label(new Rect(cr.x + 16, cr.y + 12, 340, 22), "RADIO  ·  CALL FOR FIRE", title);
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
             {
                 float left = Mathf.Max(0f, ready[i] - Time.time);
                 GUI.Label(new Rect(cr.x + 16, cr.y + 42 + i * 22, 340, 20), $"{i + 1}   {Names[i]}" + (left > 0f ? $"  ·  {left:0} S" : "  ·  READY") + ((int)pick == i ? "   <" : ""), (int)pick == i ? lineOn : line);
             }
-            GUI.Label(new Rect(cr.x + 16, cr.y + 116, 340, 80), "1 / 2 / 3 pick  ·  LEFT CLICK call it on the circle\nMOUSE move the circle  ·  SCROLL zoom  ·  WASD move the map  ·  Q / E turn the arrow (the way the jet flies in)\nESC or M back out", small);
+            GUI.Label(new Rect(cr.x + 16, cr.y + 138, 340, 80), "1 - 4 pick  ·  LEFT CLICK call it on the circle\nMOUSE move the circle  ·  SCROLL zoom  ·  WASD move the map  ·  Q / E turn the arrow (the way the jet flies in)\nESC or M back out", small);
         }
     }
 
@@ -508,6 +516,7 @@ namespace Carl
         // ------------------------------------------------------------ sounds
 
         /// <summary>A jet: a deep roar with a hiss on top.</summary>
+        public static AudioClip RoarClipPublic() => RoarClip();
         static AudioClip RoarClip()
         {
             if (roarClip != null) return roarClip;
@@ -607,7 +616,8 @@ namespace Carl
             {
                 if (h == null || h.Dead || h.Pelvis == null) continue;
                 float d = Vector3.Distance(h.Center, c);
-                if (d < 9f * size && EarlGunner.Clear(c + Vector3.up * 0.5f, h.Center, h)) h.ragdoll.Fall("blown off his feet");
+                float reach = h == PlayerAvatar.Body ? 3.5f : 9f;     // (you: only from close by)
+                if (d < reach * size && EarlGunner.Clear(c + Vector3.up * 0.5f, h.Center, h)) h.ragdoll.Fall("blown off his feet");
             }
             if (SandboxGame.Instance != null && SandboxGame.Instance.cam != null)
                 SandboxGame.Instance.Shake(Mathf.Clamp01((1.6f - Vector3.Distance(c, SandboxGame.Instance.cam.transform.position) / 60f) * Mathf.Lerp(0.6f, 1f, size)));
@@ -678,6 +688,65 @@ namespace Carl
             screamClip = AudioClip.Create("ShellScream", n, 1, rate, false);
             screamClip.SetData(d, 0);
             return screamClip;
+        }
+    }
+}
+
+namespace Carl
+{
+    /// <summary>
+    /// A single guided missile: it comes down steeply along the arrow, trailing smoke, and hits the middle of the
+    /// mark - a much smaller blast than a bomb, for one target (a man, a dugout, a corner).
+    /// </summary>
+    public class Missile : MonoBehaviour
+    {
+        Vector3 from, to;
+        float t, T, nextPuff;
+        AudioSource roar;
+
+        public static void Inbound(Vector3 at, Vector3 along, float delay)
+        {
+            var go = new GameObject("Missile");
+            var m = go.AddComponent<Missile>();
+            m.to = at;
+            m.from = at - along * 500f + Vector3.up * 380f;
+            m.T = delay;
+            go.transform.position = m.from;
+            var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            Destroy(body.GetComponent<Collider>());
+            body.transform.SetParent(go.transform, false);
+            body.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            body.transform.localScale = new Vector3(0.25f, 1f, 0.25f);
+            body.GetComponent<MeshRenderer>().sharedMaterial = Mats.Lit(new Color(0.55f, 0.57f, 0.55f), 0.4f, 0.3f);
+            var l = new GameObject("Motor").AddComponent<Light>();
+            l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.back * 1.2f;
+            l.type = LightType.Point; l.range = 12f; l.intensity = 4f; l.color = new Color(1f, 0.7f, 0.35f);
+            m.roar = go.AddComponent<AudioSource>();
+            m.roar.clip = Jet.RoarClipPublic(); m.roar.loop = true; m.roar.spatialBlend = 1f; m.roar.pitch = 1.6f;
+            m.roar.rolloffMode = AudioRolloffMode.Linear; m.roar.minDistance = 20f; m.roar.maxDistance = 1200f; m.roar.volume = 0.6f * GameSettings.Volume;
+            m.roar.Play();
+        }
+
+        void Update()
+        {
+            if (WorldFreeze.On) return;
+            t += Time.deltaTime;
+            // (a little faster at the end, as it dives)
+            float k = Mathf.Clamp01(t / T);
+            Vector3 p = Vector3.Lerp(from, to, k * k * 0.35f + k * 0.65f);
+            Vector3 d = p - transform.position;
+            if (d.sqrMagnitude > 1e-4f) transform.rotation = Quaternion.LookRotation(d);
+            transform.position = p;
+            if (Time.time > nextPuff)
+            {
+                nextPuff = Time.time + 0.03f;
+                Haze.Puff(p - transform.forward * 1.2f, -transform.forward * 0.5f, Random.Range(0.3f, 0.5f), 0.4f, new Color(0.75f, 0.74f, 0.72f), true);
+            }
+            if (k >= 1f)
+            {
+                Bomb.Blast(to, 0.5f);
+                Destroy(gameObject);
+            }
         }
     }
 }

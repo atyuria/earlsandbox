@@ -143,6 +143,7 @@ namespace Carl
             if (OnLadder && !physio.dead && physio.consciousness > 0.3f) return;
             // unconscious, dying or seizing bodies just drop
             if (physio.dead || physio.consciousness < 0.3f || physio.posture != PostureType.None) { Fall(reason); return; }
+            toppleReason = reason;
             if (DebugFalls) Debug.Log($"[Carl] {body.DisplayName} going down: {reason} (steady {Steadiness:0.00}, balance {balance:0.00})");
             bool crit = CriticalCollapse;
             if (crit) quick = 1f;

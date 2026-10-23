@@ -144,6 +144,7 @@ namespace Carl
         public void Kill(string cause, bool limpInstantly)
         {
             if (dead) return;
+            if (GameSettings.Invincible && body != null && body == PlayerAvatar.Body) return;     // (INVINCIBLE: you don't die)
             dead = true;
             deathTime = Time.time;
             causeOfDeath = cause;

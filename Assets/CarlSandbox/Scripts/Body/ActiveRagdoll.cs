@@ -57,6 +57,9 @@ namespace Carl
 
         const float StandHeight = 0.98f;
         public static bool DebugFalls = false; // set true to log falls and hits to the Console
+        /// <summary>Why this body last went down (for the playtests).</summary>
+        [HideInInspector] public string LastFall = "";
+        string toppleReason = "";
 
         public void Init(HumanBody b)
         {
@@ -124,7 +127,8 @@ namespace Carl
                 staggerDir = flat;
                 staggerLean = Mathf.Max(staggerLean, 10f + s * 18f);
                 // a stagger, not a drop: only a really big hit takes them straight down
-                if (balance < (grit > 1f ? -2.6f : -1.6f)) Fall("blown off their feet");
+                // (you: a round staggers you, it never puts you down - only a blast right by you does)
+                if (balance < (Sturdy ? -1000f : grit > 1f ? -2.6f : -1.6f)) Fall("blown off their feet");
                 else if (balance < 0f) LoseBalance(flat, Mathf.Clamp01(-balance), "knocked off balance");
             }
         }
@@ -143,6 +147,7 @@ namespace Carl
         public void Fall(string reason = "external")
         {
             if (mode == BodyMode.Down) return;
+            LastFall = $"{(reason == "went down" ? "went down after: " + toppleReason : reason)} (tilt {Vector3.Angle(body.Pelvis.transform.up, Vector3.up):0}, h {GroundHeight:0.00}, canStand {physio.CanStand}, steady {Steadiness:0.00})";
             if (DebugFalls) Debug.Log($"[Carl] {body.DisplayName} fell: {reason} (tilt {Vector3.Angle(body.Pelvis.transform.up, Vector3.up):0}, h {GroundHeight:0.00}, canStand {physio.CanStand}, t {Time.time - body.spawnTime:0.0}s)");
             mode = BodyMode.Down;
             downTime = 0f;

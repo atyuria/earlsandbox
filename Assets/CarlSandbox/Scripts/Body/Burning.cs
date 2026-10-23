@@ -39,6 +39,7 @@ namespace Carl
         public static void Ignite(BodyPart bp, Vector3 at, float amount)
         {
             if (bp == null || bp.body == null || bp.severed) return;
+            if (GameSettings.Invincible && bp.body == PlayerAvatar.Body) return;     // (INVINCIBLE: fire does nothing to you)
             var h = bp.body;
             if (!map.TryGetValue(h, out var b) || b == null)
             {
