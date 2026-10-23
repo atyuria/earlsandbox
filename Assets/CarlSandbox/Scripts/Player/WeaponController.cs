@@ -197,7 +197,18 @@ namespace Carl
         public static bool GripsFor(WeaponDef d) => d.type == WeaponType.Gun && !IsPistol(d) && d.name != "MOSSBERG 590";
         public static bool SuppressorFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && d.name != "MOSSBERG 590";
         public static bool LightFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !d.scope;
-        public static bool LaserFor(WeaponDef d) => d.name == "AR-15";
+        public static bool LaserFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER";
+        /// <summary>L and J: the weapon light (or, with none fitted, a head torch) and the laser, on and off.</summary>
+        public static bool LightOn = true, LaserOn = true, TorchOn;
+
+        /// <summary>Where the laser goes: on top of an AR-15's handguard, on the left side of the other long guns, under a pistol's frame.</summary>
+        static (Vector3 pos, Vector3 euler) LaserMount(WeaponDef d)
+        {
+            if (d.name == "AR-15") return (new Vector3(0f, 0.029f, 0.285f), Vector3.zero);
+            var l = LightMount(d.name);
+            if (IsPistol(d)) return (l.pos + new Vector3(0f, -0.006f, -0.028f), Vector3.zero);
+            return (new Vector3(-l.pos.x, l.pos.y, l.pos.z + 0.02f), new Vector3(l.euler.x, l.euler.y, -l.euler.z));
+        }
         public static bool MagnifierFor(WeaponDef d) => d.name == "AR-15";
         readonly List<Vector3> mountTop = new List<Vector3>(), mountUnder = new List<Vector3>();
         readonly List<GameObject> attach = new List<GameObject>();
@@ -779,7 +790,8 @@ namespace Carl
                 var g = ModelLibrary.Spawn("Att_Laser", root, ModelLibrary.GunMaterial, false);
                 if (g != null)
                 {
-                    g.transform.localPosition = new Vector3(0f, 0.029f, 0.285f);   // on the handguard rail, behind the front sight
+                    var lm = LaserMount(d);
+                    g.transform.localPosition = lm.pos; g.transform.localRotation = Quaternion.Euler(lm.euler);
                     attach.Add(g);
                     var e = new GameObject("LaserEmit").transform;
                     e.SetParent(g.transform, false); e.localPosition = new Vector3(-0.009f, 0.03f, 0.043f);
@@ -797,12 +809,40 @@ namespace Carl
             }
         }
 
-        /// <summary>The light is on while fitted; the laser puts its dot wherever the barrel line meets something.</summary>
+        Light torch;
+        LineRenderer beam;
+
+        /// <summary>
+        /// The light shines while fitted and switched on (L; with no light on the gun, L is a head torch). The laser
+        /// (J) puts its dot wherever the barrel line meets something, and its beam shows where there's dust or
+        /// smoke in the air for it to catch on - faint in clear air, a bright red line through a cloud.
+        /// </summary>
         void UpdateRailGear()
         {
-            for (int k = 0; k < lights.Length; k++) if (lights[k] != null) lights[k].enabled = Armed && k == current;
-            var e = Armed && current < laserEmit.Length ? laserEmit[current] : null;
+            bool gunLight = Armed && current < lights.Length && lights[current] != null;
+            for (int k = 0; k < lights.Length; k++) if (lights[k] != null) lights[k].enabled = Armed && k == current && LightOn;
+            if (torch == null && TorchOn)
+            {
+                var tg = new GameObject("HeadTorch");
+                tg.transform.SetParent(cam.transform, false);
+                tg.transform.localPosition = new Vector3(0.08f, 0.06f, 0.05f);
+                torch = tg.AddComponent<Light>();
+                torch.type = LightType.Spot; torch.spotAngle = 55f; torch.innerSpotAngle = 20f; torch.range = 28f; torch.intensity = 4f;
+                torch.color = new Color(1f, 0.93f, 0.82f); torch.shadows = LightShadows.Soft;
+            }
+            if (torch != null) torch.enabled = TorchOn && !gunLight && FpvDrone.Piloting == null;
+            var e = Armed && current < laserEmit.Length && LaserOn ? laserEmit[current] : null;
             bool on = e != null && vmRoot.gameObject.activeInHierarchy;
+            if (beam == null)
+            {
+                var bg = new GameObject("LaserBeam");
+                beam = bg.AddComponent<LineRenderer>();
+                beam.positionCount = 2; beam.useWorldSpace = true;
+                beam.startWidth = 0.003f; beam.endWidth = 0.004f;
+                beam.sharedMaterial = new Material(Mats.Unlit(new Color(1f, 0.1f, 0.06f, 1f), true));
+                beam.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; beam.receiveShadows = false;
+            }
+            beam.enabled = false;
             if (laserDot == null && on)
             {
                 laserDot = new GameObject("LaserDot");
@@ -815,13 +855,26 @@ namespace Carl
             laserDot.SetActive(false);
             if (!on) return;
             Vector3 dir = e.forward;
-            if (SelfRay(e.position, dir, out var h, 150f))
+            bool hit = SelfRay(e.position, dir, out var h, 150f);
+            Vector3 end = hit ? h.point : e.position + dir * 150f;
+            // through dust and smoke the dot dims (the haze swallows it) and the beam lights up along its length
+            float clear = Haze.Transmit(e.position, end);
+            if (hit)
             {
                 laserDot.SetActive(true);
                 laserDot.transform.position = h.point + h.normal * 0.004f;
                 laserDot.transform.rotation = Quaternion.LookRotation(-h.normal);
-                laserDot.transform.localScale = Vector3.one * (0.006f + h.distance * 0.0006f);
+                // it spreads a little with range (a real beam is a few mm wide and diverges)
+                laserDot.transform.localScale = Vector3.one * (0.006f + h.distance * 0.0006f) * Mathf.Lerp(1.6f, 1f, clear);
+                laserDot.GetComponent<MeshRenderer>().enabled = clear > 0.08f;
             }
+            float glow = 0.06f + (1f - clear) * 0.7f;
+            beam.enabled = true;
+            beam.SetPosition(0, e.position);
+            beam.SetPosition(1, end);
+            var bc = new Color(1f, 0.1f, 0.06f, glow);
+            beam.startColor = bc; beam.endColor = new Color(bc.r, bc.g, bc.b, glow * (hit ? 0.8f : 0.1f));
+            beam.sharedMaterial.SetColor("_Color", new Color(1f, 0.1f, 0.06f, glow));
         }
 
         void AddModel(GameObject g, Vector3 muzzleLocal)
@@ -854,16 +907,16 @@ namespace Carl
             bool locked = Cursor.lockState == CursorLockMode.Locked && !Menus.Blocking && !pc.flying;   // (flying the free camera: hands off the gun)
             float dt = Time.unscaledDeltaTime;
 
-            if (kb.digit1Key.wasPressedThisFrame) Select(0);
-            if (kb.digit2Key.wasPressedThisFrame) Select(1);
-            if (kb.digit3Key.wasPressedThisFrame) Select(2);
-            if (kb.digit4Key.wasPressedThisFrame) Select(3);
-            if (kb.digit5Key.wasPressedThisFrame) Select(4);
-            if (kb.digit6Key.wasPressedThisFrame) Select(5);
-            if (kb.digit7Key.wasPressedThisFrame) Select(6);
-            if (kb.digit8Key.wasPressedThisFrame) Select(7);
-            if (kb.digit9Key.wasPressedThisFrame) Select(8);
-            float scroll = mouse.scroll.ReadValue().y;
+            if (kb.digit1Key.wasPressedThisFrame && !SquadCommand.Open) Select(0);
+            if (kb.digit2Key.wasPressedThisFrame && !SquadCommand.Open) Select(1);
+            if (kb.digit3Key.wasPressedThisFrame && !SquadCommand.Open) Select(2);
+            if (kb.digit4Key.wasPressedThisFrame && !SquadCommand.Open) Select(3);
+            if (kb.digit5Key.wasPressedThisFrame && !SquadCommand.Open) Select(4);
+            if (kb.digit6Key.wasPressedThisFrame && !SquadCommand.Open) Select(5);
+            if (kb.digit7Key.wasPressedThisFrame && !SquadCommand.Open) Select(6);
+            if (kb.digit8Key.wasPressedThisFrame && !SquadCommand.Open) Select(7);
+            if (kb.digit9Key.wasPressedThisFrame && !SquadCommand.Open) Select(8);
+            float scroll = SquadCommand.Open ? 0f : mouse.scroll.ReadValue().y;   // (the squad list uses the wheel)
             if (!Grabbing && Mathf.Abs(scroll) > 0.1f && !swingFree)
                 for (int s = 1; s < defs.Count; s++) { int k = (current + (scroll < 0 ? s : defs.Count - s)) % defs.Count; if (owned[k]) { Select(k); break; } }
 
@@ -882,6 +935,21 @@ namespace Carl
             // point aim: B toggles it on and off (a gun only). Off, right mouse aims down the sights; on, the gun is
             // held canted and low, and right mouse brings it up canted to the eye (a canted aim)
             if (locked && kb.bKey.wasPressedThisFrame && d.type == WeaponType.Gun) pointOn = !pointOn;
+            // L: the light on the gun, or a head torch if there isn't one;  J: the laser
+            if (locked && kb.lKey.wasPressedThisFrame)
+            {
+                bool gunLight = Armed && current < lights.Length && lights[current] != null;
+                if (gunLight) { LightOn = !LightOn; SandboxGame.Instance?.Toast(LightOn ? "WEAPON LIGHT ON" : "WEAPON LIGHT OFF"); }
+                else { TorchOn = !TorchOn; SandboxGame.Instance?.Toast(TorchOn ? "HEAD TORCH ON" : "HEAD TORCH OFF"); }
+                Sfx.Play("click_empty", cam.transform.position, 0.3f, 0f, 1f, 0.05f);
+            }
+            if (locked && kb.jKey.wasPressedThisFrame)
+            {
+                bool fitted = Armed && current < laserEmit.Length && laserEmit[current] != null;
+                if (!fitted) SandboxGame.Instance?.Toast("NO LASER ON THIS GUN  -  FIT ONE IN THE G MENU");
+                else { LaserOn = !LaserOn; SandboxGame.Instance?.Toast(LaserOn ? "LASER ON" : "LASER OFF"); }
+                Sfx.Play("click_empty", cam.transform.position, 0.3f, 0f, 1f, 0.05f);
+            }
             if (d.type != WeaponType.Gun) pointOn = false;
             bool rmbAim = (ForceAim || locked && mouse.rightButton.isPressed) && d.type == WeaponType.Gun && !reloading;
             bool aimHeld = rmbAim && !pointOn;
@@ -909,7 +977,7 @@ namespace Carl
                 if (modes.Length > 1) { Loadout.fireMode = (Mathf.Clamp(Loadout.fireMode, 0, modes.Length - 1) + 1) % modes.Length; burstLeft = 0; Sfx.Play("click_empty", cam.transform.position, 0.35f, 0f, 1f, 0.05f); }
                 SandboxGame.Instance?.Toast("FIRE MODE: " + FireMode(current) + (modes.Length > 1 ? "" : " ONLY"));
             }
-            if (locked && kb.rKey.wasPressedThisFrame && d.type == WeaponType.Gun && !reloading && ammo[current] < MagSize(current)) StartReload();
+            if (locked && SquadCommand.ReloadFrame == Time.frameCount && d.type == WeaponType.Gun && !reloading && ammo[current] < MagSize(current)) StartReload();
 
             // ALT held with a blade or hammer: the mouse moves the weapon instead of the view
             swingFree = able && locked && d.type == WeaponType.Knife && kb.leftAltKey.isPressed && suicideT <= 0f;
@@ -2340,6 +2408,7 @@ namespace Carl
             Fx.BlastDust(muzzles[current].position, AimDirection, Mathf.Clamp(Mathf.Sqrt((am != null ? am.Energy * am.pellets : d.Energy) / 2000f), 0.6f, 2.2f) * (supp ? 0.4f : 1f));
             if (am != null && am.incendiary) Fx.DragonsBreath(muzzles[current].position, cam.transform.forward);
             HumanBrain.BroadcastNoise(origin, d.loudness * (supp ? 0.3f : 1f), 0.35f);
+            Intel.Gunshot(origin, Teams.Friendly, d.loudness * (supp ? 0.3f : 1f), PlayerAvatar.Body, null);
             Sfx.Gun(d.name, muzzles[current].position, supp);
 
             // near misses frighten people the bullet passes close to

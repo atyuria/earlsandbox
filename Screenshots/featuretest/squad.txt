@@ -1,0 +1,16 @@
+== squad  (15:55:19)
+friendlies: 5 spawned, 10 armbands, 1 medics
+PASS  a friendly squad in your trench, green armbands, a medic
+after you moved 16 m: squad 4.4 m and 1.2 m from you (FOLLOWING / BANDAGING YOU)
+PASS  the squad follows you
+  rifle: MOVING step 4/6 next Walk at (3.64, -0.01, -21.55) feet (-2.04, -0.04, -21.12) speed 3.0 obj (10.57, -0.02, 22.50)
+move order: 1.6 m from the spot after 7 s, now Move
+PASS  goes where you send him
+medic: 1 open wounds -> 0 after 3 s
+EARL #57 at (4.70, 0.97, -21.52) down False dead False side 0 HOLDING step 3/3 feet (4.70, 0.02, -21.52) speed 0.0 obj (10.57, -0.02, 22.50)
+EARL #59 at (-10.45, 0.60, -21.32) down False dead False side 0 BANDAGING YOU step 1/2 next Walk at (-10.14, -0.01, -20.22) feet (-10.45, -0.35, -21.32) speed 0.0 obj 
+YOU at (-10.33, 0.91, -20.25) down False dead False side 0 
+
+PASS  your medic bandages you
+knocked down: up again True after 8.8 s (EARL #57 HELPING YOU UP)
+PASS  a mate helps you up

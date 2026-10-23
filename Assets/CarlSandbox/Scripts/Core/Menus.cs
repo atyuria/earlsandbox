@@ -26,6 +26,8 @@ namespace Carl
         public readonly ArmourLoadout spawnArmour = new ArmourLoadout();
         public bool spawnAI = true;
         public EarlWeapon spawnWeapon = EarlWeapon.None;
+        public int spawnTeam = Teams.Enemy;
+        public bool spawnMedic;
         public int spawnCount = 1;
         GameObject ghost;
         Vector3 ghostPos; float ghostYaw; bool ghostValid;
@@ -34,6 +36,7 @@ namespace Carl
         int gunTab;
         bool armourPage;                  // G menu: the ARMOUR tab instead of a weapon
         int gunPage;                      // G menu: 0 guns, 1 melee, 2 misc (grenades, healing, the physics gun)
+        int droneTab;                     // G menu, MISC: 1 kamikaze drone, 2 grenade drone (0: a weapon)
         Vector2 listScroll;
         static int PageOf(WeaponDef d) => d.type == WeaponType.Gun ? 0 : d.type == WeaponType.Knife ? 1 : 2;
         static string PageName(int p) => p == 0 ? "GUNS" : p == 1 ? "MELEE" : "MISC";
@@ -104,7 +107,10 @@ namespace Carl
                         if (h == null) break;
                         ArmourSystem.Equip(h, spawnArmour.Clone());
                         h.brain.aiEnabled = spawnAI;
-                        EarlGunner.Arm(h, spawnWeapon);
+                        // a friendly always comes armed (an AK unless you picked something); a medic with a pistol
+                        var wpn = spawnMedic ? EarlWeapon.Pistol : spawnTeam == Teams.Friendly && spawnWeapon == EarlWeapon.None ? EarlWeapon.AK47 : spawnWeapon;
+                        var g = EarlGunner.Arm(h, wpn, null, spawnTeam);
+                        if (g != null) { g.medic = spawnMedic; g.grenades = spawnMedic ? 0 : 1; }
                     }
                     game.Toast(spawnCount > 1 ? $"{spawnCount} EARLS SPAWNED" : "EARL SPAWNED");
                 }
@@ -300,6 +306,7 @@ namespace Carl
             GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
             GUILayout.Space(4);
             Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
+            Check("CROSSHAIR", ref GameSettings.Crosshair);
             Section("AUDIO");
             GameSettings.Volume = Slider("MASTER VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
             Check("EARL VOICES", ref GameSettings.DummyVoices);
@@ -350,6 +357,30 @@ namespace Carl
             return parts.Count == 0 ? "NO ARMOUR" : string.Join("  ·  ", parts);
         }
 
+        /// <summary>The MISC page's drones: what they are, how to fly them, and LAUNCH.</summary>
+        void DrawDrone(Rect listR)
+        {
+            var kind = droneTab == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber;
+            var r = new Rect(listR.xMax + 14, listR.y, Mathf.Min(560f, Screen.width - listR.xMax - 40f), listR.height);
+            GUILayout.BeginArea(r, card);
+            GUILayout.Label(FpvDrone.NameOf(kind), title);
+            GUILayout.Label(kind == FpvDrone.Kind.Kamikaze
+                ? "A racing quad with an RPG warhead taped under it. Fast and twitchy. It goes off when it hits anything hard (or anyone at all), or when you click. 100 s of battery."
+                : "A slower quad with three impact grenades on a release. Hover over them and click to drop one; each goes off on whatever it lands on. 150 s of battery.", small);
+            GUILayout.Space(8);
+            GUILayout.Label("FLYING IT", section);
+            GUILayout.Label("MOUSE steers - it flies where you look\nW / S forward and back  ·  A / D sideways\nSPACE up  ·  CTRL down  ·  SHIFT boost\nLEFT CLICK " + (kind == FpvDrone.Kind.Kamikaze ? "detonate" : "drop a grenade") + "  ·  E back to your body\nYour body stands where you left it while you fly. Past ~250 m the link breaks up.", small);
+            GUILayout.Space(10);
+            if (Chip("LAUNCH NOW  (P)", true, 0f, 40f))
+            {
+                FpvDrone.Selected = kind;
+                Toggle(MenuKind.Gun);
+                FpvDrone.Launch(kind);
+            }
+            GUILayout.Label("P launches the last one you picked, any time.", small);
+            GUILayout.EndArea();
+        }
+
         void DrawSpawn()
         {
             panel = new Rect(16, 16, 380, Screen.height - 32);
@@ -371,6 +402,33 @@ namespace Carl
             GUILayout.BeginHorizontal();
             foreach (int n in new[] { 1, 3, 5 }) if (Chip($"x{n}", spawnCount == n)) spawnCount = n;
             GUILayout.EndHorizontal();
+
+            Section("SIDE");
+            GUILayout.BeginHorizontal();
+            if (Chip("ENEMY (RED)", spawnTeam == Teams.Enemy)) spawnTeam = Teams.Enemy;
+            if (Chip("FRIENDLY (GREEN)", spawnTeam == Teams.Friendly)) spawnTeam = Teams.Friendly;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (Chip("MEDIC", spawnMedic)) spawnMedic = !spawnMedic;
+            GUILayout.EndHorizontal();
+            GUILayout.Label(spawnTeam == Teams.Friendly ? "Fights on your side with the same brain as theirs. Look at one and HOLD R to recruit him; HOLD MIDDLE MOUSE to command your squad." : "Fights you and your friendlies." + (spawnMedic ? " Medics carry a pistol and patch up their own side when it's quiet." : ""), small);
+            if (MapBuilder.Names[game.mapIndex] == "TRENCHES")
+            {
+                GUILayout.BeginHorizontal();
+                if (Chip("+ FRIENDLY SQUAD IN YOUR TRENCH", false))
+                {
+                    int n = TrenchSquad.SpawnFriendlies(game.player.transform.position, 5);
+                    game.Toast($"{n} FRIENDLY EARLS IN YOUR TRENCH");
+                }
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if (Chip("+ ENEMY SQUAD IN THEIR TRENCH", false))
+                {
+                    int n = TrenchSquad.AddSquad(game.player.transform.position);
+                    game.Toast($"{n} MORE HOSTILES IN THE TRENCHES");
+                }
+                GUILayout.EndHorizontal();
+            }
 
             Section("ARMED WITH");
             GUILayout.BeginHorizontal();
@@ -481,12 +539,16 @@ namespace Carl
             {
                 listScroll = GUILayout.BeginScrollView(listScroll, false, false, GUIStyle.none, GUIStyle.none);
                 for (int i = 0; i < w.defs.Count; i++)
-                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i ? bigOn : big, GUILayout.Height(38))) { gunTab = i; scroll = Vector2.zero; }
+                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i && droneTab == 0 ? bigOn : big, GUILayout.Height(38))) { gunTab = i; droneTab = 0; scroll = Vector2.zero; }
+                if (gunPage == 2)
+                    for (int k = 1; k <= 2; k++)
+                        if (GUILayout.Button("P   " + FpvDrone.NameOf(k == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber), droneTab == k ? bigOn : big, GUILayout.Height(38))) { droneTab = k; scroll = Vector2.zero; }
                 GUILayout.EndScrollView();
             }
             GUILayout.EndArea();
 
             if (armourPage) { DrawArmourPage(listR); return; }
+            if (gunPage == 2 && droneTab > 0) { DrawDrone(listR); return; }
 
             var d = w.defs[gunTab];
             var L = w.loadouts[gunTab];

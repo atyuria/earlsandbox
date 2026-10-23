@@ -16,6 +16,8 @@ namespace Carl
         public static bool DummyVoices = true;
         /// <summary>Loudness of the Earls' voices, on top of the master volume.</summary>
         public static float VoiceVolume = 1f;
+        /// <summary>The crosshair in the middle of the screen (off: aim with your sights, or by feel).</summary>
+        public static bool Crosshair = true;
 
         static bool loaded;
 
@@ -33,6 +35,7 @@ namespace Carl
             Volume = PlayerPrefs.GetFloat("earl.volume", 0.8f);
             DummyVoices = PlayerPrefs.GetInt("earl.voices", 1) == 1;
             VoiceVolume = PlayerPrefs.GetFloat("earl.voiceVolume", 1f);
+            Crosshair = PlayerPrefs.GetInt("earl.crosshair", 1) == 1;
         }
 
         public static void Save()
@@ -44,6 +47,7 @@ namespace Carl
             PlayerPrefs.SetFloat("earl.volume", Volume);
             PlayerPrefs.SetInt("earl.voices", DummyVoices ? 1 : 0);
             PlayerPrefs.SetFloat("earl.voiceVolume", VoiceVolume);
+            PlayerPrefs.SetInt("earl.crosshair", Crosshair ? 1 : 0);
             PlayerPrefs.Save();
         }
 

@@ -30,6 +30,9 @@ namespace Carl
             public ArmourPiece ignoreArmour;
             public int walls;
             public bool flewBy;                              // has gone past your head (you heard it)
+            public Vector3 origin;                           // where it was fired from (the Earls work out the angle)
+            public int team = -1;                            // the side that fired it
+            public bool reported;
         }
 
         readonly List<Proj> live = new List<Proj>();
@@ -61,7 +64,9 @@ namespace Carl
                 wall = ammo != null ? ammo.wall : 1f,
                 expand = ammo != null ? ammo.expand : 1f,
                 incendiary = ammo != null && ammo.incendiary,
-                owner = FiringBody
+                owner = FiringBody,
+                origin = origin,
+                team = Teams.Of(FiringBody)
             };
             if (tracer)
             {
@@ -128,6 +133,8 @@ namespace Carl
                 Vector3 closest = a + move * t;
                 if (t > 0f && t < 1f && Vector3.Distance(closest, ears) < 3f && p.traveled + t * remaining > 4f) { p.flewBy = true; Sfx.FlyBy(closest, speed); }
             }
+            // a round cracking past an Earl tells him where it came from
+            if (p.kind == HitKind.Bullet && p.team >= 0 && p.traveled < 250f) Intel.BulletPassed(p.origin, p.team, p.pos, move);
             int guard = 0;
             while (remaining > 0f && p.alive && guard++ < 10)
             {
@@ -228,7 +235,8 @@ namespace Carl
                 // ricochet: glancing hits skip off hard surfaces, more likely the shallower the angle
                 float fromSurface = 90f - grazing;
                 float ricochetChance = Mathf.InverseLerp(38f, 6f, fromSurface) * (p.kind == HitKind.Bullet ? 0.95f : 0.6f);
-                if (p.ricochets < 3 && Random.value < ricochetChance)
+                // (not off earth: a round into dirt digs in, it doesn't skip)
+                if (p.ricochets < 3 && !Fx.IsDirt(hit.collider) && Random.value < ricochetChance)
                 {
                     p.ricochets++;
                     Fx.Sparks(hit.point, Vector3.Reflect(dir, hit.normal), 12);
@@ -254,6 +262,7 @@ namespace Carl
                     BloodSystem.Instance.Mark(hit.point, hit.normal, p.kind == HitKind.Shrapnel ? 0.02f : Mathf.Clamp(p.diam * 4f, 0.03f, 0.08f));
                 if (p.kind == HitKind.Bullet || Random.value < 0.08f) Sfx.Impact(hit.collider, hit.point);
                 bool dirt = Fx.IsDirt(hit.collider);
+                if (!dirt && p.kind == HitKind.Bullet && hit.rigidbody == null) Haze.HardHit(hit.point, hit.normal);
                 if (dirt && (p.kind == HitKind.Bullet || Random.value < 0.4f)) Fx.DirtImpact(hit.point, hit.normal, p.kind == HitKind.Bullet ? Mathf.Sqrt(energy / 1500f) : 0.4f);
                 // wallbang: punch through if the round can get through this much material
                 if (p.kind == HitKind.Bullet && p.walls < 3 && TryWallbang(p, hit, dir, energy)) { remaining = Mathf.Max(0f, remaining - 0.02f); continue; }
@@ -275,6 +284,7 @@ namespace Carl
         bool HitBody(Proj p, BodyPart bp, Vector3 point, Vector3 dir, ref float remaining)
         {
             float energy = 0.5f * p.mass * p.vel.sqrMagnitude;
+            if (!p.reported && p.kind == HitKind.Bullet && p.team >= 0) { p.reported = true; Intel.Wounded(bp.body, p.origin, p.team); }
             if (p.kind == HitKind.Bullet || Random.value < 0.15f) Sfx.Play("impact_flesh", point, 0.9f, 1f, 2f);
             if (p.incendiary)
             {
@@ -484,6 +494,8 @@ namespace Carl
             }
             for (int i = 0; i < 12 + (int)(14f * power); i++)
                 Emit(I.debris, pos, (normal + Random.insideUnitSphere * 0.8f).normalized * Random.Range(1.5f, 4.5f) * Mathf.Sqrt(power), Random.Range(0.005f, 0.016f), new Color(0.27f, 0.21f, 0.15f), Random.Range(0.5f, 1.1f));
+            // and the cloud it leaves hanging
+            Haze.DirtHit(pos, normal, power);
         }
 
         static readonly RaycastHit[] blastBuf = new RaycastHit[8];
@@ -508,6 +520,7 @@ namespace Carl
                 float k = (1f - best / 1.1f) * power;
                 // blown along the surface, away from the muzzle, and lifted off it
                 Vector3 along = Vector3.ProjectOnPlane(hit.point - muzzle + dir * 0.3f, hit.normal).normalized;
+                Haze.BlastDust(hit.point, hit.normal, along, k);
                 int m = 5 + (int)(14f * k);
                 for (int i = 0; i < m; i++)
                     Emit(I.dust, hit.point + Random.insideUnitSphere * 0.05f, (along * Random.Range(0.8f, 2.5f) + hit.normal * Random.Range(0.2f, 0.9f) + Random.insideUnitSphere * 0.4f) * k,
@@ -542,6 +555,7 @@ namespace Carl
                 Emit(I.debris, pos, d * Random.Range(4f, 14f), Random.Range(0.015f, 0.05f), new Color(0.2f, 0.18f, 0.16f, 1f), Random.Range(0.6f, 1.4f));
             }
             Sparks(pos, Vector3.up, 90);
+            Haze.Blast(pos);
             Flash(pos, 26f, 22f, 0.35f);
             Shockwave(pos);
         }
@@ -576,6 +590,7 @@ namespace Carl
             for (int i = 0; i < 8; i++)
                 Emit(I.smoke, pos + dir * 0.05f + Random.insideUnitSphere * 0.02f, dir * Random.Range(0.4f, 1.2f) + up2 * 0.3f + Random.insideUnitSphere * 0.2f, Random.Range(0.035f, 0.08f) * (0.6f + power * 0.5f), new Color(0.75f, 0.74f, 0.72f, 0.25f), Random.Range(0.6f, 1.2f));
             for (int i = 0; i < 4; i++) Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.35f).normalized * Random.Range(4f, 9f), 0.005f, new Color(1f, 0.75f, 0.35f), 0.15f);
+            Haze.MuzzleSmoke(pos, dir, power);
         }
 
         /// <summary>Dragon's breath: a long jet of burning magnesium out of the barrel, showering sparks.</summary>

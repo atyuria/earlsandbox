@@ -1,0 +1,9 @@
+== haze  (15:53:07)
+after a 10-round burst: 110 puffs, at camera 0.93
+1 s after the grenade: 56 puffs, sight through the cloud 0.00, at camera 0.00
+PASS  the grenade's cloud blocks the view down the trench
+20 s: 324 puffs, sight 0.00
+50 s: 1 puffs, sight 1.00
+PASS  it clears slowly
+after 10 s: open air sight 1.00, in the trench 0.20
+PASS  it lingers longer in the trench than over the top

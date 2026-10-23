@@ -30,6 +30,8 @@ namespace Carl
         public DamageModel damage;
         public ActiveRagdoll ragdoll;
         public HumanBrain brain;
+        /// <summary>His gun (and the side he fights for), if he has one.</summary>
+        [HideInInspector] public EarlGunner gunner;
         public float totalMass;
         public string lastHit = "";
         public float lastHitTime = -999f;

@@ -19,7 +19,7 @@ namespace Carl
         Vector3 camPos;
         bool camInit;
         int armsLayerFor = -1, handKids = -1;
-        float leanCam;
+        float leanCam, nextStepNoise;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Body = null; Armour = new ArmourLoadout(); ArmourPreset = 0; EyeT = null; }
@@ -136,7 +136,7 @@ namespace Carl
             pc.down = rag.IsDown;
             if (p.dead) { rag.moveSpeed = 0f; return true; }
             // (flying the free camera, your body stands still and keeps looking where it was; the keys fly the camera)
-            bool keys = !pc.flying;
+            bool keys = !pc.flying && FpvDrone.Piloting == null;
             Transform eyes = pc.flying && EyeT != null ? EyeT : pc.cam.transform;
             Vector3 look = eyes.forward;
             Vector3 flat = Vector3.ProjectOnPlane(look, Vector3.up).normalized;
@@ -164,6 +164,20 @@ namespace Carl
             leanCam = rag.lean;
             ShowSevered();
 
+            // ---- ladders: walk into one at its foot to climb out, walk back over the lip at its top to climb down
+            if (LadderClimber.Busy(h)) { Follow(h, keys); return true; }
+            if (keys && !rag.IsDown && rag.mode == BodyMode.Standing && wishWorld.sqrMagnitude > 0.25f)
+            {
+                var lad = Ladder.Near(pc.transform.position, 0.9f, out bool atTop);
+                if (lad != null && Vector3.Dot(wishWorld.normalized, atTop ? -lad.outward : lad.outward) > 0.55f && LadderClimber.Begin(h, lad, !atTop) != null)
+                {
+                    rag.lean = 0f; leanCam = 0f;
+                    Follow(h, keys);
+                    return true;
+                }
+            }
+            if (keys) PlayerFooting.Update(h, wishWorld, dt);
+
             // ---- moving: the same gait as any Earl, so a hurt leg limps and a lost one drops you
             float speed = wishWorld.sqrMagnitude > 0.01f ? (sprint ? 4.8f : 2.3f) : 0f;
             // backing off and side-stepping are slower than walking forward (the legs can only step back so fast)
@@ -172,11 +186,17 @@ namespace Carl
             // firing a hard-kicking gun you slow right down to hold it
             if (w != null) speed *= 1f - 0.55f * w.FireSlow;
             rag.moveSpeed = speed * Mathf.Clamp01(wishWorld.magnitude);
+            // footsteps: running is heard a good way off, creeping crouched hardly at all
+            if (rag.moveSpeed > 0.3f && Time.time > nextStepNoise)
+            {
+                nextStepNoise = Time.time + 0.45f;
+                Intel.Noise(h.Pelvis.transform.position, Teams.Friendly, crouch ? 2.5f : sprint ? 16f : 7f);
+            }
             // Z: go down / try to get up. On the ground: hold space to get up, keys to crawl
             if (keys && kb.yKey.wasPressedThisFrame && !rag.IsDown) rag.Fall("player");
             if (rag.IsDown)
             {
-                rag.wantStand = !keys || kb.spaceKey.isPressed || kb.yKey.wasPressedThisFrame;
+                rag.wantStand = !keys || kb.spaceKey.isPressed || kb.yKey.wasPressedThisFrame || rag.helpUp > 0.3f;   // (or a mate is helping you up)
                 rag.wantCrawl = wishWorld.sqrMagnitude > 0.01f;
                 rag.crawlDir = rag.wantCrawl ? wishWorld.normalized : Vector3.zero;
             }
@@ -187,11 +207,16 @@ namespace Carl
                 if (keys && kb.spaceKey.wasPressedThisFrame && rag.mode == BodyMode.Standing && p.CanStand && Physics.Raycast(h.Pelvis.transform.position, Vector3.down, 1.2f, ~(1 << OwnLayer), QueryTriggerInteraction.Ignore))
                     foreach (var bp in h.partList) if (bp.rb != null && !bp.severed) bp.rb.AddForce(Vector3.up * 3.6f, ForceMode.VelocityChange);
             }
-            // the player object follows the body (other code asks where "the player" is)
+            Follow(h, keys);
+            return true;
+        }
+
+        /// <summary>The player object follows the body (other code asks where "the player" is).</summary>
+        void Follow(HumanBody h, bool keys)
+        {
             Vector3 pel = h.Pelvis.transform.position;
             float gy = Physics.Raycast(pel, Vector3.down, out var g, 2.5f, ~(1 << OwnLayer), QueryTriggerInteraction.Ignore) && g.collider.GetComponentInParent<HumanBody>() == null ? g.point.y : pel.y - 0.95f;
             if (keys) pc.transform.position = new Vector3(pel.x, gy, pel.z);   // (not while the camera is off flying)
-            return true;
         }
 
         /// <summary>The camera is in your head: it goes where the head goes (stumbling, falling, lying on the floor).</summary>

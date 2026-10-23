@@ -90,6 +90,13 @@ namespace Carl
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
             float dt = Time.unscaledDeltaTime;
+            // flying a drone: your body stands where you left it, the mouse and keys are the drone's
+            if (FpvDrone.Piloting != null)
+            {
+                var av0 = GetComponent<PlayerAvatar>();
+                if (av0 != null && PlayerAvatar.Body != null) av0.Drive(Vector3.zero, false, kb, dt);
+                return;
+            }
 
             if (Cursor.lockState == CursorLockMode.Locked)
             {

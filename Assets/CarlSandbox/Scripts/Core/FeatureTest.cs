@@ -28,6 +28,9 @@ namespace Carl
             go.AddComponent<FeatureTest>().scenario = name;
         }
 
+        /// <summary>For poking at things from the editor: load a map now.</summary>
+        public static void Map(int i) => SandboxGame.Instance?.LoadMap(i);
+
         void Start()
         {
             dir = Path.Combine(Application.dataPath, "..", "Screenshots", "featuretest");
@@ -56,6 +59,15 @@ namespace Carl
                 case "adrenaline": body = Adrenaline(); break;
                 case "adraim": body = AdrenalineAim(); break;
                 case "recoil": body = RecoilTest(); break;
+                case "ladder": body = LadderTest(); break;
+                case "haze": body = HazeTest(); break;
+                case "tactics": body = TacticsTest(); break;
+                case "squad": body = SquadTest(); break;
+                case "stuck": body = StuckTest(); break;
+                case "battle": body = BattleTest(); break;
+                case "drone": body = DroneTest(); break;
+                case "gear": body = GearTest(); break;
+                case "walk": body = WalkTest(); break;
                 default: Line("unknown scenario"); break;
             }
             if (body != null) yield return body;
@@ -249,6 +261,495 @@ namespace Carl
             yield return GrabView("armour_visor_torn_off");
             if (e) Destroy(e.gameObject);
             PlayerAvatar.Wear(new ArmourLoadout { vest = VestKind.None, helmet = HelmetKind.None });
+        }
+
+        // ------------------------------------------------------------ ladders and cover on the trench map
+
+        void ClearEarls()
+        {
+            foreach (var h in HumanBody.All.ToArray()) if (h != null && h != PlayerAvatar.Body) { HumanBody.All.Remove(h); Destroy(h.gameObject); }
+            TrenchSquad.Clear();
+        }
+
+        IEnumerator LadderTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Line($"ladders: {Ladder.All.Count}");
+            Check(Ladder.All.Count >= 8, "ladders along the front lines");
+            int walls = 0, wrecks = 0, hogs = 0, rims = 0, wire = 0, revet = 0, duck = 0;
+            foreach (var t in FindObjectsByType<Transform>())
+                switch (t.name)
+                {
+                    case "SandbagWall": walls++; break; case "Wreck": wrecks++; break; case "Hedgehog": hogs++; break;
+                    case "CraterRim": rims++; break; case "Wire": wire++; break; case "Revetment": revet++; break; case "Duckboard": duck++; break;
+                }
+            Line($"cover: sandbag walls {walls}, wrecks {wrecks}, hedgehogs {hogs}, crater rim lumps {rims}, wire runs {wire}; revetment {revet}, duckboards {duck}");
+            Check(walls >= 8 && wrecks >= 2 && hogs >= 6, "cover out on the field");
+            // the ladder nearest your spawn: stand at its foot, climb
+            var l = Ladder.Nearest(Game.SpawnPoint);
+            Game.player.Teleport(l.foot + Vector3.up * 0.05f, Mathf.Atan2(l.outward.x, l.outward.z) * Mathf.Rad2Deg);
+            yield return new WaitForSeconds(2.5f);
+            Game.player.LookAt(l.lip + Vector3.up * 0.5f);
+            yield return GrabView("ladder_foot");
+            var me = PlayerAvatar.Body;
+            Check(LadderClimber.Begin(me, l, true) != null, "starts climbing");
+            float t0 = Time.time;
+            while (LadderClimber.Busy(me) && Time.time - t0 < 12f) yield return null;
+            yield return new WaitForSeconds(1.5f);
+            Vector3 pel = me.Pelvis.transform.position;
+            Line($"after climbing ({Time.time - t0:0.0} s): pelvis {pel}, top {l.top}, down {me.ragdoll.IsDown}");
+            Check(pel.y > l.top.y + 0.5f && !me.ragdoll.IsDown, "out on top, on his feet");
+            Game.player.LookAt(pel + l.outward * 10f + Vector3.up * 0.8f);
+            yield return GrabView("ladder_top");
+            // and back down
+            Check(LadderClimber.Begin(me, l, false) != null, "starts climbing down");
+            t0 = Time.time;
+            var trace = new StringBuilder();
+            float nextT = 0f;
+            while ((LadderClimber.Busy(me) || Time.time - t0 < 4f) && Time.time - t0 < 12f)
+            {
+                if (Time.time - t0 >= nextT) { nextT += 0.25f; trace.Append($"{Time.time - t0:0.0}:{me.Pelvis.transform.position.y:0.00}/{Vector3.Angle(me.Pelvis.transform.up, Vector3.up):0}{(LadderClimber.Busy(me) ? "L" : "")} "); }
+                yield return null;
+            }
+            Line("down trace (t:y/tilt): " + trace);
+            yield return new WaitForSeconds(1.5f);
+            pel = me.Pelvis.transform.position;
+            Check(pel.y < l.foot.y + 1.3f && !me.ragdoll.IsDown, $"back in the trench, standing (pelvis y {pel.y:0.00})");
+            // a view along the field
+            Game.player.Teleport(l.top + Vector3.up * 0.05f, Mathf.Atan2(l.outward.x, l.outward.z) * Mathf.Rad2Deg);
+            yield return new WaitForSeconds(2f);
+            yield return GrabView("field");
+        }
+
+        IEnumerator HazeTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            yield return new WaitForSeconds(1.5f);
+            var cam = Game.player.cam.transform;
+            // a burst along the trench into the earth: muzzle smoke, dust off the walls, dirt where they land
+            Vector3 muzzle = cam.position + cam.forward * 0.6f - Vector3.up * 0.1f;
+            Vector3 aim = Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized;
+            Vector3 wallDir = (aim + Vector3.down * 0.15f).normalized;
+            for (int i = 0; i < 10; i++)
+            {
+                Fx.Muzzle(muzzle, wallDir, 1f);
+                Fx.BlastDust(muzzle, wallDir, 1f);
+                Ballistics.Instance.Fire(muzzle, (wallDir + Random.insideUnitSphere * 0.03f).normalized, 715f, 0.0079f, 0.0078f, HitKind.Bullet, false);
+                yield return new WaitForSeconds(0.1f);
+            }
+            yield return new WaitForSeconds(0.4f);
+            Line($"after a 10-round burst: {Haze.Count} puffs, at camera {Haze.AtCamera:0.00}");
+            yield return GrabView("haze_burst");
+            // a look along the trench at a cloud a few metres off
+            Haze.Clear();
+            Vector3 along = Vector3.zero; float best = 0f;
+            for (int k = 0; k < 16; k++)
+            {
+                Vector3 d = Quaternion.Euler(0f, k * 22.5f, 0f) * Vector3.forward;
+                float dd = Physics.Raycast(me + Vector3.up * 1.2f, d, out var ah, 30f) ? ah.distance : 30f;
+                if (dd > best) { best = dd; along = d; }
+            }
+            Game.player.LookAt(me + Vector3.up * 1.5f + along * 10f);
+            for (int k = 0; k < 6; k++) Haze.DirtHit(me + along * Mathf.Min(best - 0.5f, 5f) + Vector3.up * Random.Range(0.4f, 1.6f), -along, 1.5f);
+            yield return new WaitForSeconds(0.6f);
+            yield return GrabView("haze_cloud");
+            aim = along;
+            // the grenade: 5 m along the trench
+            Vector3 gp = me + aim * 5f + Vector3.up * 0.3f;
+            if (Physics.Raycast(me + Vector3.up * 1f, aim, out var wh, 5f)) gp = me + aim * Mathf.Max(1.5f, wh.distance - 0.5f) + Vector3.up * 0.3f;
+            var g = Grenade.Throw(gp, Vector3.zero); g.fuse = 0.2f; g.shrapnel = 0;
+            yield return new WaitForSeconds(1.2f);
+            float tr = Haze.Transmit(me + Vector3.up * 1.6f, gp + aim * 3f + Vector3.up * 1f);
+            Line($"1 s after the grenade: {Haze.Count} puffs, sight through the cloud {tr:0.00}, at camera {Haze.AtCamera:0.00}");
+            Check(tr < 0.35f, "the grenade's cloud blocks the view down the trench");
+            yield return GrabView("haze_grenade");
+            // wind: what is left, 20 s and 50 s on
+            yield return new WaitForSeconds(20f);
+            float tr20 = Haze.Transmit(me + Vector3.up * 1.6f, gp + aim * 3f + Vector3.up * 1f);
+            Line($"20 s: {Haze.Count} puffs, sight {tr20:0.00}");
+            yield return GrabView("haze_20s");
+            yield return new WaitForSeconds(30f);
+            float tr50 = Haze.Transmit(me + Vector3.up * 1.6f, gp + aim * 3f + Vector3.up * 1f);
+            Line($"50 s: {Haze.Count} puffs, sight {tr50:0.00}");
+            Check(tr20 > tr && tr50 > 0.75f, "it clears slowly");
+            // up top it goes far quicker
+            Haze.Clear();
+            Vector3 field = me + Vector3.up * 6f;
+            Haze.Puff(field, Vector3.zero, 1f, 1f, Color.gray);
+            Haze.Puff(me + Vector3.up * 0.8f, Vector3.zero, 1f, 1f, Color.gray);
+            yield return new WaitForSeconds(10f);
+            float hi = Haze.Transmit(field - Vector3.right * 3f, field + Vector3.right * 3f), lo = Haze.Transmit(me + Vector3.up * 0.8f - Vector3.right * 3f, me + Vector3.up * 0.8f + Vector3.right * 3f);
+            Line($"after 10 s: open air sight {hi:0.00}, in the trench {lo:0.00}");
+            Check(hi > lo, "it lingers longer in the trench than over the top");
+        }
+
+        EarlGunner Gunner(Vector3 feet, int team, float yaw = 0f)
+        {
+            var h = Game.SpawnCarl(feet, yaw);
+            if (h == null) return null;
+            ArmourSystem.Equip(h, TrenchSquad.RandomKit());
+            h.brain.aiEnabled = true;
+            return EarlGunner.Arm(h, EarlWeapon.AK47, null, team);
+        }
+
+        IEnumerator TacticsTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Line($"nav: {TrenchNav.Nodes.Count} points");
+            Vector3 theirs = Vector3.zero; float bz = -1f;
+            foreach (var n in TrenchNav.Nodes) if (n.y < 0.5f && n.z > 20f && (bz < 0f || Mathf.Abs(n.x - me.x) < bz)) { bz = Mathf.Abs(n.x - me.x); theirs = n; }
+            var trenchOnly = TrenchNav.Path(me, theirs, true, 50f);
+            var overTop = TrenchNav.Path(me, theirs, true, 0.4f);
+            int lad = 0; foreach (var st in overTop) if (st.kind != TrenchNav.Edge.Walk) lad++;
+            float len(System.Collections.Generic.List<TrenchNav.Step> p) { float l = 0f; for (int i = 1; i < p.Count; i++) l += Vector3.Distance(p[i - 1].at, p[i].at); return l; }
+            bool anyField = false; foreach (var st in trenchOnly) if (st.at.y > 1.4f) anyField = true;
+            Line($"path to their line: by trench {trenchOnly.Count} points {len(trenchOnly):0} m (uses field: {anyField}); over the top {overTop.Count} points {len(overTop):0} m, {lad} ladder climbs");
+            Check(trenchOnly.Count > 0 && overTop.Count > 0 && lad >= 2, "routes to their trench, along the trenches and over the top");
+
+            // a lone enemy 12+ m off down the trench: hears a shot, works out roughly where
+            Vector3 spot = me; float best = 0f;
+            foreach (var n in TrenchNav.Nodes) { float d = Vector3.Distance(n, me); if (n.y < 0.5f && d > 12f && d < 20f && d > best) { best = d; spot = n; } }
+            var e = Gunner(spot, Teams.Enemy);
+            yield return new WaitForSeconds(2f);
+            Intel.Gunshot(me + Vector3.up * 1.4f, Teams.Friendly, 60f, PlayerAvatar.Body, null);
+            yield return new WaitForSeconds(0.5f);
+            Line($"enemy heard the shot: suspects {Vector3.Distance(e.suspect, me):0.0} m from you (conf {e.SuspectConf:0.00}); stance {e.StanceName}");
+            Check(e.SuspectConf > 0.3f && Vector3.Distance(e.suspect, me) < 4f, "a shot gives your position away (roughly)");
+            float t0 = Time.time; string stances = "";
+            while (Time.time - t0 < 6f) { if (!stances.EndsWith(e.StanceName)) stances += " " + e.StanceName; yield return null; }
+            Line("what he did: " + stances);
+            Destroy(e.gameObject); HumanBody.All.Remove(e.Body);
+            yield return null;
+
+            // grenade: he thinks someone is hiding round the corner and it's gone quiet
+            e = Gunner(spot, Teams.Enemy);
+            e.grenades = 2;
+            yield return new WaitForSeconds(1.5f);
+            Vector3 hide = me; best = 0f;
+            foreach (var n in TrenchNav.Nodes) { float d = Vector3.Distance(n, spot); if (n.y < 0.5f && d > 9f && d < 16f && Vector3.Distance(n, me) > 10f && !EarlGunner.Clear(e.Body.Head.transform.position, n + Vector3.up, e.Body)) { hide = n; break; } }
+            e.Learn(hide, 0.9f, false); e.suspectTime = Time.time - 5f;
+            int before = Grenade.All.Count; float thrownAt = -1f;
+            t0 = Time.time;
+            while (Time.time - t0 < 10f) { if (Grenade.All.Count > before && thrownAt < 0f) thrownAt = Time.time - t0; yield return null; }
+            Line($"grenade: {(thrownAt >= 0f ? $"thrown after {thrownAt:0.0} s" : "not thrown")}, {e.grenades} left");
+            Check(thrownAt >= 0f, "throws a grenade into the corner you've gone quiet in");
+            yield return new WaitForSeconds(3f);
+            Destroy(e.gameObject); HumanBody.All.Remove(e.Body);
+
+            // a grenade at his feet
+            var f = Gunner(spot, Teams.Enemy);
+            yield return new WaitForSeconds(2f);
+            Vector3 gp = f.Body.Pelvis.transform.position + f.Body.ragdoll.faceDir * 1.2f; gp.y = spot.y + 0.2f;
+            var g = Grenade.Throw(gp, Vector3.zero); g.fuse = 3.2f; g.shrapnel = 0; g.team = Teams.Friendly;
+            float start = Vector3.Distance(f.Body.Pelvis.transform.position, gp);
+            yield return new WaitForSeconds(3.1f);
+            float end = Vector3.Distance(f.Body.Pelvis.transform.position, gp);
+            Line($"grenade at his feet: {start:0.0} m -> {end:0.0} m when it went off, down {f.Body.ragdoll.IsDown}");
+            Check(end > start + 2.5f || f.Body.ragdoll.IsDown, "runs from (or dives away from) a grenade");
+            yield return new WaitForSeconds(1f);
+            Destroy(f.gameObject); HumanBody.All.Remove(f.Body);
+
+            // wandering, and yours pushing over to their trench
+            var w = Gunner(spot, Teams.Enemy);
+            var a = Gunner(me + Vector3.right * 1.5f, Teams.Friendly); a.overTheTop = false;
+            var b = Gunner(me - Vector3.right * 1.5f, Teams.Friendly); b.overTheTop = true;
+            Vector3 w0 = w.Body.Pelvis.transform.position, a0 = a.Body.Pelvis.transform.position, b0 = b.Body.Pelvis.transform.position;
+            float wMax = 0f, bTop = 0f;
+            t0 = Time.time; float nextLog = 2f;
+            while (Time.time - t0 < 30f)
+            {
+                if (Time.time - t0 > nextLog && b != null) { nextLog += 5f; Line($"  over-the-top: sees {b.SeesEnemy} conf {b.SuspectConf:0.0} {b.StanceName} {b.NavDebug}"); Line($"  trench: sees {a.SeesEnemy} conf {a.SuspectConf:0.0} {a.StanceName} {a.NavDebug}"); }
+                if (w != null && w.Body != null) wMax = Mathf.Max(wMax, Vector3.Distance(w.Body.Pelvis.transform.position, w0));
+                if (b != null && b.Body != null) bTop = Mathf.Max(bTop, b.Body.Pelvis.transform.position.y);
+                yield return null;
+            }
+            Line($"wanderer went up to {wMax:0} m from his start; trench friendly z {a0.z:0} -> {a.Body.Pelvis.transform.position.z:0}; over-the-top friendly z {b0.z:0} -> {b.Body.Pelvis.transform.position.z:0}, highest {bTop:0.0}");
+            Check(wMax > 5f, "enemies wander their trench");
+            Check(a.Body.Pelvis.transform.position.z > a0.z + 8f || b.Body.Pelvis.transform.position.z > b0.z + 8f, "friendlies push toward their trench");
+            Check(bTop > 2.3f, "the over-the-top one climbed out");
+            Game.player.LookAt(b.Body.Center);
+            yield return GrabView("tactics_advance");
+        }
+
+        IEnumerator GearTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            var w = Game.weapons;
+            int ak = w.defs.FindIndex(d => d.name == "AK-47");
+            w.Give(ak, true);
+            w.loadouts[ak].laser = true; w.loadouts[ak].light = true;
+            w.Select(ak);
+            w.RefreshAttachments();
+            WeaponController.LaserOn = true; WeaponController.LightOn = true;
+            // look along the trench
+            Vector3 me = Game.SpawnPoint; Vector3 along = Vector3.zero; float best = 0f;
+            for (int k = 0; k < 16; k++)
+            {
+                Vector3 d = Quaternion.Euler(0f, k * 22.5f, 0f) * Vector3.forward;
+                float dd = Physics.Raycast(me + Vector3.up * 1.2f, d, out var ah, 30f) ? ah.distance : 30f;
+                if (dd > best) { best = dd; along = d; }
+            }
+            Game.player.LookAt(me + Vector3.up * 1.3f + along * 10f);
+            yield return new WaitForSeconds(2f);
+            var beam = GameObject.Find("LaserBeam")?.GetComponent<LineRenderer>();
+            Check(beam != null && beam.enabled, "AK with a laser: the beam is on");
+            yield return GrabView("laser_clear");
+            for (int k = 0; k < 6; k++) Haze.DirtHit(me + along * Mathf.Min(best - 0.5f, 5f) + Vector3.up * Random.Range(0.6f, 1.6f), -along, 1.5f);
+            yield return new WaitForSeconds(0.5f);
+            Line($"beam colour alpha in the dust {beam.startColor.a:0.00}");
+            Check(beam.startColor.a > 0.3f, "the beam shows up in the dust");
+            yield return GrabView("laser_dust");
+            WeaponController.LaserOn = false;
+            yield return null; yield return null;
+            Check(!beam.enabled, "J turns it off");
+            WeaponController.LaserOn = true;
+            GameSettings.Crosshair = false;
+            yield return new WaitForSeconds(0.3f);
+            yield return GrabView("no_crosshair");
+            GameSettings.Crosshair = true;
+        }
+
+        /// <summary>Hold W (as if pressed) for a while.</summary>
+        IEnumerator HoldW(float secs)
+        {
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            float t0 = Time.time;
+            while (Time.time - t0 < secs)
+            {
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.W));
+                yield return null;
+            }
+            UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+        }
+
+        public static bool WalkNoBodies;
+
+        IEnumerator WalkTest()
+        {
+            // the yard: flat ground, a row of dead Earls across your way, then you walk over them
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            // a way with nothing in it for 12 m
+            Vector3 fwd = Vector3.forward;
+            for (int k = 0; k < 16; k++)
+            {
+                Vector3 d = Quaternion.Euler(0f, k * 22.5f, 0f) * Vector3.forward;
+                bool blocked = false;
+                foreach (float hgt in new[] { 0.3f, 0.8f, 1.4f })
+                    foreach (var hit in Physics.SphereCastAll(me + Vector3.up * hgt - d * 0.5f, 0.35f, d, 12f, ~0, QueryTriggerInteraction.Ignore))
+                        if (hit.collider.GetComponentInParent<HumanBody>() == null && !(hit.collider is CharacterController)) blocked = true;
+                if (!blocked) { fwd = d; break; }
+            }
+            Game.player.LookAt(me + Vector3.up * 1.4f + fwd * 10f);
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            for (int i = 0; i < 4 && !WalkNoBodies; i++)
+            {
+                var d = Dummy(me + fwd * (2.5f + i * 1.6f) + side * Random.Range(-0.4f, 0.4f), Random.Range(0f, 360f));
+                d.physio.Kill("TEST", true);
+            }
+            yield return new WaitForSeconds(3f);
+            var you = PlayerAvatar.Body;
+            int falls = 0; bool wasDown = false;
+            Vector3 p0 = you.Pelvis.transform.position;
+            var hold = StartCoroutine(HoldW(7f));
+            float t0 = Time.time;
+            var tr = new StringBuilder(); float nt = 0f;
+            while (Time.time - t0 < 7f)
+            {
+                if (Time.time - t0 >= nt) { nt += 0.5f; tr.Append($"{Time.time - t0:0.0}:{Vector3.Dot(you.Pelvis.transform.position - p0, fwd):0.0}/{you.Pelvis.transform.position.y:0.00}/{you.ragdoll.mode}/{you.ragdoll.moveSpeed:0.0} "); }
+                if (you.ragdoll.IsDown && !wasDown) falls++;
+                wasDown = you.ragdoll.IsDown;
+                yield return null;
+            }
+            float went = Vector3.Dot(you.Pelvis.transform.position - p0, fwd);
+            Line($"walked {went:0.0} m over 4 bodies: fell {falls} times");
+            Line("trace (t:along/height/mode/speed): " + tr);
+            Check(went > 7f && falls == 0, "you walk over bodies without tripping");
+            yield return GrabView("walk_bodies");
+            // knocked over, not hurt: hold space and up you get
+            you.ragdoll.Fall("test");
+            yield return new WaitForSeconds(0.3f);
+            var kb = UnityEngine.InputSystem.Keyboard.current;
+            float tu = Time.time;
+            while (you.ragdoll.mode != BodyMode.Standing && Time.time - tu < 12f)
+            {
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState(UnityEngine.InputSystem.Key.Space));
+                yield return null;
+            }
+            UnityEngine.InputSystem.InputSystem.QueueStateEvent(kb, new UnityEngine.InputSystem.LowLevel.KeyboardState());
+            float upT = Time.time - tu;
+            Line($"knocked down unhurt: standing again after {upT:0.0} s");
+            Check(upT < 5f, "you get back up quickly when you're not hurt");
+        }
+
+        IEnumerator DroneTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            var target = Dummy(me + fwd * 14f, 180f);
+            var target2 = Dummy(me + fwd * 10f + Vector3.Cross(Vector3.up, fwd) * 6f, 180f);
+            yield return new WaitForSeconds(1.5f);
+            // the kamikaze: straight at him
+            var d = FpvDrone.Launch(FpvDrone.Kind.Kamikaze);
+            Check(d != null && FpvDrone.Piloting == d && !Game.player.cam.enabled, "kamikaze drone up, you're seeing through it");
+            yield return new WaitForSeconds(0.6f);
+            yield return GrabView("drone_fpv");
+            float t0 = Time.time;
+            while (d != null && !d.Ended && Time.time - t0 < 8f) { d.autopilot = (target.Center - d.transform.position).normalized * 14f; yield return null; }
+            yield return new WaitForSeconds(0.5f);
+            Line($"kamikaze: hit after {Time.time - t0:0.0} s; Earl dead {target.Dead}, wounds {Wounds(target)}; back in your eyes {Game.player.cam.enabled}");
+            Check(Wounds(target) > 3 && Game.player.cam.enabled && FpvDrone.Piloting == null, "it blows up on him, you're back in your body");
+            yield return GrabView("drone_after");
+            // the dropper: over the other one, drop
+            var b = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            t0 = Time.time;
+            Vector3 over = target2.Center + Vector3.up * 6f;
+            while (Time.time - t0 < 10f && Vector3.Distance(b.transform.position, over) > 0.6f) { b.autopilot = Vector3.ClampMagnitude((over - b.transform.position) * 2f, 8f); yield return null; }
+            b.autopilot = Vector3.zero;
+            yield return new WaitForSeconds(0.6f);
+            int before = Wounds(target2);
+            b.Drop();
+            yield return new WaitForSeconds(2.5f);
+            Line($"dropper: dropped from {b.transform.position.y - target2.Center.y:0} m above; wounds {before} -> {Wounds(target2)}");
+            Check(Wounds(target2) > before, "a dropped grenade hurts whoever it lands by");
+            b.End("TEST OVER");
+            yield return new WaitForSeconds(0.5f);
+            Check(Game.player.cam.enabled && FpvDrone.Piloting == null, "E ends it, back in your body");
+        }
+
+        IEnumerator BattleTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(2f);
+            Vector3 me = Game.SpawnPoint;
+            // you: well out of it, up in the air in the free camera's place (so the fight is between them)
+            Teams.PlayerOutOfIt = true;
+            int en = 0; foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Enemy) en++;
+            int fr = TrenchSquad.SpawnFriendlies(me, 6);
+            Intel.Shots[0] = Intel.Shots[1] = 0; Intel.OwnSideHits = 0;
+            int frSaw = 0, enSaw = 0, grenades = 0, overTop = 0;
+            var saw = new HashSet<EarlGunner>(); var top = new HashSet<EarlGunner>();
+            float t0 = Time.time; float nextLog = 15f; int gBefore = 0;
+            while (Time.time - t0 < 75f)
+            {
+                foreach (var g in EarlGunner.All)
+                {
+                    if (g == null || g.Body == null) continue;
+                    if (g.SeesEnemy && saw.Add(g)) { if (g.team == 0) frSaw++; else enSaw++; }
+                    if (g.Body.Pelvis.transform.position.y > 2.2f && top.Add(g)) overTop++;
+                }
+                if (Grenade.All.Count > gBefore) grenades += Grenade.All.Count - gBefore;
+                gBefore = Grenade.All.Count;
+                if (Time.time - t0 > nextLog)
+                {
+                    nextLog += 15f;
+                    int fa = 0, ea = 0; foreach (var g in EarlGunner.All) if (g != null && g.Fighting) { if (g.team == 0) fa++; else ea++; }
+                    Line($"  {Time.time - t0:0} s: friendlies fighting {fa}/{fr}, enemies {ea}/{en}; shots {Intel.Shots[0]} / {Intel.Shots[1]}, own-side hits {Intel.OwnSideHits}");
+                }
+                yield return null;
+            }
+            Line($"battle: {frSaw} friendlies and {enSaw} enemies got eyes on someone; {grenades} grenades thrown; {overTop} went over the top; own-side hits {Intel.OwnSideHits}");
+            Check(Intel.Shots[0] > 10 && Intel.Shots[1] > 10, "both sides fight");
+            Check(Intel.OwnSideHits <= 2, "(almost) no shooting their own");
+            Teams.PlayerOutOfIt = false;
+        }
+
+        IEnumerator StuckTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            foreach (var w in new[] { EarlWeapon.Pistol, EarlWeapon.AK47 })
+            {
+                var h = Game.SpawnCarl(new Vector3(9.0f, 0.05f, -20.1f), 250f);
+                h.brain.aiEnabled = true;
+                var g = EarlGunner.Arm(h, w, null, Teams.Friendly);
+                g.inSquad = true; g.order = SquadOrder.Move; g.orderPos = new Vector3(3.6f, 0f, -21.5f);
+                Vector3 p0 = h.Pelvis.transform.position;
+                Game.player.Teleport(new Vector3(5f, 0.05f, -21.2f), 70f);
+                yield return new WaitForSeconds(1.5f);
+                Game.player.LookAt(h.Center);
+                yield return GrabView("stuck_" + w);
+                yield return new WaitForSeconds(6f);
+                Line($"{w}: spawned {p0}, now {h.Pelvis.transform.position}, {g.NavDebug}, order {g.order}");
+                Destroy(h.gameObject); HumanBody.All.Remove(h);
+                yield return null;
+            }
+        }
+
+        IEnumerator SquadTest()
+        {
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            int n = TrenchSquad.SpawnFriendlies(me, 5);
+            yield return new WaitForSeconds(1f);
+            var fr = new List<EarlGunner>();
+            foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Friendly) fr.Add(g);
+            int bands = 0, medics = 0;
+            foreach (var g in fr) { foreach (var t in g.Body.GetComponentsInChildren<Transform>()) if (t.name == "Armband") bands++; if (g.medic) medics++; }
+            Line($"friendlies: {n} spawned, {bands} armbands, {medics} medics");
+            Check(n >= 4 && bands >= n * 2 && medics >= 1, "a friendly squad in your trench, green armbands, a medic");
+            // recruit two (one the medic) and walk off
+            var medic = fr.Find(g => g.medic);
+            var rifle = fr.Find(g => !g.medic);
+            medic.Recruit(true); rifle.Recruit(true);
+            foreach (var g in fr) if (g != medic && g != rifle) Destroy(g.gameObject);
+            yield return null;
+            Vector3 far = me; float best = 0f;
+            foreach (var p in TrenchNav.Nodes) { float d = Vector3.Distance(p, me); if (p.y < 0.5f && p.z < -15f && d > 12f && d < 16f && d > best) { best = d; far = p; } }
+            Game.player.Teleport(far + Vector3.up * 0.05f, 0f);
+            yield return new WaitForSeconds(16f);
+            float dm = Vector3.Distance(medic.Body.Center, PlayerAvatar.Body.Center), dr = Vector3.Distance(rifle.Body.Center, PlayerAvatar.Body.Center);
+            Line($"after you moved {best:0} m: squad {dr:0.0} m and {dm:0.0} m from you ({rifle.Status} / {medic.Status})");
+            Check(dr < 7f && dm < 7f, "the squad follows you");
+            // move order
+            Vector3 there = me;
+            rifle.order = SquadOrder.Move; rifle.orderPos = there;
+            float t0 = Time.time;
+            float nl = 4f;
+            while (Time.time - t0 < 20f && Vector3.Distance(rifle.Body.Pelvis.transform.position - Vector3.up * 0.95f, there) > 1.6f) { if (Time.time - t0 > nl) { nl += 4f; Line($"  rifle: {rifle.Status} {rifle.NavDebug}"); } yield return null; }
+            Line($"move order: {Vector3.Distance(rifle.Body.Pelvis.transform.position - Vector3.up * 0.95f, there):0.0} m from the spot after {Time.time - t0:0} s, now {rifle.order}");
+            Check(Vector3.Distance(rifle.Body.Pelvis.transform.position - Vector3.up * 0.95f, there) < 2f, "goes where you send him");
+            // the medic on you
+            var you = PlayerAvatar.Body;
+            var arm = you[PartId.ForearmL];
+            you.damage.ApplyStab(arm, arm.transform.position + arm.transform.right * 0.04f, -arm.transform.right, 0.05f);
+            int open() { int c = 0; foreach (var bp in you.partList) if (bp != null) foreach (var w in bp.wounds) if (MedKit.CanTreat(w, false)) c++; return c; }
+            int before = open();
+            medic.order = SquadOrder.Heal; medic.orderTarget = you;
+            t0 = Time.time;
+            nl = 4f;
+            while (Time.time - t0 < 25f && open() > 0) { if (Time.time - t0 > nl) { nl += 4f; Line($"  medic: {medic.Status} order {medic.order} down {medic.Body.ragdoll.IsDown} mode {medic.Body.ragdoll.mode} canStand {medic.Body.physio.CanStand} conc {medic.Body.physio.consciousness:0.00} fear {medic.Body.brain.fear:0.00} wantStand {medic.Body.ragdoll.wantStand} pain {medic.Body.physio.EffectivePain:0.00} {medic.NavDebug}"); } yield return null; }
+            Line($"medic: {before} open wounds -> {open()} after {Time.time - t0:0} s");
+            Line(DebugProbe.Bodies());
+            Game.player.LookAt(medic.Body.Center); yield return GrabView("medic_heal");
+            Check(before > 0 && open() == 0, "your medic bandages you");
+            // knocked down: a mate helps you up (you don't touch a key)
+            medic.order = SquadOrder.Follow;
+            you.ragdoll.Fall("test");
+            yield return new WaitForSeconds(1.5f);
+            t0 = Time.time;
+            string who = "";
+            while (Time.time - t0 < 20f && you.ragdoll.IsDown) { foreach (var g in new[] { medic, rifle }) if (g.Status.Contains("UP")) who = g.Body.DisplayName + " " + g.Status; yield return null; }
+            Line($"knocked down: up again {!you.ragdoll.IsDown} after {Time.time - t0:0.0} s ({who})");
+            Check(!you.ragdoll.IsDown, "a mate helps you up");
         }
 
         // ------------------------------------------------------------ the trenches: map, hostiles, squad movement

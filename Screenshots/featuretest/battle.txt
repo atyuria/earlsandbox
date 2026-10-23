@@ -1,0 +1,8 @@
+== battle  (15:38:30)
+  15 s: friendlies fighting 6/6, enemies 7/7; shots 0 / 0, own-side hits 0
+  30 s: friendlies fighting 6/6, enemies 7/7; shots 16 / 6, own-side hits 0
+  45 s: friendlies fighting 6/6, enemies 7/7; shots 56 / 55, own-side hits 0
+  60 s: friendlies fighting 6/6, enemies 7/7; shots 80 / 77, own-side hits 0
+battle: 3 friendlies and 4 enemies got eyes on someone; 0 grenades thrown; 4 went over the top; own-side hits 1
+PASS  both sides fight
+PASS  (almost) no shooting their own

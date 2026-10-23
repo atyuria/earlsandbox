@@ -490,6 +490,8 @@ namespace Carl
                 var h = rayBuf[i];
                 if (Own(h.rigidbody)) continue;   // its own limbs
                 if (h.collider is CharacterController) continue;
+                // (you stand on the floor, not on the bodies lying on it: your legs pass over them)
+                if (grit > 1f && h.rigidbody != null && h.collider.GetComponentInParent<HumanBody>() != null) continue;
                 if (h.distance < best) { best = h.distance; groundY = h.point.y; }
             }
             GroundHeight = pelvis.position.y - groundY;
@@ -734,10 +736,11 @@ namespace Carl
                 // fall detection
                 float tilt = Vector3.Angle(pelvis.transform.up, Vector3.up);
                 bool settling = mode == BodyMode.GettingUp && getUpT < 2.5f;
-                unstableTimer = tilt > 42f && !settling ? unstableTimer + dt : Mathf.Max(0f, unstableTimer - dt);
+                // (you hold on through a bigger lurch over a lip or a body before it's a fall)
+                unstableTimer = tilt > (grit > 1f ? 58f : 42f) && !settling ? unstableTimer + dt : Mathf.Max(0f, unstableTimer - dt);
                 lowTimer = h < 0.5f && mode == BodyMode.Standing ? lowTimer + dt : 0f;
-                if (!sinking && (unstableTimer > 0.35f || lowTimer > 0.6f)) Topple(unstableTimer > 0.35f ? "tilted" : "too low", 0.8f);
-                if (mode == BodyMode.GettingUp && getUpT > 3f && tilt > 35f) Topple("failed to get up", 0.6f);
+                if (!sinking && (unstableTimer > (grit > 1f ? 0.6f : 0.35f) || lowTimer > (grit > 1f ? 1.2f : 0.6f))) Topple(unstableTimer > 0.35f ? "tilted" : "too low", 0.8f);
+                if (mode == BodyMode.GettingUp && getUpT > (grit > 1f ? 4f : 3f) && tilt > (grit > 1f ? 50f : 35f)) Topple("failed to get up", 0.6f);
                 IsCrawling = false;
             }
             else

@@ -64,6 +64,8 @@ namespace Carl
             if (flat.sqrMagnitude < 1e-4f) flat = Vector3.ProjectOnPlane(body.Chest.transform.forward, Vector3.up);
             flat.Normalize();
             float recover = Mathf.Clamp01(Steadiness * 0.95f + will * 0.15f - severity * 0.35f);
+            // you: unless really hurt, a push or a misstep is a stagger, not a fall
+            if (grit > 1f) recover = Mathf.Max(recover, Mathf.Clamp01(Steadiness * 1.15f - severity * 0.2f));
             if (CriticalCollapse) recover = 0f;
             if (Random.value < recover)
             {
@@ -110,6 +112,10 @@ namespace Carl
 
         float Unsteady => 1f - Steadiness;
 
+        /// <summary>Set every physics step by LadderClimber while it carries this body.</summary>
+        [HideInInspector] public float ladderT = -10f;
+        public bool OnLadder => Time.time - ladderT < 0.3f;
+
         /// <summary>
         /// Start going down. Not an instant ragdoll: the legs give, they sink and reach out to catch
         /// themselves. With some steadiness left (or a wall to lean on) they may catch themselves.
@@ -117,6 +123,8 @@ namespace Carl
         public void Topple(string reason, float quick = 0f)
         {
             if (mode == BodyMode.Down || sinking) return;
+            // on a ladder the climb holds them (a hit that kills or knocks them out still drops them off it)
+            if (OnLadder && !physio.dead && physio.consciousness > 0.3f) return;
             // unconscious, dying or seizing bodies just drop
             if (physio.dead || physio.consciousness < 0.3f || physio.posture != PostureType.None) { Fall(reason); return; }
             if (DebugFalls) Debug.Log($"[Carl] {body.DisplayName} going down: {reason} (steady {Steadiness:0.00}, balance {balance:0.00})");
@@ -307,6 +315,8 @@ namespace Carl
             float u = Unsteady;
             float p = Mathf.Pow(u, 1.6f) * 0.16f + panic * 0.006f * gaitRun + physio.Clumsiness * 0.05f;
             p *= Mathf.Lerp(0.5f, 1.4f, Mathf.InverseLerp(0.5f, 4f, spd));
+            // you watch where you put your feet: far fewer missteps
+            if (grit > 1f) p *= 0.15f;
             if (Random.value > p) return;
             // the foot catches: a short, crossed step, and the body pitches over it
             Vector3 short_ = l.from + (l.to - l.from) * Random.Range(0.15f, 0.45f);
@@ -373,13 +383,17 @@ namespace Carl
         // ----------------------------------------------------------------- getting up
 
         /// <summary>How long they lie there before trying to get up: quick if barely hurt, longer if hurt.</summary>
-        float GetUpDelay => (Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty) / grit;
+        float GetUpDelay => grit > 1f ? Mathf.Lerp(2.4f, 0.45f, Steadiness) + getUpPenalty * 0.35f - helpUp * 1.5f : (Mathf.Lerp(5f, 1.8f, Steadiness) + getUpPenalty) / grit - helpUp * 2f;
+
+        /// <summary>Someone is helping this body up (an Earl's hands under the arms): quicker, stronger, can't fail. Decays.</summary>
+        [HideInInspector] public float helpUp;
 
         void UpdateGetUpAttempt(float dt)
         {
             if (mode != BodyMode.GettingUp || sinking) return;
             // a hurt person's attempt can fail partway up
-            if (getUpT > 0.4f && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit))
+            helpUp = Mathf.Max(0f, helpUp - dt * 0.5f);
+            if (getUpT > 0.4f && helpUp < 0.2f && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit) * (grit > 1f ? 0.2f : 1f))
             {
                 getUpPenalty += 1.5f;
                 Topple("failed to get up", 0.3f);

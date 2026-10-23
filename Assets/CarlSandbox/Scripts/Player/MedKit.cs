@@ -109,6 +109,14 @@ namespace Carl
         {
             var w = treating; treating = null;
             if (w == null) return;
+            Treat(PlayerAvatar.Body, w, surgery);
+            SandboxGame.Instance?.Toast((surgery ? "SUTURED: " : "BANDAGED: ") + (w.part != null ? w.part.Name : ""));
+        }
+
+        /// <summary>A wound packed and wrapped, or sewn shut - by you, or by a medic (on you or on an Earl).</summary>
+        public static void Treat(HumanBody patient, Wound w, bool surgery)
+        {
+            if (w == null) return;
             if (surgery)
             {
                 // sewn shut: it doesn't bleed outside any more, and a sewn artery is tied off
@@ -127,9 +135,27 @@ namespace Carl
                 w.bandaged = true;
                 w.desc = (w.desc ?? w.type.ToString().ToUpper()) + " (BANDAGED)";
             }
-            var me = PlayerAvatar.Body;
-            me?.physio.AddPain(surgery ? 0.15f : 0.04f, w.part != null ? w.part.id : PartId.Chest);
-            SandboxGame.Instance?.Toast((surgery ? "SUTURED: " : "BANDAGED: ") + (w.part != null ? w.part.Name : ""));
+            patient?.physio.AddPain(surgery ? 0.15f : 0.04f, w.part != null ? w.part.id : PartId.Chest);
+        }
+
+        /// <summary>What a medic would do next for this body: the worst wound a bandage helps, then the worst to sew.</summary>
+        public static Wound NextFor(HumanBody h, out bool surgery)
+        {
+            surgery = false;
+            Wound best = null; float bs = 0.04f;
+            foreach (var bp in h.partList)
+                if (bp != null) foreach (var w in bp.wounds)
+                    {
+                        if (!CanTreat(w, false)) continue;
+                        float s = w.extRate + (w.arterial ? 50f : 0f) + (Deep(w) ? 0.5f : 0f);
+                        if (s > bs) { bs = s; best = w; }
+                    }
+            if (best != null) return best;
+            foreach (var bp in h.partList)
+                if (bp != null) foreach (var w in bp.wounds)
+                        if (CanTreat(w, true) && (best == null || w.extRate > best.extRate)) best = w;
+            surgery = best != null;
+            return best;
         }
 
         // ------------------------------------------------------------ the list and the progress bar

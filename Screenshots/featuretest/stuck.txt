@@ -1,0 +1,3 @@
+== stuck  (15:22:07)
+Pistol: spawned (9.18, 0.93, -19.86), now (5.84, 0.85, -21.14), step 1/2 next Walk at (3.64, -0.01, -21.55) feet (5.84, -0.10, -21.14) speed 3.0 obj , order Move
+AK47: spawned (9.18, 0.93, -19.86), now (5.76, 0.86, -21.12), step 1/2 next Walk at (3.64, -0.01, -21.55) feet (5.76, -0.09, -21.12) speed 3.0 obj , order Move

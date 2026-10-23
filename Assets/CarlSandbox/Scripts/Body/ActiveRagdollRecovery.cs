@@ -77,6 +77,9 @@ namespace Carl
             float M = body.totalMass;
             // weak, hurt people do it slowly and may not make it
             float strength = Mathf.Clamp01(physio.Effort + 0.25f) * Mathf.Lerp(0.55f, 1.05f, Steadiness) * Mathf.Lerp(1f, 1.3f, grit - 1f);
+            // you, not badly hurt, get up like a fit person does; a mate helping lifts too
+            if (grit > 1f) strength *= Mathf.Lerp(1f, 1.6f, Steadiness);
+            strength = Mathf.Min(1.9f, strength * (1f + helpUp * 0.8f));
             var ct = chest.transform;
             float hChest = HeightAboveGround(chest.position), hPelvis = HeightAboveGround(pelvis.position);
             UpdateWallBrace(dt);
@@ -111,7 +114,7 @@ namespace Carl
                     PD(pelvis, flat, 30f * strength, 7f, M * 0.06f);
                     phaseOk = hChest > 0.38f && hPelvis > 0.36f ? phaseOk + dt : 0f;
                     if (phaseOk > 0.25f) { getUpPhase = 2; phaseT = 0f; phaseOk = 0f; }
-                    if (phaseT > 3.5f) { getUpPenalty += 1.2f; Fall("too weak to push up"); }
+                    if (phaseT > (grit > 1f ? 5f : 3.5f)) { getUpPenalty += grit > 1f ? 0.4f : 1.2f; Fall("too weak to push up"); }
                     break;
                 }
                 case 2:
@@ -134,7 +137,7 @@ namespace Carl
                         getUpT = 0.75f;
                         ResetGait();
                     }
-                    if (phaseT > 3.2f) { getUpPenalty += 1.5f; Topple("couldn't stand up from kneeling", 0.4f); }
+                    if (phaseT > (grit > 1f ? 4.5f : 3.2f)) { getUpPenalty += grit > 1f ? 0.5f : 1.5f; Topple("couldn't stand up from kneeling", 0.4f); }
                     break;
                 }
             }

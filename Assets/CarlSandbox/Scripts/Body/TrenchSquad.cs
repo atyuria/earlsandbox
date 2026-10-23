@@ -64,9 +64,12 @@ namespace Carl
         // ------------------------------------------------------------ manning the trenches
 
         /// <summary>Puts squads in the trenches (TRENCHES map), away from where you start and out of your sight.</summary>
-        public static int Populate(Vector3 player, int squads = 3)
+        /// <summary>One more enemy squad, somewhere out of your sight.</summary>
+        public static int AddSquad(Vector3 player) => Populate(player, 1, false);
+
+        public static int Populate(Vector3 player, int squads = 3, bool clear = true)
         {
-            Clear();
+            if (clear) Clear();
             var spots = MapBuilder.TrenchSpots;
             if (spots.Count == 0 || SandboxGame.Instance == null) return 0;
             Vector3 eye = player + Vector3.up * 1.6f;
@@ -113,16 +116,62 @@ namespace Carl
                     if (h == null) break;
                     ArmourSystem.Equip(h, RandomKit());
                     h.brain.aiEnabled = true;
-                    var g = EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true));
+                    // the last man of a bigger squad is often their medic: a pistol, and a bag of dressings
+                    bool medic = k == used.Count - 1 && used.Count >= 3 && Random.value < 0.6f;
+                    var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null) : EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true));
                     if (g == null) continue;
+                    g.medic = medic;
                     g.squad = sq;
                     // the first is the point man; of the rest about a third stay put and wait for you
                     g.role = k == 0 ? SquadRole.Point : Random.value < 0.35f ? SquadRole.Hold : SquadRole.Follow;
                     g.leans = Random.value < 0.55f;
+                    g.grenades = Random.Range(1, 3);
                     g.holdPoint = used[k];
                     sq.members.Add(g);
                     placed++;
                 }
+            }
+            return placed;
+        }
+
+        /// <summary>
+        /// Friendly Earls (green armbands) in your own trench round you: armoured, AKs, a medic or two with a
+        /// pistol. Left to themselves they push over to the enemy trench, some along the trenches, some over
+        /// the top. Look at one and hold R to take him into your squad.
+        /// </summary>
+        public static int SpawnFriendlies(Vector3 player, int count)
+        {
+            var spots = MapBuilder.TrenchSpots;
+            if (spots.Count == 0 || SandboxGame.Instance == null) return 0;
+            // your side of no-man's-land
+            float side = Mathf.Sign(player.z == 0f ? -1f : player.z);
+            var ok = spots.FindAll(p => Mathf.Sign(p.z) == side && Mathf.Abs(p.z) > 12f && Vector3.Distance(p, player) > 2.5f && Vector3.Distance(p, player) < 30f);
+            ok.Sort((a, b) => Vector3.Distance(a, player).CompareTo(Vector3.Distance(b, player)));
+            var used = new List<Vector3>();
+            foreach (var p in ok)
+            {
+                if (used.Count >= count) break;
+                bool clash = false;
+                foreach (var u in used) if (Vector3.Distance(u, p) < 2.4f) { clash = true; break; }
+                foreach (var h in HumanBody.All) if (h != null && h.Pelvis != null && Vector3.Distance(h.Pelvis.transform.position, p) < 1.5f) clash = true;
+                if (!clash) used.Add(p);
+            }
+            int placed = 0;
+            for (int k = 0; k < used.Count; k++)
+            {
+                float yaw = side < 0f ? 0f : 180f;
+                var h = SandboxGame.Instance.SpawnCarl(used[k], yaw);
+                if (h == null) break;
+                ArmourSystem.Equip(h, RandomKit());
+                h.brain.aiEnabled = true;
+                bool medic = k % 5 == 2;
+                var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null, Teams.Friendly) : EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true), Teams.Friendly);
+                if (g == null) continue;
+                g.medic = medic;
+                g.grenades = medic ? 0 : Random.Range(1, 3);
+                g.overTheTop = !medic && Random.value < 0.35f;
+                g.leans = Random.value < 0.6f;
+                placed++;
             }
             return placed;
         }

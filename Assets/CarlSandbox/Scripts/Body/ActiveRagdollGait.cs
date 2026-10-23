@@ -43,6 +43,8 @@ namespace Carl
                 var h = rayBuf[i];
                 if (h.collider is CharacterController) continue;
                 if (Own(h.rigidbody)) continue;   // its own limbs
+                // (you step down onto the floor through whoever lies on it: your legs pass over them)
+                if (grit > 1f && h.rigidbody != null && h.collider.GetComponentInParent<HumanBody>() != null) continue;
                 if (h.distance < best) { best = h.distance; hitP = h.point; found = true; }
             }
             if (!found) hitP.y = body.Pelvis.transform.position.y - GroundHeight;

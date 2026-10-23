@@ -10,6 +10,14 @@ namespace Carl
         public int shrapnel = 260;
         float armed;
         bool exploded;
+        /// <summary>Every live grenade (the Earls watch for them at their feet).</summary>
+        public static readonly System.Collections.Generic.List<Grenade> All = new System.Collections.Generic.List<Grenade>();
+        /// <summary>Who threw it (-1 nobody in particular; 0 your side, 1 theirs).</summary>
+        public int team = -1;
+        void OnEnable() => All.Add(this);
+        void OnDisable() => All.Remove(this);
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { All.Clear(); }
 
         void OnCollisionEnter(Collision c)
         {

@@ -1,0 +1,5 @@
+== gear  (15:56:18)
+PASS  AK with a laser: the beam is on
+beam colour alpha in the dust 0.76
+PASS  the beam shows up in the dust
+PASS  J turns it off

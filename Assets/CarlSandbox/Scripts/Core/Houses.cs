@@ -53,7 +53,7 @@ namespace Carl
             g.transform.localRotation = Quaternion.Euler(0, rotY, 0);
             g.transform.localScale = size;
             g.GetComponent<MeshRenderer>().sharedMaterial = m;
-            if (!collide) Object.Destroy(g.GetComponent<Collider>());
+            if (!collide) { var dc = g.GetComponent<Collider>(); dc.enabled = false; Object.Destroy(dc); }
             g.isStatic = true;
             return g;
         }

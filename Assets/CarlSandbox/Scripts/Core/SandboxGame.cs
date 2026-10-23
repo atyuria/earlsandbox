@@ -70,6 +70,7 @@ namespace Carl
             gameObject.AddComponent<VisorView>();
             gameObject.AddComponent<MiniEarl>();
             MedKit.Attach(gameObject);
+            SquadCommand.Attach(gameObject);
             menus = gameObject.AddComponent<Menus>();
             menus.Init(this);
             LoadMap(0);
@@ -104,9 +105,12 @@ namespace Carl
         {
             WorldFreeze.Set(false);
             ClearAll();
-            if (mapRoot != null) Destroy(mapRoot.gameObject);
+            if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); }   // (gone now: the new map is laid out against what is there)
             mapIndex = index;
             mapRoot = MapBuilder.Build(index, out var spawn, out playerYaw, out var carls);
+            Haze.Clear();
+            Haze.ShelterHeight = MapBuilder.Names[index] == "TRENCHES" ? 1.45f : -1000f;
+            Haze.PrepareCamera(player.cam);
             SpawnPoint = spawn;
             player.Teleport(spawn, playerYaw);
             foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
@@ -158,6 +162,7 @@ namespace Carl
             foreach (var h in HumanBody.All.ToArray()) if (h && h != PlayerAvatar.Body) Destroy(h.gameObject);
             HumanBody.All.RemoveAll(h => h != PlayerAvatar.Body);
             TrenchSquad.Clear();
+            Haze.Clear();
             foreach (var g in FindObjectsByType<Grenade>()) Destroy(g.gameObject);
             // torn-off limbs, the strands they hung by, and armour that came off
             foreach (var c in FindObjectsByType<LimbChunk>()) Destroy(c.gameObject);
@@ -211,7 +216,7 @@ namespace Carl
             if (kb.xKey.wasPressedThisFrame) { xray.Toggle(); Toast(xray.on ? "X-RAY ON" : "X-RAY OFF"); }
             if (kb.tabKey.wasPressedThisFrame) showHelp = !showHelp;
             // H: your own injuries - the same medical monitor as for an Earl
-            if (kb.hKey.wasPressedThisFrame && PlayerAvatar.Body != null) medical.Select(medical.selected == PlayerAvatar.Body ? null : PlayerAvatar.Body);
+            if (kb.hKey.wasPressedThisFrame && PlayerAvatar.Body != null && !SquadCommand.Open) medical.Select(medical.selected == PlayerAvatar.Body ? null : PlayerAvatar.Body);
             // N: flip your own helmet's visor up or down
             if (kb.nKey.wasPressedThisFrame && !menus.IsOpen && PlayerAvatar.Body != null)
             {
@@ -225,6 +230,8 @@ namespace Carl
                 else if (vis != null) { vis.ToggleVisor(); Toast(vis.isUp ? "VISOR UP" : "VISOR DOWN"); Sfx.Play("impact_metal", cam.transform.position, 0.25f, 0f, 1f, 0.1f); }
             }
             if (kb.cKey.wasPressedThisFrame) { ClearAll(); Toast("CLEARED"); }
+            // P: up goes the drone you last picked (G menu, MISC)
+            if (kb.pKey.wasPressedThisFrame && !menus.IsOpen && FpvDrone.Piloting == null && Cursor.lockState == CursorLockMode.Locked) FpvDrone.Launch(FpvDrone.Selected);
             if (kb.f1Key.wasPressedThisFrame) LoadMap(0);
             if (kb.f2Key.wasPressedThisFrame) LoadMap(1);
             if (kb.f3Key.wasPressedThisFrame) LoadMap(2);
@@ -233,7 +240,7 @@ namespace Carl
             {
                 foreach (var h in HumanBody.All) if (!h.Dead && h != PlayerAvatar.Body) h.physio.Kill("ADMIN KILL", true);
             }
-            if (mouse.middleButton.wasPressedThisFrame) SelectUnderCrosshair();
+            if (SquadCommand.MiddleTapFrame == Time.frameCount) SelectUnderCrosshair();   // (held, it's the squad list)
             // debug: snap aim to the nearest Carl (F9 chest, F10 head, F11 thigh)
             if (kb.f8Key.wasPressedThisFrame)
             {
@@ -427,7 +434,10 @@ namespace Carl
             InitHud();
             float W = Screen.width, H = Screen.height;
 
-            if (weapons != null && weapons.Scoped)
+            // flying a drone: its goggles draw their own picture, none of yours
+            bool drone = FpvDrone.Piloting != null;
+            if (drone) { }
+            else if (weapons != null && weapons.Scoped)
             {
                 float size = H;
                 float x0 = (W - size) / 2f;
@@ -437,7 +447,7 @@ namespace Carl
                 GUI.color = Color.white;
                 GUI.DrawTexture(new Rect(x0, 0, size, size), scopeTex);
             }
-            else
+            else if (GameSettings.Crosshair)
             {
                 // crosshair (fades out while aiming down the sights, so it never sits on top of them)
                 float aimFade = weapons != null && weapons.Current.type == WeaponType.Gun ? Mathf.Clamp01(1f - weapons.AimAmount * 2.5f) : 1f;
@@ -498,6 +508,7 @@ namespace Carl
             // weapon bar + ammo
             float bw = 92f, bh = 28f;
             float bx = 16f, by = H - bh - 14f;
+            if (drone) return;
             if (medical.selected == null && (menus == null || !menus.IsOpen))
             {
                 int shown = 0; float x = bx;
@@ -526,12 +537,13 @@ namespace Carl
                     "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
                     "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
-                    "X real-time x-ray  ·  MIDDLE CLICK medical panel\n" +
+                    "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  J laser  ·  P fly a drone (pick one in G, MISC)\n" +
+                    "Friendlies (green armband): look at one, HOLD R to recruit  ·  HOLD MIDDLE MOUSE: squad orders\n" +
                     "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
                     "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse";
-                GUI.Box(new Rect(12, 12, 560, 166), GUIContent.none, hudCard);
-                GUI.Label(new Rect(26, 22, 540, 150), help, new GUIStyle(hudSmall) { richText = true, fontSize = 12 });
+                GUI.Box(new Rect(12, 12, 620, 196), GUIContent.none, hudCard);
+                GUI.Label(new Rect(26, 22, 600, 180), help, new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 });
             }
         }
     }

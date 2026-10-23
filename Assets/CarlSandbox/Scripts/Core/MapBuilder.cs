@@ -3,7 +3,7 @@ using UnityEngine;
 namespace Carl
 {
     /// <summary>Builds the two test maps out of primitives.</summary>
-    public static class MapBuilder
+    public static partial class MapBuilder
     {
         public static readonly string[] Names = { "THE LAB", "THE YARD", "HOUSES", "TRENCHES" };
 
@@ -179,6 +179,7 @@ namespace Carl
         public static Transform Build(int index, out Vector3 playerSpawn, out float playerYaw, out Vector3[] carlSpawns)
         {
             InitMaterials();
+            Ladder.All.Clear(); TrenchSpots.Clear(); TrenchNav.Clear();
             var root = new GameObject("Map_" + Names[index]).transform;
             if (index == 0) BuildLab(root, out playerSpawn, out playerYaw, out carlSpawns);
             else if (index == 1) BuildYard(root, out playerSpawn, out playerYaw, out carlSpawns);
@@ -224,7 +225,7 @@ namespace Carl
         {
             var g = Box(r, name, c, size, m);
             g.transform.localRotation = Quaternion.Euler(euler);
-            Object.Destroy(g.GetComponent<Collider>());
+            { var dc = g.GetComponent<Collider>(); dc.enabled = false; Object.Destroy(dc); }   // (off now: Destroy only happens at the end of the frame)
             return g;
         }
 
@@ -254,7 +255,7 @@ namespace Carl
             g.transform.localRotation = Quaternion.FromToRotation(Vector3.up, d.normalized);
             g.transform.localScale = new Vector3(radius * 2f, d.magnitude * 0.5f, radius * 2f);
             g.GetComponent<MeshRenderer>().sharedMaterial = m;
-            if (!solid) Object.Destroy(g.GetComponent<Collider>());
+            if (!solid) { var dc = g.GetComponent<Collider>(); dc.enabled = false; Object.Destroy(dc); }
             g.isStatic = true;
             return g;
         }
@@ -490,23 +491,52 @@ namespace Carl
                     float ya = H(a.x, a.y), yb = H(b.x, b.y);
                     if (ya > 0.5f || yb > 0.5f) continue;
                     Vector3 A3 = new Vector3(a.x, ya + 0.03f, a.y), B3 = new Vector3(b.x, yb + 0.03f, b.y);
-                    var duck = Box(r, "Duckboard", (A3 + B3) * 0.5f, new Vector3(0.5f, 0.05f, len - 0.1f), planks);
-                    duck.transform.localRotation = Quaternion.LookRotation(B3 - A3);
-                    Tiled(duck, 1.2f);
-                    if (kind > 1) continue;
+                    // mostly bare dirt: boards only in stretches (where someone had the timber and the time)
+                    Vector2 mid2 = (a + b) * 0.5f;
+                    float timber = Mathf.PerlinNoise(mid2.x * 0.06f + 3.1f, mid2.y * 0.06f + 7.7f);
+                    if (timber > 0.5f)
+                    {
+                        var duck = Box(r, "Duckboard", (A3 + B3) * 0.5f, new Vector3(0.5f, 0.05f, len - 0.1f), planks);
+                        duck.transform.localRotation = Quaternion.LookRotation(B3 - A3);
+                        Tiled(duck, 1.2f);
+                    }
+                    if (kind > 1 || timber < 0.66f) continue;
                     // the front lines: boards along both walls, held by posts driven in every couple of metres
                     Vector3 d3 = new Vector3(b.x - a.x, 0f, b.y - a.y) / len, n3 = new Vector3(-d3.z, 0f, d3.x);
                     float floor = Mathf.Min(ya, yb);
+                    int oneSide = timber < 0.72f ? (Mathf.PerlinNoise(mid2.x * 0.3f, mid2.y * 0.3f) < 0.5f ? -1 : 1) : 0;
                     for (int s = -1; s <= 1; s += 2)
                     {
-                        Vector3 mid = new Vector3((a.x + b.x) * 0.5f, floor + 0.75f, (a.y + b.y) * 0.5f) + n3 * s * 0.47f;
-                        var wallB = Box(r, "Revetment", mid, new Vector3(0.04f, 1.5f, len), planks);
-                        wallB.transform.localRotation = Quaternion.LookRotation(d3);
-                        Tiled(wallB, 1.2f);
-                        for (float t = 0.2f; t < len; t += 2f)
+                        if (oneSide != 0 && s != oneSide) continue;
+                        // in board-lengths, against the wall as it was actually dug (it wanders off the line it was
+                        // drawn from), and only where there is a wall: none across the mouth of a side trench or a
+                        // fighting position
+                        for (float t = 0f; t < len - 0.3f; t += 1.2f)
                         {
-                            Vector3 pp = new Vector3(a.x, floor, a.y) + d3 * t + n3 * s * 0.43f;
-                            Pole(r, "Post", pp - Vector3.up * 0.2f, pp + Vector3.up * R2(1.6f, 1.85f), 0.05f, logMat, true);
+                            float piece = Mathf.Min(1.2f, len - t);
+                            Vector2 at2 = a + (b - a) / len * (t + piece * 0.5f);
+                            // the middle of the floor across here
+                            Vector2 nrm2 = new Vector2(n3.x, n3.z);
+                            float sum = 0f; int cnt = 0;
+                            for (float o = -1.1f; o <= 1.1f; o += 0.1f) { Vector2 q = at2 + nrm2 * o; if (H(q.x, q.y) < floor + 0.3f) { sum += o; cnt++; } }
+                            if (cnt == 0) continue;
+                            at2 += nrm2 * (sum / cnt);
+                            Vector3 from = new Vector3(at2.x, floor + 0.75f, at2.y);
+                            if (!col.Raycast(new Ray(from, n3 * s), out var wallHit, 1.1f)) continue;
+                            // not where the wall turns a corner (the board would stand out across the floor), nor
+                            // anywhere it leaves less than a man's width between the walls
+                            if (Mathf.Abs(Vector3.Dot(Vector3.ProjectOnPlane(wallHit.normal, Vector3.up).normalized, n3)) < 0.8f) continue;
+                            float across = col.Raycast(new Ray(from, -n3 * s), out var otherHit, 2f) ? wallHit.distance + otherHit.distance : 3f;
+                            if (across < 1.1f) continue;
+                            Vector3 mid = wallHit.point - n3 * s * 0.03f;
+                            var wallB = Box(r, "Revetment", mid, new Vector3(0.04f, 1.5f, piece), planks);
+                            wallB.transform.localRotation = Quaternion.LookRotation(d3);
+                            Tiled(wallB, 1.2f);
+                            if (Mathf.Repeat(t, 2.4f) < 0.1f)
+                            {
+                                Vector3 pp = new Vector3(mid.x, floor, mid.z) - n3 * s * 0.05f;
+                                Pole(r, "Post", pp - Vector3.up * 0.2f, pp + Vector3.up * R2(1.6f, 1.85f), 0.05f, logMat, true);
+                            }
                         }
                     }
                 }
@@ -552,6 +582,9 @@ namespace Carl
             Scatter("tree_stump_01", 5, 0.8f, 1.2f, true, 0.05f); Scatter("tree_stump_02", 5, 0.8f, 1.2f, true, 0.05f);
             Scatter("dead_tree_trunk", 5, 0.9f, 1.1f, true, 0.1f, true); Scatter("dead_tree_trunk_02", 5, 0.9f, 1.1f, true, 0.1f, true);
             Scatter("boulder_01", 5, 0.5f, 0.9f, true, 0.2f); Scatter("rock_07", 12, 3f, 6f, true, 0.1f);
+
+            TrenchExtras(r, data, col, dr);
+            TrenchNav.Build(data.lines, data.cells, H, col);
 
             // you start in your own front line, the Earls in theirs and in their fighting positions
             var friendly = data.lines.Find(l => l.kind == 0).pts;
