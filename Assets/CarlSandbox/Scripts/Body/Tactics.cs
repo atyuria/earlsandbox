@@ -75,6 +75,7 @@ namespace Carl
         public static void Gunshot(Vector3 pos, int team, float radius, HumanBody shooter, Vector3? shootingAt)
         {
             if (team >= 0 && team < 2) Shots[team]++;
+            EarlGunner.Flashed(shooter);
             foreach (var g in EarlGunner.All)
             {
                 if (g == null || !g.Fighting || g.Body == shooter) continue;

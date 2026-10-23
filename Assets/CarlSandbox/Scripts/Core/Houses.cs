@@ -275,15 +275,25 @@ namespace Carl
                 }
             }
             // parked cars
-            for (int c = 0; c < 3; c++)
+            // (modelled saloons and hatchbacks, BlenderTools/car_build.py: glossy paint, glass, chrome-less trim, lamps)
+            Color[] cols = { new Color(0.16f, 0.24f, 0.42f), new Color(0.5f, 0.08f, 0.07f), new Color(0.86f, 0.86f, 0.84f), new Color(0.12f, 0.12f, 0.13f), new Color(0.55f, 0.56f, 0.58f) };
+            for (int c = 0; c < 5; c++)
             {
-                var car = Group(r, "Car", new Vector3(c % 2 == 0 ? 2.4f : -2.4f, 0f, -30f + c * 26f), c % 2 == 0 ? 0f : 180f);
-                Color[] cols = { new Color(0.25f, 0.32f, 0.5f), new Color(0.55f, 0.12f, 0.1f), new Color(0.85f, 0.85f, 0.82f) };
-                Box(car, "Body", new Vector3(0, 0.6f, 0), new Vector3(1.8f, 0.7f, 4.2f), Mats.Lit(cols[c], 0.6f, 0.3f));
-                var cab = Box(car, "Cabin", new Vector3(0, 1.2f, -0.2f), new Vector3(1.6f, 0.55f, 2.2f), glassM);
-                cab.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                Box(car, "Seats", new Vector3(0, 0.95f, -0.2f), new Vector3(1.5f, 0.15f, 1.9f), dark, 0f, false);
-                for (int i = 0; i < 4; i++) Box(car, "Wheel", new Vector3(i % 2 == 0 ? -0.85f : 0.85f, 0.32f, i < 2 ? -1.35f : 1.35f), new Vector3(0.25f, 0.64f, 0.64f), dark);
+                bool saloon = c % 2 == 0;
+                var car = Group(r, "Car", new Vector3(c % 2 == 0 ? 2.4f : -2.4f, 0f, -42f + c * 19f), (c % 2 == 0 ? 0f : 180f) + Random.Range(-3f, 3f));
+                var paint = Mats.Lit(cols[c], 0.82f, 0.35f);
+                var lamp = Mats.Lit(new Color(0.92f, 0.93f, 0.9f), 0.95f, 0.2f);
+                var tail = Mats.Lit(new Color(0.6f, 0.05f, 0.04f), 0.9f, 0.1f);
+                var plate = Mats.Lit(new Color(0.92f, 0.9f, 0.82f), 0.3f);
+                var trim = Mats.Lit(new Color(0.05f, 0.05f, 0.055f), 0.35f);
+                var rim = Mats.Lit(new Color(0.62f, 0.63f, 0.65f), 0.7f, 0.85f);
+                var tyre = Mats.Lit(new Color(0.04f, 0.04f, 0.045f), 0.15f);
+                var model = ModelLibrary.Spawn(saloon ? "Car_Saloon" : "Car_Hatch", car, m =>
+                    m == "Paint" ? paint : m == "Glass" ? glassM : m == "Rubber" ? tyre : m == "Steel" ? rim : m == "Light" ? lamp : m == "Tail" ? tail : m == "Plate" ? plate : trim);
+                // the cabin is dark inside (seats, dash), seen through the glass
+                Box(car, "Interior", new Vector3(0, 1.05f, saloon ? -0.15f : -0.3f), new Vector3(1.4f, 0.55f, saloon ? 2.1f : 2.4f), dark, 0f, false);
+                var bc = car.gameObject.AddComponent<BoxCollider>();
+                bc.center = new Vector3(0f, 0.78f, 0f); bc.size = new Vector3(1.8f, 1.35f, saloon ? 4.6f : 4.05f);
             }
             spawn = new Vector3(0f, 0.1f, -56f);
             yaw = 0f;

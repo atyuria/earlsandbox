@@ -98,7 +98,8 @@ namespace Carl
                 return;
             }
 
-            if (Cursor.lockState == CursorLockMode.Locked)
+            // (ALT + A / D: the mouse is working the gun out round the corner, not your head)
+            if (Cursor.lockState == CursorLockMode.Locked && !WeaponController.BlindHold)
             {
                 Vector2 md = mouse.delta.ReadValue() * sensitivity * sensitivityScale;
                 yaw += md.x;
@@ -143,8 +144,9 @@ namespace Carl
             Vector3 input = Vector3.zero;
             if (kb.wKey.isPressed) input.z += 1f;
             if (kb.sKey.isPressed) input.z -= 1f;
-            if (kb.dKey.isPressed) input.x += 1f;
-            if (kb.aKey.isPressed) input.x -= 1f;
+            bool altHeld = kb.leftAltKey.isPressed || kb.rightAltKey.isPressed;   // (ALT + A / D is the gun round a corner, not a step)
+            if (kb.dKey.isPressed && !altHeld) input.x += 1f;
+            if (kb.aKey.isPressed && !altHeld) input.x -= 1f;
             input = Vector3.ClampMagnitude(input, 1f);
             bool sprint = kb.leftShiftKey.isPressed;
 

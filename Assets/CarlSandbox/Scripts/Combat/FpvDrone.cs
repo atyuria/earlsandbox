@@ -33,6 +33,8 @@ namespace Carl
         bool ended;
         Vector3 home;
         GUIStyle hud, big;
+        RenderTexture feed;
+        static Texture2D grain;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { Piloting = null; Selected = Kind.Kamikaze; }
@@ -117,7 +119,10 @@ namespace Carl
             cg.transform.SetParent(transform, false);
             cg.transform.localPosition = new Vector3(0f, 0.045f, 0.3f);   // (out ahead of the warhead's nose)
             cam = cg.AddComponent<Camera>();
-            cam.fieldOfView = 100f;
+            cam.fieldOfView = 112f;                                        // a wide FPV lens
+            // an analogue video link: the picture is small and soft (drawn blown up in OnGUI)
+            feed = new RenderTexture(400, 225, 16) { filterMode = FilterMode.Bilinear };
+            cam.targetTexture = feed;
             cam.nearClipPlane = 0.03f;
             cam.farClipPlane = 1500f;
             cg.tag = "MainCamera";
@@ -233,7 +238,10 @@ namespace Carl
             Vector3 v = rb.linearVelocity;
             Vector3 localV = Quaternion.Inverse(Quaternion.Euler(0f, yaw, 0f)) * v;
             visual.rotation = Quaternion.Euler(Mathf.Clamp(localV.z * 1.8f, -35f, 35f), yaw, Mathf.Clamp(-localV.x * 2.2f, -35f, 35f));
-            cam.transform.rotation = look;
+            // the camera is bolted to the frame: it rolls with the bank and shakes with the motors
+            float bankRoll = Mathf.Clamp(-localV.x * 2.2f, -35f, 35f) * 0.6f;
+            float shake = 0.25f + v.magnitude * 0.02f;
+            cam.transform.rotation = look * Quaternion.Euler(Random.Range(-shake, shake), Random.Range(-shake, shake), bankRoll + Random.Range(-shake, shake));
         }
 
         void OnCollisionEnter(Collision c)
@@ -288,6 +296,10 @@ namespace Carl
                 g.player.cam.enabled = true;
                 var ml = g.player.cam.GetComponent<AudioListener>(); if (ml) ml.enabled = true;
             }
+            // the goggles: a blast or a crash cuts the picture to static before you're back in your own eyes
+            if (why == "DETONATED" || why == "CRASHED" || why == "SIGNAL LOST") FpvStatic.Show(why == "DETONATED" ? 1.6f : 1.1f);
+            if (cam != null) cam.targetTexture = null;
+            if (feed != null) { feed.Release(); Destroy(feed); feed = null; }
             if (cam != null) { cam.enabled = false; var l = cam.GetComponent<AudioListener>(); if (l) Destroy(l); cam.tag = "Untagged"; }
             g?.Toast(why);
             if (destroy) { Destroy(gameObject); return; }
@@ -313,6 +325,11 @@ namespace Carl
                 big = new GUIStyle(hud) { fontSize = 13, alignment = TextAnchor.UpperCenter };
             }
             float W = Screen.width, H = Screen.height;
+            // the picture itself, then the analogue grain over it
+            if (feed != null) GUI.DrawTexture(new Rect(0, 0, W, H), feed, ScaleMode.ScaleAndCrop, false);
+            if (grain == null) grain = new Texture2D(160, 90, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Repeat };
+            if (Time.frameCount % 2 == 0) FpvStatic.Noise(grain, 0.12f);
+            GUI.DrawTexture(new Rect(0, 0, W, H), grain);
             float range = Vector3.Distance(transform.position, home);
             // breaking up with range, a little all the time
             int lines = 6 + (int)(Mathf.InverseLerp(150f, 400f, range) * 120f);

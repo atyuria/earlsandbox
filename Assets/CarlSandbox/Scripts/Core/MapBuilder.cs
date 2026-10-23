@@ -75,6 +75,25 @@ namespace Carl
 
         static readonly System.Collections.Generic.Dictionary<string, GameObject> props = new System.Collections.Generic.Dictionary<string, GameObject>();
 
+        /// <summary>How far a prop reaches out from its pivot across the ground (m, at scale 1).</summary>
+        static float PropRadius(string id)
+        {
+            if (!props.TryGetValue(id, out var pf) || pf == null) props[id] = pf = Resources.Load<GameObject>("Props/" + id);
+            if (pf == null) return 0.5f;
+            float r = 0.2f;
+            foreach (var mf in pf.GetComponentsInChildren<MeshFilter>())
+            {
+                if (mf.sharedMesh == null) continue;
+                var b = mf.sharedMesh.bounds; var m = mf.transform.localToWorldMatrix;   // (the prefab sits at the origin)
+                for (int c = 0; c < 8; c++)
+                {
+                    var p = m.MultiplyPoint3x4(new Vector3((c & 1) == 0 ? b.min.x : b.max.x, (c & 2) == 0 ? b.min.y : b.max.y, (c & 4) == 0 ? b.min.z : b.max.z));
+                    r = Mathf.Max(r, new Vector2(p.x, p.z).magnitude);
+                }
+            }
+            return r;
+        }
+
         // The props' textures: Resources/PropTex/<id>/ with <id>.json naming each material's colour and normal maps
         // and whether it is cut out (leaves, grass) and two-sided (BlenderTools/ph_proptex.js).
         [System.Serializable] class PropTexMat { public string name, diff, nor; public bool cut, two; }
@@ -569,9 +588,18 @@ namespace Carl
             {
                 for (int k = 0, tries = 0; k < n && tries < n * 6; tries++)
                 {
-                    float x = R2(-48f, 48f), z = R2(-50f, 52f);
-                    if (!Open(x, z, 1.6f) || !Open(x + 0.8f, z, 1.6f) || !Open(x - 0.8f, z, 1.6f) || !Open(x, z + 0.8f, 1.6f) || !Open(x, z - 0.8f, 1.6f)) continue;
-                    Prop(r, id, G(x, z) - Vector3.up * sink, R2(0f, 360f), R2(s0, s1), solid, lying ? new Vector3(R2(-4f, 4f), 0f, R2(-4f, 4f)) : default);
+                    float x = R2(-48f, 48f), z = R2(-50f, 52f), sc = R2(s0, s1);
+                    // its whole footprint on open, fairly level ground (a long clump of grass must not bridge a trench)
+                    float rad = PropRadius(id) * sc + 0.4f, y0 = H(x, z);
+                    bool fits = Open(x, z, 1.6f);
+                    for (int q = 0; q < 12 && fits; q++)
+                    {
+                        float a = q * Mathf.PI / 6f, f = q < 6 ? rad : rad * 0.5f;
+                        float px = x + Mathf.Cos(a) * f, pz = z + Mathf.Sin(a) * f;
+                        fits = Open(px, pz, 1.6f) && Mathf.Abs(H(px, pz) - y0) < 0.3f;
+                    }
+                    if (!fits) continue;
+                    Prop(r, id, G(x, z) - Vector3.up * sink, R2(0f, 360f), sc, solid, lying ? new Vector3(R2(-4f, 4f), 0f, R2(-4f, 4f)) : default);
                     k++;
                 }
             }

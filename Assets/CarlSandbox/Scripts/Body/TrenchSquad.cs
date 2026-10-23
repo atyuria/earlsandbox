@@ -78,7 +78,9 @@ namespace Carl
                 Vector3 head = p + Vector3.up * 1.55f, d = head - eye;
                 return Physics.Raycast(eye, d.normalized, d.magnitude - 0.2f, ~0, QueryTriggerInteraction.Ignore);
             }
-            var ok = spots.FindAll(p => Vector3.Distance(p, player) > 35f && Hidden(p));
+            // only in their own trenches, across no-man's-land: never along the sides of yours
+            float mine = Mathf.Sign(player.z == 0f ? -1f : player.z);
+            var ok = spots.FindAll(p => Mathf.Sign(p.z) != mine && Mathf.Abs(p.z) > 12f && Vector3.Distance(p, player) > 35f && Hidden(p));
             int placed = 0;
             var anchors = new List<Vector3>();
             for (int s = 0; s < squads && ok.Count > 0; s++)
@@ -170,6 +172,7 @@ namespace Carl
                 g.medic = medic;
                 g.grenades = medic ? 0 : Random.Range(1, 3);
                 g.overTheTop = !medic && Random.value < 0.35f;
+                g.holdPoint = used[k];
                 g.leans = Random.value < 0.6f;
                 placed++;
             }

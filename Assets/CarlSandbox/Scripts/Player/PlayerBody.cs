@@ -378,9 +378,7 @@ namespace Carl
                 Fill(all, white, tint);
             }
             Fill(all, white, new Color(1f, 1f, 0.97f, whiteFlash * 0.85f));
-            // adrenaline: the world goes bright and sharp (pupils wide)
-            float rush = PlayerAvatar.Body != null ? Rush : 0f;
-            if (rush > 0.01f && !dead && !passedOut) Fill(all, white, new Color(1f, 0.99f, 0.95f, rush * 0.16f));
+            // (adrenaline used to wash the screen white here: gone - it shows in the shaking hands and the heartbeat)
             // going dark (passing out, dying): at once from a shot, slowly fading when you bleed out
             if (dark > 0.005f) Fill(all, white, new Color(0, 0, 0, dark * (dead || passedOut ? 0.985f : 1f)));
             GUI.color = Color.white;

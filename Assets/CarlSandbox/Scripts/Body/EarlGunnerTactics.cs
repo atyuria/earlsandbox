@@ -111,6 +111,7 @@ namespace Carl
                 if (!torso && !head) continue;
                 Vector3 at = torso ? c + Vector3.up * 0.05f : hd;
                 if (Haze.Transmit(eye, at) < 0.3f) continue;     // lost in the dust and smoke
+                if (!Visible(h, eye, cand[i].d)) continue;          // at night: nothing gives him away
                 enemy = h; enemyAim = at; sees = true;
                 break;
             }
@@ -565,6 +566,8 @@ namespace Carl
             var rag = body.ragdoll;
             stance = Stance.None;
             rag.lean = Mathf.MoveTowards(rag.lean, 0f, Time.deltaTime * 3f);
+            if (assault) { Advance(legs); return; }
+            if (defend) { HoldLine(legs); return; }
             if (team == Teams.Friendly) { Advance(legs); return; }
             // no paths to walk (not the trenches): they come looking for you, as they always have
             if (!TrenchNav.Ready)
@@ -627,19 +630,26 @@ namespace Carl
                 for (int i = 0; i < TrenchNav.Nodes.Count; i++)
                 {
                     var n = TrenchNav.Nodes[i];
-                    if (TrenchNav.Field[i] || n.z < 18f || n.z > 29f) continue;
+                    if (TrenchNav.Field[i] || !TheirLineNode(n)) continue;
                     float d = Mathf.Abs(n.x - here.x + Random.Range(-12f, 12f)) + Random.Range(0f, 6f);
                     if (d < bd) { bd = d; best = n; }
                 }
                 objective = best;
                 if (objective == null) { rag.moveSpeed = 0f; return; }
             }
-            bool inTheirs = here.z > 16f && here.y < 1.2f;
+            bool inTheirs = InTheirLine(here) && here.y < 1.2f;
             if (inTheirs || FlatDist(here, objective.Value) < 2f)
             {
                 // in: clear it, spot by spot
-                Wander(legs, i => !TrenchNav.Field[i] && TrenchNav.Nodes[i].z > 12f);
+                Wander(legs, i => !TrenchNav.Field[i] && (team == Teams.Friendly ? TrenchNav.Nodes[i].z > 12f : TrenchNav.Nodes[i].z < -12f));
                 return;
+            }
+            // those not going straight over the top go by the middle of no-man's-land first
+            if (!overTheTop && !viaDone)
+            {
+                if (via == null) via = TrenchNav.RandomNear(new Vector3(Random.Range(-4f, 4f), 1.8f, Random.Range(-2f, 2f)), 6f, i => TrenchNav.Field[i]);
+                if (via == null || FlatDist(here, via.Value) < 2.5f || InTheirLine(here)) viaDone = true;
+                else { MoveTo(via.Value, (here.y > 1.4f ? 3.2f : 2f) * legs, 0.45f); AimAt(here + rag.moveDir * 8f + Vector3.up * 0.6f, false); return; }
             }
             bool fast = here.y > 1.4f;      // out in the open: run
             MoveTo(objective.Value, (fast ? 3.4f : 2f) * legs, overTheTop ? 0.45f : 25f);

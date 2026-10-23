@@ -587,7 +587,7 @@ namespace Carl
                 Vector3 jet = Quaternion.AngleAxis(k * 90f + Random.Range(-20f, 20f), dir) * side;
                 Emit(I.flame, pos + dir * 0.02f, (jet * 3f + dir) * power, 0.026f * power, new Color(1f, 0.7f, 0.4f, 0.9f), 0.035f);
             }
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < 5; i++)
                 Emit(I.smoke, pos + dir * 0.05f + Random.insideUnitSphere * 0.02f, dir * Random.Range(0.4f, 1.2f) + up2 * 0.3f + Random.insideUnitSphere * 0.2f, Random.Range(0.035f, 0.08f) * (0.6f + power * 0.5f), new Color(0.75f, 0.74f, 0.72f, 0.25f), Random.Range(0.6f, 1.2f));
             for (int i = 0; i < 4; i++) Emit(I.sparks, pos, (dir + Random.insideUnitSphere * 0.35f).normalized * Random.Range(4f, 9f), 0.005f, new Color(1f, 0.75f, 0.35f), 0.15f);
             Haze.MuzzleSmoke(pos, dir, power);

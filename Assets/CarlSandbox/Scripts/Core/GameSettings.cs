@@ -18,6 +18,14 @@ namespace Carl
         public static float VoiceVolume = 1f;
         /// <summary>The crosshair in the middle of the screen (off: aim with your sights, or by feel).</summary>
         public static bool Crosshair = true;
+        /// <summary>Graphics: 0 low, 1 medium, 2 high (render scale, shadow distance, detail).</summary>
+        public static int Graphics = 0;
+        /// <summary>Time of day for the next map: 0 day, 1 dusk, 2 night.</summary>
+        public static int TimeOfDay = 0;
+        /// <summary>Earls on the maps (off: an empty map to wander).</summary>
+        public static bool SpawnNpcs = true;
+        /// <summary>TRENCHES: false = you hold your trench against their assault, true = you assault theirs.</summary>
+        public static bool TrenchAttack = false;
 
         static bool loaded;
 
@@ -36,6 +44,11 @@ namespace Carl
             DummyVoices = PlayerPrefs.GetInt("earl.voices", 1) == 1;
             VoiceVolume = PlayerPrefs.GetFloat("earl.voiceVolume", 1f);
             Crosshair = PlayerPrefs.GetInt("earl.crosshair", 1) == 1;
+            Graphics = PlayerPrefs.GetInt("earl.graphics", 0);
+            TimeOfDay = PlayerPrefs.GetInt("earl.timeOfDay", 0);
+            SpawnNpcs = PlayerPrefs.GetInt("earl.npcs", 1) == 1;
+            TrenchAttack = PlayerPrefs.GetInt("earl.trenchAttack", 0) == 1;
+            ApplyGraphics();
         }
 
         public static void Save()
@@ -48,7 +61,26 @@ namespace Carl
             PlayerPrefs.SetInt("earl.voices", DummyVoices ? 1 : 0);
             PlayerPrefs.SetFloat("earl.voiceVolume", VoiceVolume);
             PlayerPrefs.SetInt("earl.crosshair", Crosshair ? 1 : 0);
+            PlayerPrefs.SetInt("earl.graphics", Graphics);
+            PlayerPrefs.SetInt("earl.timeOfDay", TimeOfDay);
+            PlayerPrefs.SetInt("earl.npcs", SpawnNpcs ? 1 : 0);
+            PlayerPrefs.SetInt("earl.trenchAttack", TrenchAttack ? 1 : 0);
             PlayerPrefs.Save();
+        }
+
+        /// <summary>Puts the graphics setting into effect: the render pipeline's resolution and shadows, level of detail.</summary>
+        public static void ApplyGraphics()
+        {
+            Graphics = Mathf.Clamp(Graphics, 0, 2);
+            if (UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset urp)
+            {
+                urp.renderScale = Graphics == 0 ? 0.75f : Graphics == 1 ? 0.9f : 1f;
+                urp.shadowDistance = Graphics == 0 ? 25f : Graphics == 1 ? 40f : 60f;
+                urp.msaaSampleCount = 1;
+            }
+            QualitySettings.lodBias = Graphics == 0 ? 0.7f : Graphics == 1 ? 1f : 2f;
+            QualitySettings.anisotropicFiltering = Graphics == 0 ? AnisotropicFiltering.Disable : AnisotropicFiltering.Enable;
+            QualitySettings.globalTextureMipmapLimit = Graphics == 0 ? 1 : 0;   // half-size textures on low
         }
 
         /// <summary>World blood resolution, pixels per metre.</summary>

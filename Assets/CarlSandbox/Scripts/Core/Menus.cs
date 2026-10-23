@@ -4,7 +4,7 @@ using UnityEngine.InputSystem;
 
 namespace Carl
 {
-    public enum MenuKind { None, Settings, Spawn, Gun }
+    public enum MenuKind { None, Settings, Spawn, Gun, Main }
 
     /// <summary>
     /// Esc settings, F spawn menu (with a ghost outline where the Earl will appear and a turning showcase of the
@@ -278,7 +278,7 @@ namespace Carl
             if (!IsOpen) return;
             Styles();
             // dim the world behind a menu a little
-            GUI.color = new Color(0f, 0f, 0f, open == MenuKind.Spawn ? 0.12f : 0.45f);
+            GUI.color = new Color(0f, 0f, 0f, open == MenuKind.Spawn ? 0.12f : open == MenuKind.Main ? 0.55f : 0.45f);
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), white);
             GUI.color = Color.white;
             switch (open)
@@ -286,7 +286,112 @@ namespace Carl
                 case MenuKind.Settings: DrawSettings(); break;
                 case MenuKind.Spawn: DrawSpawn(); break;
                 case MenuKind.Gun: DrawGun(); break;
+                case MenuKind.Main: DrawMain(); break;
             }
+        }
+
+        // ------------------------------------------------------------ the main menu (what the game boots into)
+        int mainMap = -1;
+        bool mainSettings;
+        Vector2 mainScroll;
+
+        /// <summary>Back to the main menu: choose a map, the time of day, who is on it, then PLAY.</summary>
+        public void OpenMain()
+        {
+            open = MenuKind.Main;
+            LastMenuFrame = Time.frameCount;
+            if (mainMap < 0) mainMap = game.mapIndex;
+            if (stage != null) stage.SetActive(false);
+            if (ghost) ghost.SetActive(false);
+            ApplyCursor();
+        }
+
+        static readonly string[] MapBlurb =
+        {
+            "A bright test hall: cover walls, a platform, benches and kit. Earls stand about waiting.",
+            "An open range out to 200 m: firing line, sniper tower, containers, sandbags.",
+            "A street of houses with gardens, rooms to clear and cars parked out front.",
+            "Zig-zag trenches in a shelled tree line either side of no-man's-land, held by armed squads.",
+        };
+
+        void DrawMain()
+        {
+            float pw = Mathf.Min(760f, Screen.width - 40f), ph = Mathf.Min(660f, Screen.height - 30f);
+            panel = new Rect(Screen.width / 2 - pw / 2, Screen.height / 2 - ph / 2, pw, ph);
+            panel2 = default;
+            GUILayout.BeginArea(panel, card);
+            GUILayout.Label("EARL SANDBOX", new GUIStyle(title) { fontSize = 34 });
+            GUILayout.Label("Choose where, when and who's there, then PLAY.", sub);
+            mainScroll = GUILayout.BeginScrollView(mainScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+            Section("MAP");
+            GUILayout.BeginHorizontal();
+            for (int m = 0; m < MapBuilder.Names.Length; m++) if (Chip(MapBuilder.Names[m], mainMap == m, 0f, 40f)) mainMap = m;
+            GUILayout.EndHorizontal();
+            GUILayout.Label(MapBlurb[Mathf.Clamp(mainMap, 0, MapBlurb.Length - 1)], small);
+            Section("TIME OF DAY");
+            GUILayout.BeginHorizontal();
+            string[] tod = { "DAY", "DUSK", "NIGHT" };
+            for (int t = 0; t < 3; t++) if (Chip(tod[t], GameSettings.TimeOfDay == t, 0f, 34f)) GameSettings.TimeOfDay = t;
+            GUILayout.EndHorizontal();
+            GUILayout.Label(GameSettings.TimeOfDay == 2
+                ? "Dark. Earls carry torches but keep them off most of the time so they don't give themselves away; they see by your light, your muzzle flash and the noise you make."
+                : GameSettings.TimeOfDay == 1 ? "The sun low and red, long shadows, getting dark." : "Full daylight.", small);
+            Section("EARLS");
+            Check("SPAWN EARLS (NPCS)", ref GameSettings.SpawnNpcs);
+            GUILayout.Label(GameSettings.SpawnNpcs ? "The map is peopled: Earls standing about, or squads holding the trenches." : "An empty map: just you (spawn your own with F).", small);
+            if (mainMap == 3 && GameSettings.SpawnNpcs)
+            {
+                Section("TRENCHES: YOUR SIDE");
+                GUILayout.BeginHorizontal();
+                if (Chip("DEFEND YOUR TRENCH", !GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = false;
+                if (Chip("ATTACK THEIR TRENCH", GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = true;
+                GUILayout.EndHorizontal();
+                GUILayout.Label(GameSettings.TrenchAttack
+                    ? "You and your squad go across: some over the top, some up the communication trench in the middle, into theirs. They hold it."
+                    : "You and your squad hold your line. They come across at you: some over the top through no-man's-land, some up the trench in the middle.", small);
+            }
+            Section("SETTINGS");
+            if (Chip(mainSettings ? "▾  HIDE SETTINGS" : "▸  SHOW SETTINGS", mainSettings, 0f, 30f)) mainSettings = !mainSettings;
+            if (mainSettings)
+            {
+                Graphics();
+                GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
+                GameSettings.Volume = Slider("MASTER VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
+                GameSettings.BloodQuality = Slider("BLOOD QUALITY", GameSettings.QualityName, GameSettings.BloodQuality, 0f, 1f);
+                GameSettings.BloodAmount = Slider("BLOOD AMOUNT", GameSettings.AmountName, GameSettings.BloodAmount, 0f, 1f);
+                GUILayout.BeginHorizontal();
+                Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
+                Check("CROSSHAIR", ref GameSettings.Crosshair);
+                Check("EARL VOICES", ref GameSettings.DummyVoices);
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+            GUILayout.Space(8);
+            GUILayout.BeginHorizontal();
+            if (Chip("PLAY", true, 0f, 46f))
+            {
+                PlayerPrefs.SetInt("earl.map", mainMap);
+                GameSettings.Save();
+                open = MenuKind.None;
+                LastMenuFrame = Time.frameCount;
+                game.LoadMap(mainMap);
+                ApplyCursor();
+                game.Toast("F SPAWN MENU · G GUNS · ESC SETTINGS · X X-RAY · MIDDLE CLICK MEDICAL");
+            }
+            if (Chip("QUIT", false, 120f, 46f)) Application.Quit();
+            GUILayout.EndHorizontal();
+            GUILayout.EndArea();
+        }
+
+        /// <summary>The graphics level chips (LOW / MEDIUM / HIGH), applied at once.</summary>
+        void Graphics()
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("GRAPHICS", statLabel, GUILayout.Width(110), GUILayout.Height(30));
+            string[] g = { "LOW", "MEDIUM", "HIGH" };
+            for (int q = 0; q < 3; q++)
+                if (Chip(g[q], GameSettings.Graphics == q, 0f, 30f)) { GameSettings.Graphics = q; GameSettings.ApplyGraphics(); }
+            GUILayout.EndHorizontal();
         }
 
         void DrawSettings()
@@ -307,6 +412,7 @@ namespace Carl
             GUILayout.Space(4);
             Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
             Check("CROSSHAIR", ref GameSettings.Crosshair);
+            Graphics();
             Section("AUDIO");
             GameSettings.Volume = Slider("MASTER VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
             Check("EARL VOICES", ref GameSettings.DummyVoices);
@@ -324,6 +430,7 @@ namespace Carl
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
             if (Chip("RESUME", true, 0f, 38f)) Toggle(MenuKind.Settings);
+            if (Chip("MAIN MENU", false, 130f, 38f)) { GameSettings.Save(); OpenMain(); }
             if (Chip("QUIT GAME", false, 140f, 38f)) Application.Quit();
             GUILayout.EndHorizontal();
             GUILayout.EndArea();
@@ -538,8 +645,9 @@ namespace Carl
             else
             {
                 listScroll = GUILayout.BeginScrollView(listScroll, false, false, GUIStyle.none, GUIStyle.none);
+                int num = 0;   // numbered down the page, 1, 2, 3...
                 for (int i = 0; i < w.defs.Count; i++)
-                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((i + 1) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i && droneTab == 0 ? bigOn : big, GUILayout.Height(38))) { gunTab = i; droneTab = 0; scroll = Vector2.zero; }
+                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((++num) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i && droneTab == 0 ? bigOn : big, GUILayout.Height(38))) { gunTab = i; droneTab = 0; scroll = Vector2.zero; }
                 if (gunPage == 2)
                     for (int k = 1; k <= 2; k++)
                         if (GUILayout.Button("P   " + FpvDrone.NameOf(k == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber), droneTab == k ? bigOn : big, GUILayout.Height(38))) { droneTab = k; scroll = Vector2.zero; }

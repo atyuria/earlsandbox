@@ -24,6 +24,8 @@ namespace Carl
         public const int MaxCarls = 100;
 
         Transform mapRoot;
+        /// <summary>Everything belonging to the map now loaded (gone with it when another is loaded).</summary>
+        public Transform MapRoot => mapRoot;
         float playerYaw;
         bool slowMo, showHelp = true;
         readonly List<(string msg, float until)> toasts = new List<(string, float)>();
@@ -73,14 +75,86 @@ namespace Carl
             SquadCommand.Attach(gameObject);
             menus = gameObject.AddComponent<Menus>();
             menus.Init(this);
-            LoadMap(0);
-            LockCursor(true);
-            Toast("F SPAWN MENU · G GUNS · ESC SETTINGS · X X-RAY · MIDDLE CLICK MEDICAL");
+            // a map behind the main menu (with nobody on it) while you choose
+            bool npcs = GameSettings.SpawnNpcs; GameSettings.SpawnNpcs = false;
+            LoadMap(Mathf.Clamp(PlayerPrefs.GetInt("earl.map", 0), 0, MapBuilder.Names.Length - 1));
+            GameSettings.SpawnNpcs = npcs;
+            menus.OpenMain();
         }
+
+        Light sun;
+        Material daySky;
+
+        /// <summary>
+        /// Day, dusk or night (GameSettings.TimeOfDay) on the map just built: where the sun is, how bright, the sky
+        /// and ambient light; at night the lamps on the map are lit (ceiling strips in the lab, street lamps).
+        /// </summary>
+        void ApplyTimeOfDay(Transform map)
+        {
+            if (sun == null) return;
+            int t = GameSettings.TimeOfDay;
+            if (daySky == null && RenderSettings.skybox != null) daySky = RenderSettings.skybox;
+            if (daySky != null)
+            {
+                var sky = RenderSettings.skybox = new Material(daySky);
+                if (sky.HasProperty("_Exposure")) sky.SetFloat("_Exposure", t == 0 ? daySky.GetFloat("_Exposure") : t == 1 ? 0.55f : 0.035f);
+                if (sky.HasProperty("_Tint")) sky.SetColor("_Tint", t == 1 ? new Color(0.75f, 0.5f, 0.45f) : t == 2 ? new Color(0.25f, 0.3f, 0.45f) : sky.GetColor("_Tint"));
+                if (sky.HasProperty("_SkyTint")) sky.SetColor("_SkyTint", t == 1 ? new Color(0.65f, 0.42f, 0.38f) : t == 2 ? new Color(0.1f, 0.12f, 0.2f) : daySky.GetColor("_SkyTint"));
+            }
+            if (t == 0)
+            {
+                sun.transform.rotation = Quaternion.Euler(58f, -32f, 0f);
+                sun.intensity = 1.05f; sun.color = new Color(1f, 0.98f, 0.95f); sun.shadowStrength = 0.75f;
+                RenderSettings.ambientSkyColor = new Color(0.55f, 0.58f, 0.63f);
+                RenderSettings.ambientEquatorColor = new Color(0.47f, 0.49f, 0.52f);
+                RenderSettings.ambientGroundColor = new Color(0.32f, 0.32f, 0.34f);
+            }
+            else if (t == 1)
+            {
+                sun.transform.rotation = Quaternion.Euler(7f, -70f, 0f);
+                sun.intensity = 0.75f; sun.color = new Color(1f, 0.55f, 0.32f); sun.shadowStrength = 0.85f;
+                RenderSettings.ambientSkyColor = new Color(0.32f, 0.3f, 0.38f);
+                RenderSettings.ambientEquatorColor = new Color(0.36f, 0.27f, 0.24f);
+                RenderSettings.ambientGroundColor = new Color(0.13f, 0.12f, 0.12f);
+            }
+            else
+            {
+                // a half moon: faint, blue, high; everything else near black
+                sun.transform.rotation = Quaternion.Euler(40f, 150f, 0f);
+                sun.intensity = 0.07f; sun.color = new Color(0.62f, 0.72f, 1f); sun.shadowStrength = 0.6f;
+                RenderSettings.ambientSkyColor = new Color(0.035f, 0.042f, 0.065f);
+                RenderSettings.ambientEquatorColor = new Color(0.025f, 0.028f, 0.04f);
+                RenderSettings.ambientGroundColor = new Color(0.012f, 0.012f, 0.015f);
+            }
+            Night = t == 2;
+            EarlGunner.Lamps.Clear();
+            if (t != 2 || map == null) return;
+            foreach (var tr in map.GetComponentsInChildren<Transform>())
+            {
+                if (tr.name == "Light")
+                {
+                    var l = new GameObject("NightLight").AddComponent<Light>();
+                    l.transform.SetParent(tr, false); l.transform.localPosition = Vector3.down * 0.8f;
+                    l.type = LightType.Point; l.range = 13f; l.intensity = 1.8f; l.color = new Color(0.95f, 0.97f, 1f);
+                    EarlGunner.Lamps.Add((l.transform.position - Vector3.up * 4f, 13f));
+                }
+                else if (tr.name == "LampHead")
+                {
+                    var l = new GameObject("StreetLight").AddComponent<Light>();
+                    l.transform.SetParent(tr, false); l.transform.localPosition = Vector3.down * 0.15f;
+                    l.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                    l.type = LightType.Spot; l.spotAngle = 110f; l.range = 14f; l.intensity = 6f; l.color = new Color(1f, 0.75f, 0.45f);
+                    EarlGunner.Lamps.Add((l.transform.position - Vector3.up * 4f, 9f));
+                }
+            }
+        }
+
+        /// <summary>Is it night on the map now (no daylight: you see by lamps, torches and flashes).</summary>
+        public static bool Night;
 
         void SetupLighting()
         {
-            Light sun = null;
+            sun = null;
             foreach (var l in FindObjectsByType<Light>())
                 if (l.type == LightType.Directional) { sun = l; break; }
             if (sun == null)
@@ -108,21 +182,24 @@ namespace Carl
             if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); }   // (gone now: the new map is laid out against what is there)
             mapIndex = index;
             mapRoot = MapBuilder.Build(index, out var spawn, out playerYaw, out var carls);
+            ApplyTimeOfDay(mapRoot);
             Haze.Clear();
             Haze.ShelterHeight = MapBuilder.Names[index] == "TRENCHES" ? 1.45f : -1000f;
             Haze.PrepareCamera(player.cam);
             SpawnPoint = spawn;
             player.Teleport(spawn, playerYaw);
-            foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
+            if (GameSettings.SpawnNpcs) foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
             TrenchSquad.Clear();
-            if (MapBuilder.Names[index] == "TRENCHES")
+            if (MapBuilder.Names[index] == "TRENCHES" && GameSettings.SpawnNpcs)
             {
                 Physics.SyncTransforms();
                 int n = TrenchSquad.Populate(spawn);
                 // and your own side round you in your trench (green armbands; HOLD R on one to recruit him)
                 int f = TrenchSquad.SpawnFriendlies(spawn, 6);
-                Toast($"{n} HOSTILE EARLS IN THE TRENCHES  ·  {f} FRIENDLIES WITH YOU");
+                TrenchBattle.Begin(GameSettings.TrenchAttack);
+                Toast(GameSettings.TrenchAttack ? $"ATTACK: TAKE THEIR TRENCH  ·  {n} HOLDING IT  ·  {f} GOING ACROSS WITH YOU" : $"DEFEND: HOLD YOUR TRENCH  ·  {n} COMING ACROSS  ·  {f} WITH YOU");
             }
+            else TrenchBattle.Stop();
             Toast("MAP: " + MapBuilder.Names[index]);
         }
 
@@ -192,6 +269,8 @@ namespace Carl
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
 
+            // the main menu (what you boot into): nothing else answers the keys until you press PLAY
+            if (menus.open == MenuKind.Main) { WorldFreeze.Set(false); WorldFreeze.Tick(); return; }
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (menus.IsOpen && menus.open != MenuKind.Settings) menus.Toggle(menus.open);
@@ -518,7 +597,7 @@ namespace Carl
                 {
                     if (!weapons.owned[i]) continue;
                     // each slot as wide as its name needs
-                    var text = new GUIContent($"{i + 1}  {weapons.defs[i].name}");
+                    var text = new GUIContent($"{shown + 1}  {weapons.defs[i].name}");
                     float wdt = Mathf.Max(bw, hudBar.CalcSize(text).x + 18f);
                     GUI.Label(new Rect(x, by, wdt, bh), text, i == weapons.current ? hudBarSel : hudBar);
                     x += wdt + 4f; shown++;
@@ -537,6 +616,7 @@ namespace Carl
                     "<b><color=#F58F29>CONTROLS</color></b>\n" +
                     "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Y drop down · Z fire mode\n" +
                     "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
+                    "ALT + D / ALT + A: gun out round the corner right / left (mouse left-right: how far out · hold RMB + mouse: point it · LMB fire)\n" +
                     "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
                     "F spawn menu  ·  G gun menu  ·  V hold: free camera  ·  T slow-mo  ·  K end it\n" +
                     "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  J laser  ·  P fly a drone (pick one in G, MISC)\n" +

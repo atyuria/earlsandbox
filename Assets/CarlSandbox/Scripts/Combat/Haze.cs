@@ -35,6 +35,8 @@ namespace Carl
         /// <summary>How thick the haze is right at the camera (0..1), for the screen tint.</summary>
         public static float AtCamera { get; private set; }
         public static int Count => I != null ? I.count : 0;
+        /// <summary>Everything thrown up is this much thinner than it was first tuned (it was hiding too much).</summary>
+        const float Thickness = 0.65f;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { I = null; ShelterHeight = -1000f; AtCamera = 0f; }
@@ -79,6 +81,7 @@ namespace Carl
         /// <summary>One puff: centre, drift, radius (m), density (1 = you can't see through a metre of it), colour.</summary>
         public static void Puff(Vector3 pos, Vector3 vel, float radius, float density, Color c, bool smoke = false)
         {
+            density *= Thickness;
             if (density < 0.01f) return;
             var h = Get();
             int i;

@@ -200,6 +200,16 @@ namespace Carl
         public static bool LaserFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER";
         /// <summary>L and J: the weapon light (or, with none fitted, a head torch) and the laser, on and off.</summary>
         public static bool LightOn = true, LaserOn = true, TorchOn;
+        /// <summary>Your gun light or head torch is shining now.</summary>
+        public static bool PlayerLightOn;
+        /// <summary>ALT + A / D held with a gun: it is pushed out round a corner (the view stays where it is, the
+        /// mouse works the gun instead, and the strafe keys don't walk you).</summary>
+        public static bool BlindHold;
+        /// <summary>Playtests: hold the gun out round a corner this side (1 right, -1 left) as if ALT + D / A were held.</summary>
+        public static int ForceBlind;
+        int blindSide = 1;
+        float blindT, blindOut = 0.5f;
+        Vector2 blindAim;
 
         /// <summary>Where the laser goes: on top of an AR-15's handguard, on the left side of the other long guns, under a pistol's frame.</summary>
         static (Vector3 pos, Vector3 euler) LaserMount(WeaponDef d)
@@ -831,6 +841,8 @@ namespace Carl
                 torch.color = new Color(1f, 0.93f, 0.82f); torch.shadows = LightShadows.Soft;
             }
             if (torch != null) torch.enabled = TorchOn && !gunLight && FpvDrone.Piloting == null;
+            // (the Earls can see a light from a long way off at night)
+            PlayerLightOn = FpvDrone.Piloting == null && (gunLight && LightOn || TorchOn && !gunLight);
             var e = Armed && current < laserEmit.Length && LaserOn ? laserEmit[current] : null;
             bool on = e != null && vmRoot.gameObject.activeInHierarchy;
             if (beam == null)
@@ -899,6 +911,13 @@ namespace Carl
 
         // ------------------------------------------------------------ input
 
+        /// <summary>The n-th (0-based) weapon you carry, as numbered on the bar.</summary>
+        public void SelectSlot(int n)
+        {
+            for (int i = 0, k = 0; i < defs.Count; i++)
+                if (owned[i]) { if (k == n) { Select(i); return; } k++; }
+        }
+
         void Update()
         {
             var kb = Keyboard.current;
@@ -907,15 +926,10 @@ namespace Carl
             bool locked = Cursor.lockState == CursorLockMode.Locked && !Menus.Blocking && !pc.flying;   // (flying the free camera: hands off the gun)
             float dt = Time.unscaledDeltaTime;
 
-            if (kb.digit1Key.wasPressedThisFrame && !SquadCommand.Open) Select(0);
-            if (kb.digit2Key.wasPressedThisFrame && !SquadCommand.Open) Select(1);
-            if (kb.digit3Key.wasPressedThisFrame && !SquadCommand.Open) Select(2);
-            if (kb.digit4Key.wasPressedThisFrame && !SquadCommand.Open) Select(3);
-            if (kb.digit5Key.wasPressedThisFrame && !SquadCommand.Open) Select(4);
-            if (kb.digit6Key.wasPressedThisFrame && !SquadCommand.Open) Select(5);
-            if (kb.digit7Key.wasPressedThisFrame && !SquadCommand.Open) Select(6);
-            if (kb.digit8Key.wasPressedThisFrame && !SquadCommand.Open) Select(7);
-            if (kb.digit9Key.wasPressedThisFrame && !SquadCommand.Open) Select(8);
+            // number keys pick the n-th weapon you carry (the slots are numbered in the order you hold them)
+            if (!SquadCommand.Open)
+                for (int n = 0; n < 9; n++)
+                    if (kb[Key.Digit1 + n].wasPressedThisFrame) { SelectSlot(n); break; }
             float scroll = SquadCommand.Open ? 0f : mouse.scroll.ReadValue().y;   // (the squad list uses the wheel)
             if (!Grabbing && Mathf.Abs(scroll) > 0.1f && !swingFree)
                 for (int s = 1; s < defs.Count; s++) { int k = (current + (scroll < 0 ? s : defs.Count - s)) % defs.Count; if (owned[k]) { Select(k); break; } }
@@ -950,8 +964,22 @@ namespace Carl
                 else { LaserOn = !LaserOn; SandboxGame.Instance?.Toast(LaserOn ? "LASER ON" : "LASER OFF"); }
                 Sfx.Play("click_empty", cam.transform.position, 0.3f, 0f, 1f, 0.05f);
             }
+            // ALT + D / ALT + A: the gun out round the corner on that side. Mouse left and right: how far out;
+            // hold right mouse and move it to point the gun about while it's out there
+            bool alt = kb.leftAltKey.isPressed || kb.rightAltKey.isPressed;
+            int blindWant = able && (locked || ForceBlind != 0) && d.type == WeaponType.Gun && (alt || ForceBlind != 0) && !reloading ? (ForceBlind != 0 ? ForceBlind : kb.dKey.isPressed ? 1 : kb.aKey.isPressed ? -1 : 0) : 0;
+            if (blindWant != 0)
+            {
+                if (blindT < 0.05f) { blindAim = Vector2.zero; }
+                blindSide = blindWant;
+                Vector2 md = mouse.delta.ReadValue() * 0.09f * GameSettings.MouseSensitivity;
+                if (mouse.rightButton.isPressed) blindAim = new Vector2(Mathf.Clamp(blindAim.x + md.x, -40f, 40f), Mathf.Clamp(blindAim.y + md.y, -30f, 30f));
+                else blindOut = Mathf.Clamp01(blindOut + md.x * blindSide * 0.012f);
+            }
+            BlindHold = blindWant != 0;
+            blindT = Mathf.MoveTowards(blindT, blindWant != 0 ? 1f : 0f, dt * 5f);
             if (d.type != WeaponType.Gun) pointOn = false;
-            bool rmbAim = (ForceAim || locked && mouse.rightButton.isPressed) && d.type == WeaponType.Gun && !reloading;
+            bool rmbAim = (ForceAim || locked && mouse.rightButton.isPressed && !BlindHold) && d.type == WeaponType.Gun && !reloading;
             bool aimHeld = rmbAim && !pointOn;
             aimT = Mathf.MoveTowards(aimT, aimHeld ? 1f : 0f, dt * (IsScope ? 5f : Loadout.grip == GripKind.Angled ? 11f : 8f));
             bool pointHeld = pointOn && d.type == WeaponType.Gun && !reloading;
@@ -2370,6 +2398,8 @@ namespace Carl
 
             float gripK = Loadout.grip == GripKind.Vertical ? 0.78f : Loadout.grip == GripKind.Angled ? 0.88f : 1f;
             float ammoK = am != null ? Mathf.Clamp(Mathf.Sqrt(am.Energy / Mathf.Max(1f, d.Energy)), 0.5f, 1.4f) : 1f;
+            // held out at arm's length round a corner, one-handed, no shoulder behind it: it jumps all over
+            float blindK = Mathf.Lerp(1f, 2.8f, blindT);
             float suppK = Loadout.suppressor && SuppressorFor(d) ? 0.9f : 1f;    // a can takes a little of the muzzle rise off
             // braced into the shoulder, cheek on the stock: it helps, but a rifle still kicks hard
             float adsK = Mathf.Lerp(1f, 0.62f, aimT);
@@ -2377,17 +2407,17 @@ namespace Carl
             // the burst: a pause between shots starts a new one with a new (unpredictable) pattern
             if (Time.unscaledTime - lastShotTime > 0.32f) { burstShot = 0; burstSeed = Random.Range(0f, 1000f); burstSide = Random.value < 0.6f ? 1f : -1f; }
             lastShotTime = Time.unscaledTime;
-            float k = ammoK * gripK * oneK * adsK * suppK;
+            float k = ammoK * gripK * oneK * adsK * suppK * blindK;
             Vector2 kickDeg = rec.Shot(burstShot, burstSeed, burstSide) * k;
             burstShot++;
             // held by your body most of the kick goes into the gun and your arms (they throw the muzzle about);
             // the rest moves your view
-            float camK = held ? 0.5f : 1f;
+            float camK = (held ? 0.5f : 1f) * (1f - 0.7f * blindT);   // (round the corner it isn't at your eye)
             pc.AddRecoil(camK * kickDeg.y, camK * kickDeg.x);
             if (held && gunRb != null)
             {
                 // the gun is driven back into the hands, the muzzle flips up and jumps sideways, and it rolls
-                float r = d.recoil * ammoK * gripK * suppK * Mathf.Lerp(1f, 0.6f, aimT);
+                float r = d.recoil * ammoK * gripK * suppK * Mathf.Lerp(1f, 0.6f, aimT) * blindK;
                 KickGun(-(gRot * Vector3.forward) * (0.55f * r * Mathf.Sqrt(oneK)) + Vector3.up * (0.1f * r),
                     (gRot * Vector3.right) * (-kickDeg.y * rec.flip * 0.9f) + (gRot * Vector3.up) * (kickDeg.x * rec.flip * 0.8f) + (gRot * Vector3.forward) * (Random.Range(-1f, 1f) * kickDeg.y * 0.35f));
             }
@@ -2672,6 +2702,17 @@ namespace Carl
                 float thrust = Mathf.Sin(Mathf.Clamp01(thrustT / 0.25f) * Mathf.PI);
                 pos += new Vector3(swingPos.x * 0.36f, swingPos.y * 0.24f - 0.03f, 0.1f + 0.06f * Mathf.Abs(swingPos.x) + thrust * 0.3f);
                 rot *= Quaternion.Euler(-swingPos.y * 70f - 25f + thrust * 60f, swingPos.x * 70f, -swingPos.x * 35f);
+            }
+            if (blindT > 0.001f && d.type == WeaponType.Gun)
+            {
+                // round the corner: pushed out at arm's length to that side, turned out past the edge, pointed
+                // by feel (it is a lot further across your body to the left with the gun in your right hand)
+                float s = blindSide, k = Mathf.SmoothStep(0f, 1f, blindT);
+                float reach = s > 0f ? Mathf.Lerp(0.3f, 0.62f, blindOut) : Mathf.Lerp(0.2f, 0.42f, blindOut);
+                Vector3 bp = new Vector3(s * reach, -0.14f, Mathf.Lerp(0.36f, 0.24f, blindOut));
+                Quaternion br = Quaternion.Euler(-blindAim.y, s * Mathf.Lerp(30f, 75f, blindOut) + blindAim.x, -s * 14f);
+                pos = Vector3.Lerp(pos, bp, k);
+                rot = Quaternion.Slerp(rot, br, k);
             }
             if (suicideT > 0f)
             {

@@ -26,6 +26,7 @@ namespace Carl
 
         /// <summary>Your body's eyes (what the gun is held in front of): the camera, or while you fly the free camera
         /// your head, looking the way you were when you took off.</summary>
+        Ladder ladderWant; float ladderHold;   // walking straight into a ladder, and for how long
         public static Transform EyeT;
         bool wasFlying;
 
@@ -164,12 +165,24 @@ namespace Carl
             leanCam = rag.lean;
             ShowSevered();
 
-            // ---- ladders: walk into one at its foot to climb out, walk back over the lip at its top to climb down
+            // ---- ladders: walk into one at its foot to climb out, walk back over the lip at its top to climb down. Only
+            // on purpose: right up against it, walking and looking straight at it, for a moment - walking past one
+            // (or brushing it sideways) never grabs you
             if (LadderClimber.Busy(h)) { Follow(h, keys); return true; }
+            Ladder want = null; bool wantTop = false;
             if (keys && !rag.IsDown && rag.mode == BodyMode.Standing && wishWorld.sqrMagnitude > 0.25f)
             {
-                var lad = Ladder.Near(pc.transform.position, 0.9f, out bool atTop);
-                if (lad != null && Vector3.Dot(wishWorld.normalized, atTop ? -lad.outward : lad.outward) > 0.55f && LadderClimber.Begin(h, lad, !atTop) != null)
+                var lad = Ladder.Near(pc.transform.position, 0.55f, out bool atTop);
+                Vector3 into = lad == null ? Vector3.zero : atTop ? -lad.outward : lad.outward;
+                Vector3 viewFlat = Vector3.ProjectOnPlane(pc.transform.forward, Vector3.up).normalized;
+                if (lad != null && Vector3.Dot(wishWorld.normalized, into) > 0.85f && Vector3.Dot(viewFlat, into) > 0.6f) { want = lad; wantTop = atTop; }
+            }
+            ladderHold = want != null && want == ladderWant ? ladderHold + dt : 0f;
+            ladderWant = want;
+            if (want != null)
+            {
+                var lad = want; bool atTop = wantTop;
+                if (ladderHold > 0.3f && LadderClimber.Begin(h, lad, !atTop) != null)
                 {
                     rag.lean = 0f; leanCam = 0f;
                     Follow(h, keys);

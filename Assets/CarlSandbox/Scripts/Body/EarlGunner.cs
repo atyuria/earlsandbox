@@ -160,7 +160,9 @@ namespace Carl
         {
             if (dropped || weapon == null) return;
             dropped = true;
-            weapon.transform.SetParent(null, true);
+            if (torch != null) torch.enabled = false;
+            // left lying with the map (cleared with it, not carried over into the next one)
+            weapon.transform.SetParent(SandboxGame.Instance != null ? SandboxGame.Instance.MapRoot : null, true);
             var rb = weapon.AddComponent<Rigidbody>();
             rb.mass = TwoHanded ? 3.5f : 1f;
             var hand = body[PartId.HandR];
@@ -200,13 +202,16 @@ namespace Carl
             }
             else keepFightingDown = -1f;
             brain.hostile = able;
-            if (!able) { rag.aimDir = null; return; }
+            if (!able) { rag.aimDir = null; if (torch != null) torch.enabled = false; return; }
             // (the brain leaves a fighting man to us: knocked down, he gets back up when he can, shooting meanwhile)
             if (rag.IsDown) { rag.wantStand = p.CanStand && p.EffectivePain < 0.8f; rag.wantCrawl = false; }
             // both hands on the rungs
             if (LadderClimber.Busy(body)) { rag.aimDir = null; return; }
 
             Sense();
+            UpdateTorch();
+            // his footsteps (louder running, and on the duckboards) carry to anyone close on the other side
+            if (Time.time > nextStep && rag.moveSpeed > 0.4f) { nextStep = Time.time + 0.6f; Intel.Noise(body.Center, team, rag.moveSpeed > 2.5f ? 16f : 9f); }
             Vector3 chest = body.Chest.transform.position;
             rag.pose = PoseKind.Stand;
             rag.holdPart = null;
