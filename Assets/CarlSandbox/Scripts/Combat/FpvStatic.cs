@@ -20,6 +20,8 @@ namespace Carl
             s.left = s.length = seconds;
         }
 
+        void Awake() { useGUILayout = false; }
+
         void Start()
         {
             snow = new Texture2D(192, 108, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };

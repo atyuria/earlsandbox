@@ -385,6 +385,7 @@ namespace Carl
             var root = new GameObject("Anatomy").transform;
             root.SetParent(bp.transform, false);
             bp.revealRoot = root;
+            root.gameObject.SetActive(false);   // (switched on when the first hole opens: BodyPart)
             BuildFleshLayers(bp);
             bp.revealMaterial = new Material(Mats.Find("Carl/RevealOrgan")) { renderQueue = 2010 };
             var skinMesh = bp.skin != null ? bp.skin.GetComponent<MeshFilter>()?.sharedMesh : null;
@@ -490,7 +491,7 @@ namespace Carl
                 bp.skin.sharedMaterial = on ? ghostMat : bp.skinMaterial;
                 bp.skin.shadowCastingMode = on ? UnityEngine.Rendering.ShadowCastingMode.Off : UnityEngine.Rendering.ShadowCastingMode.On;
                 bp.xrayRoot.gameObject.SetActive(on);
-                if (bp.revealRoot) bp.revealRoot.gameObject.SetActive(!on);
+                if (bp.revealRoot) bp.revealRoot.gameObject.SetActive(!on && (bp.holes.Count > 0 || bp.severed));
                 if (bp.fleshRoot) bp.fleshRoot.gameObject.SetActive(!on && bp.holes.Count > 0);
             }
             if (visor) visor.enabled = !on;

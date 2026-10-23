@@ -30,8 +30,10 @@ namespace Carl
         public Texture mask;            // where the canvas lies on a real surface (world tiles)
         static readonly int Mask = Shader.PropertyToID("_Mask"), UseMask = Shader.PropertyToID("_UseMask");
 
+        static readonly Unity.Profiling.ProfilerMarker mNew = new Unity.Profiling.ProfilerMarker("Carl.Blood.NewCanvas");
         public BloodCanvas(int res, bool wrapU)
         {
+            using var _m = mNew.Auto();
             this.wrapU = wrapU;
             if (mat == null) mat = new Material(Mats.Find("Hidden/Carl/BloodSim"));
             var fmt = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RGHalf) ? RenderTextureFormat.RGHalf : RenderTextureFormat.ARGBHalf;

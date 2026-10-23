@@ -213,6 +213,7 @@ namespace Carl
             if (tiles.TryGetValue(key, out var t)) { t.lastUse = Time.time; return t; }
 
             if (tiles.Count >= MaxTiles) EvictOldest();
+            mNewTile.Begin();
             t = new Tile { canvas = new BloodCanvas(TileRes, false), u = u, v = v, n = nq, lastUse = Time.time, mpb = new MaterialPropertyBlock() };
             t.corner = o + u * (i * TileSize) + v * (j * TileSize);
             Vector3 down = Vector3.down;
@@ -237,28 +238,66 @@ namespace Carl
             t.canvas.mask = BuildMask(t);
             t.mpb.SetTexture("_Mask", t.canvas.mask);
             tiles[key] = t;
+            mNewTile.End();
             return t;
         }
 
         /// <summary>Raycasts a grid over the tile to find where the surface really is (walls end, corners, edges).</summary>
+        const int MaskN = 48, CoarseN = 12;
+        /// <summary>Tiles over an edge whose fine mask is still being worked out, a few rows a frame.</summary>
+        readonly List<(Tile t, Color32[] px)> maskQueue = new List<(Tile, Color32[])>();
+        int maskRow;
+
+        bool OnSurface(Tile t, float fx, float fy)
+        {
+            Vector3 p = t.corner + t.u * (fx * TileSize) + t.v * (fy * TileSize);
+            return Physics.Raycast(p + t.n * 0.04f, -t.n, out var h, 0.08f, ~0, QueryTriggerInteraction.Ignore)
+                   && Vector3.Dot(h.normal, t.n) > 0.95f && h.rigidbody == null;
+        }
+
+        /// <summary>
+        /// Where on the tile the surface really is. A coarse look first (12 x 12): a tile wholly on the floor or a
+        /// wall (most of them) is done at once; one over an edge gets the coarse mask now and the full 48 x 48 a
+        /// few rows a frame after (RefineMasks) - the 2300 raycasts all in one frame were a hitch on every new splash.
+        /// </summary>
         Texture2D BuildMask(Tile t)
         {
-            const int N = 48;
-            var tex = new Texture2D(N, N, TextureFormat.R8, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
-            var px = new Color32[N * N];
-            bool any = false, all = true;
-            for (int y = 0; y < N; y++)
-                for (int x = 0; x < N; x++)
-                {
-                    Vector3 p = t.corner + t.u * ((x + 0.5f) / N * TileSize) + t.v * ((y + 0.5f) / N * TileSize);
-                    bool on = Physics.Raycast(p + t.n * 0.04f, -t.n, out var h, 0.08f, ~0, QueryTriggerInteraction.Ignore)
-                              && Vector3.Dot(h.normal, t.n) > 0.95f && h.rigidbody == null;
-                    px[y * N + x] = on ? new Color32(255, 0, 0, 255) : new Color32(0, 0, 0, 255);
-                    any |= on; all &= on;
-                }
+            var tex = new Texture2D(MaskN, MaskN, TextureFormat.R8, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+            var px = new Color32[MaskN * MaskN];
+            var coarse = new bool[CoarseN * CoarseN];
+            bool all = true;
+            for (int y = 0; y < CoarseN; y++)
+                for (int x = 0; x < CoarseN; x++)
+                    all &= coarse[y * CoarseN + x] = OnSurface(t, (x + 0.5f) / CoarseN, (y + 0.5f) / CoarseN);
+            const int k = MaskN / CoarseN;
+            for (int y = 0; y < MaskN; y++)
+                for (int x = 0; x < MaskN; x++)
+                    px[y * MaskN + x] = coarse[(y / k) * CoarseN + x / k] ? new Color32(255, 0, 0, 255) : new Color32(0, 0, 0, 255);
             tex.SetPixels32(px);
             tex.Apply(false);
+            if (!all) maskQueue.Add((t, px));
             return tex;
+        }
+
+        /// <summary>The fine masks of edge tiles, at most so many raycasts a frame.</summary>
+        void RefineMasks()
+        {
+            int budget = 600;
+            while (budget > 0 && maskQueue.Count > 0)
+            {
+                var (t, px) = maskQueue[0];
+                if (t == null || t.go == null || t.canvas.mask == null) { maskQueue.RemoveAt(0); maskRow = 0; continue; }
+                for (int x = 0; x < MaskN; x++)
+                    px[maskRow * MaskN + x] = OnSurface(t, (x + 0.5f) / MaskN, (maskRow + 0.5f) / MaskN) ? new Color32(255, 0, 0, 255) : new Color32(0, 0, 0, 255);
+                budget -= MaskN;
+                if (++maskRow >= MaskN)
+                {
+                    var mt = (Texture2D)t.canvas.mask; mt.SetPixels32(px);
+                    mt.Apply(false);
+                    maskQueue.RemoveAt(0);
+                    maskRow = 0;
+                }
+            }
         }
 
         void EvictOldest()
@@ -567,6 +606,8 @@ namespace Carl
 
         // ============================================================ simulation
 
+        static readonly Unity.Profiling.ProfilerMarker mUpd1 = new Unity.Profiling.ProfilerMarker("Carl.Blood.EmitDropsRunners"), mTiles = new Unity.Profiling.ProfilerMarker("Carl.Blood.WorldTiles"), mParts = new Unity.Profiling.ProfilerMarker("Carl.Blood.BodyParts"), mNewTile = new Unity.Profiling.ProfilerMarker("Carl.Blood.NewTile");
+
         void Update()
         {
             float dt = WorldFreeze.On ? 0f : Time.deltaTime;   // frozen world (spawn menu): the blood stops too
@@ -578,6 +619,7 @@ namespace Carl
                 runners.Clear();
                 TileRes = GameSettings.WorldBloodRes;
             }
+            using (mUpd1.Auto())
             if (dt > 0f)
             {
                 EmitWounds(dt);
@@ -585,6 +627,7 @@ namespace Carl
                 UpdateRunners(dt);
             }
 
+            mTiles.Begin();
             foreach (var t in tiles.Values)
             {
                 var k = t.key;
@@ -606,6 +649,8 @@ namespace Carl
                 t.mpb.SetTexture("_BloodTex", t.canvas.Texture);
                 t.mr.SetPropertyBlock(t.mpb);
             }
+            mTiles.End(); mParts.Begin();
+            var cam = Camera.main != null ? Camera.main.transform : null;
             for (int i = bloodyParts.Count - 1; i >= 0; i--)
             {
                 var p = bloodyParts[i];
@@ -616,8 +661,16 @@ namespace Carl
                     if ((Time.frameCount + i) % 3 != 0) continue;
                     p.StepBlood(Mathf.Min(0.1f, dt * 3f));
                 }
-                else p.StepBlood(dt);
+                // an Earl: every other frame (far off, every fourth), with the step to match - it flows the same,
+                // just updated less often; the parts take turns so it's spread over the frames
+                else
+                {
+                    int every = cam != null && (p.transform.position - cam.position).sqrMagnitude > 15f * 15f ? 4 : 2;
+                    if ((Time.frameCount + i) % every == 0) p.StepBlood(Mathf.Min(0.1f, dt * every));
+                }
             }
+            mParts.End();
+            RefineMasks();
             marks.Render();
             RenderDrops();
         }

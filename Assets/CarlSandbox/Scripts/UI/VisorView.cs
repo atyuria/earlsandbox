@@ -12,6 +12,7 @@ namespace Carl
     /// </summary>
     public class VisorView : MonoBehaviour
     {
+        void Awake() { useGUILayout = false; }   // (its OnGUI draws directly: no layout pass needed)
         Texture2D altynFrame, altynGlass, knightPlate, crackTex, crazeTex;
         GUIStyle hint;
 

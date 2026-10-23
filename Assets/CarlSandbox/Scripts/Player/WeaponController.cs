@@ -207,8 +207,12 @@ namespace Carl
         public static bool BlindHold;
         /// <summary>Playtests: hold the gun out round a corner this side (1 right, -1 left) as if ALT + D / A were held.</summary>
         public static int ForceBlind;
+        /// <summary>Playtests: hold the trigger down (as if the left button were held, full auto).</summary>
+        public static bool ForceFire;
+        /// <summary>How far your head is turned (yaw, pitch degrees) to look where the gun points round the corner.</summary>
+        public static Vector2 BlindLook;
         int blindSide = 1;
-        float blindT, blindOut = 0.5f;
+        float blindT, blindOut = 0.8f;
         Vector2 blindAim;
 
         /// <summary>Where the laser goes: on top of an AR-15's handguard, on the left side of the other long guns, under a pistol's frame.</summary>
@@ -1011,19 +1015,19 @@ namespace Carl
             swingFree = able && locked && d.type == WeaponType.Knife && kb.leftAltKey.isPressed && suicideT <= 0f;
             if (swingFree) { pc.sensitivityScale = 0f; UpdateFreeSwing(mouse, dt); } else { swingPos = Vector2.Lerp(swingPos, Vector2.zero, dt * 8f); swingTipValid = false; }
 
-            if (locked && !Grabbing && able && !swingFree && suicideT <= 0f)
+            if ((locked || ForceFire) && !Grabbing && able && !swingFree && suicideT <= 0f)
             {
                 switch (d.type)
                 {
                     case WeaponType.Gun:
                         // burst: one pull fires three
                         if (FireMode(current) == "BURST" && mouse.leftButton.wasPressedThisFrame && burstLeft <= 0) burstLeft = 3;
-                        bool trigger = mouse.leftButton.wasPressedThisFrame || (IsAuto(current) && mouse.leftButton.isPressed) || burstLeft > 0;
+                        bool trigger = mouse.leftButton.wasPressedThisFrame || (IsAuto(current) && (mouse.leftButton.isPressed || ForceFire)) || burstLeft > 0;
                         if (trigger && !reloading && Time.unscaledTime >= nextFire)
                         {
                             bool taserLive = d.name == "TASER" && TaserWires.Current != null && TaserWires.Current.Arrived;
                             if (ammo[current] <= 0 && !taserLive) { Sfx.Play("click_empty", cam.transform.position, 0.6f, 0f); StartReload(); }
-                            else FireGun(d);
+                            else { using (Prof.Fire.Auto()) FireGun(d); }
                         }
                         break;
                     case WeaponType.Knife:
@@ -2333,7 +2337,7 @@ namespace Carl
             if (i >= ejectPts.Count || i >= models.Count || models[i] == null) return;
             var root = models[i].transform;
             Vector3 vel = BodyHeld && gInit ? simVel : Vector3.zero;
-            Casing.Eject(CaseFor(modelNames[i]), root.TransformPoint(ejectPts[i]), root.right, root.up, -root.forward, vel, gunCol != null && gunCol.enabled ? gunCol : null);
+            using (Prof.Casing.Auto()) Casing.Eject(CaseFor(modelNames[i]), root.TransformPoint(ejectPts[i]), root.right, root.up, -root.forward, vel, gunCol != null && gunCol.enabled ? gunCol : null);
         }
 
         void UpdatePendingCases()
@@ -2708,12 +2712,20 @@ namespace Carl
                 // round the corner: pushed out at arm's length to that side, turned out past the edge, pointed
                 // by feel (it is a lot further across your body to the left with the gun in your right hand)
                 float s = blindSide, k = Mathf.SmoothStep(0f, 1f, blindT);
-                float reach = s > 0f ? Mathf.Lerp(0.3f, 0.62f, blindOut) : Mathf.Lerp(0.2f, 0.42f, blindOut);
-                Vector3 bp = new Vector3(s * reach, -0.14f, Mathf.Lerp(0.36f, 0.24f, blindOut));
-                Quaternion br = Quaternion.Euler(-blindAim.y, s * Mathf.Lerp(30f, 75f, blindOut) + blindAim.x, -s * 14f);
-                pos = Vector3.Lerp(pos, bp, k);
-                rot = Quaternion.Slerp(rot, br, k);
+                // arms out straight in front and over to that side, the gun out past the corner, still pointing
+                // mostly forward (your body stays behind the cover)
+                float reach = s > 0f ? Mathf.Lerp(0.32f, 0.6f, blindOut) : Mathf.Lerp(0.18f, 0.4f, blindOut);
+                Vector3 bp = new Vector3(s * reach, -0.08f, Mathf.Lerp(0.44f, 0.5f, blindOut));
+                float gunYaw = s * Mathf.Lerp(8f, 30f, blindOut) + blindAim.x;
+                Quaternion br = Quaternion.Euler(-blindAim.y, gunYaw, -s * 14f);
+                // your head turns to look where it points; the pose is in the turned view, so it is turned back
+                // by as much (the gun stays where it is held, out round the corner)
+                BlindLook = new Vector2(gunYaw * 0.5f, blindAim.y * 0.5f) * k;
+                Quaternion unturn = Quaternion.Inverse(Quaternion.Euler(-BlindLook.y, BlindLook.x, 0f));
+                pos = Vector3.Lerp(pos, unturn * bp, k);
+                rot = Quaternion.Slerp(rot, unturn * br, k);
             }
+            else BlindLook = Vector2.zero;
             if (suicideT > 0f)
             {
                 // turned round, muzzle up under the chin

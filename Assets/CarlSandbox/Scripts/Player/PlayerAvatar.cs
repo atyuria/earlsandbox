@@ -140,6 +140,8 @@ namespace Carl
             bool keys = !pc.flying && FpvDrone.Piloting == null;
             Transform eyes = pc.flying && EyeT != null ? EyeT : pc.cam.transform;
             Vector3 look = eyes.forward;
+            // (ALT + A / D: your head glances after the gun, but your body stays square behind the cover)
+            if (WeaponController.BlindLook != Vector2.zero && !pc.flying) look = eyes.rotation * Quaternion.Inverse(Quaternion.Euler(-WeaponController.BlindLook.y, WeaponController.BlindLook.x, 0f)) * Vector3.forward;
             Vector3 flat = Vector3.ProjectOnPlane(look, Vector3.up).normalized;
             rag.faceDir = flat;
             rag.lookAt = eyes.position + look * 10f;
@@ -199,6 +201,8 @@ namespace Carl
             // firing a hard-kicking gun you slow right down to hold it
             if (w != null) speed *= 1f - 0.55f * w.FireSlow;
             rag.moveSpeed = speed * Mathf.Clamp01(wishWorld.magnitude);
+            // the first steps after getting back up are steadier ones, building up to full speed
+            if (rag.standGrace > 0f) rag.moveSpeed *= Mathf.Lerp(1f, 0.45f, rag.standGrace / 2.5f);
             // footsteps: running is heard a good way off, creeping crouched hardly at all
             if (rag.moveSpeed > 0.3f && Time.time > nextStepNoise)
             {

@@ -23,16 +23,24 @@ namespace Carl
         static readonly Dictionary<CaseKind, Mesh> meshes = new Dictionary<CaseKind, Mesh>();
         static Material brass, steelCase, hull;
         static readonly List<Casing> live = new List<Casing>();
+        static readonly Stack<Casing> pool = new Stack<Casing>();
+        static readonly Dictionary<CaseKind, PhysicsMaterial> physMats = new Dictionary<CaseKind, PhysicsMaterial>();
+        Collider col, ignored;
         const int MaxLive = 90;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { meshes.Clear(); live.Clear(); brass = steelCase = hull = null; }
+        static void ResetStatics() { meshes.Clear(); live.Clear(); pool.Clear(); physMats.Clear(); brass = steelCase = hull = null; }
 
         /// <summary>Throw a case out of a port: `right` is the gun's right, `up` its top, `back` toward the shooter.</summary>
         public static void Eject(CaseKind kind, Vector3 port, Vector3 right, Vector3 up, Vector3 back, Vector3 gunVelocity, Collider ignore = null)
         {
             if (kind == CaseKind.None) return;
-            while (live.Count >= MaxLive) { var old = live[0]; live.RemoveAt(0); if (old) Destroy(old.gameObject); }
+            while (live.Count >= MaxLive) { var old = live[0]; live.RemoveAt(0); if (old) old.Recycle(); }
+            // (reused: a full-auto burst made and destroyed a new object, collider, body and material every shot)
+            Casing c = null;
+            while (pool.Count > 0 && c == null) c = pool.Pop();
+            if (c != null && c.kind == kind) { Reuse(c, port, right, up, back, gunVelocity, ignore); return; }
+            if (c != null) Destroy(c.gameObject);   // (another cartridge: its mesh and collider don't fit)
             var go = new GameObject("Case_" + kind);
             go.layer = 2;   // bullets, blood and the crosshair look straight past it
             go.transform.position = port;
@@ -41,29 +49,62 @@ namespace Carl
             go.AddComponent<MeshFilter>().sharedMesh = MeshFor(kind, out float len, out float rad);
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterials = Materials(kind);
-            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;   // (far too small to see a shadow of)
             var col = go.AddComponent<CapsuleCollider>();
             col.direction = 2; col.radius = rad; col.height = Mathf.Max(len, rad * 2f); col.center = new Vector3(0f, 0f, len * 0.5f);
-            var pm = new PhysicsMaterial("Case") { bounciness = kind == CaseKind.TwelveGauge ? 0.2f : 0.35f, dynamicFriction = 0.6f, staticFriction = 0.8f, bounceCombine = PhysicsMaterialCombine.Maximum };
-            col.sharedMaterial = pm;
+            col.sharedMaterial = PhysMat(kind);
             if (ignore != null) Physics.IgnoreCollision(col, ignore, true);
+            // (remembered on the case below, so a reused one can stop ignoring it)
             var rb = go.AddComponent<Rigidbody>();
             rb.mass = Mass(kind);
             rb.linearDamping = 0.25f; rb.angularDamping = 1.2f;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;   // (cheaper, and still never falls through the floor)
             rb.interpolation = RigidbodyInterpolation.Interpolate;
             float sp = Speed(kind);
             rb.linearVelocity = gunVelocity + (right * Random.Range(0.85f, 1.15f) + up * Random.Range(0.45f, 0.75f) + back * Random.Range(0.05f, 0.35f)).normalized * sp * Random.Range(0.85f, 1.15f);
             rb.angularVelocity = up * Random.Range(-25f, 25f) + Random.insideUnitSphere * 18f;
-            var c = go.AddComponent<Casing>();
-            c.kind = kind; c.rb = rb; c.born = Time.time;
+            c = go.AddComponent<Casing>();
+            c.kind = kind; c.rb = rb; c.col = col; c.born = Time.time; c.ignored = ignore;
             live.Add(c);
         }
 
         void Update()
         {
             if (landed < 0f && Time.time - born > 0.25f && rb.linearVelocity.sqrMagnitude < 0.04f) landed = Time.time;
-            if ((landed >= 0f && Time.time - landed > LieTime) || Time.time - born > MaxLife) { live.Remove(this); Destroy(gameObject); }
+            if ((landed >= 0f && Time.time - landed > LieTime) || Time.time - born > MaxLife) { live.Remove(this); Recycle(); }
+        }
+
+        /// <summary>Off the floor and into the pool for the next shot.</summary>
+        void Recycle()
+        {
+            if (this == null) return;
+            gameObject.SetActive(false);
+            pool.Push(this);
+        }
+
+        /// <summary>A pooled case of the same cartridge, thrown out of the port again.</summary>
+        static void Reuse(Casing c, Vector3 port, Vector3 right, Vector3 up, Vector3 back, Vector3 gunVelocity, Collider ignore)
+        {
+            var t = c.transform;
+            t.SetPositionAndRotation(port, Quaternion.LookRotation(right, up) * Quaternion.Euler(Random.Range(-15f, 15f), Random.Range(-20f, 20f), Random.Range(0f, 360f)));
+            if (c.ignored != null && c.ignored != ignore && c.col != null) Physics.IgnoreCollision(c.col, c.ignored, false);
+            if (ignore != null && c.col != null) Physics.IgnoreCollision(c.col, ignore, true);
+            c.ignored = ignore;
+            c.gameObject.SetActive(true);
+            var rb = c.rb;
+            rb.position = port; rb.rotation = t.rotation;
+            float sp = Speed(c.kind);
+            rb.linearVelocity = gunVelocity + (right * Random.Range(0.85f, 1.15f) + up * Random.Range(0.45f, 0.75f) + back * Random.Range(0.05f, 0.35f)).normalized * sp * Random.Range(0.85f, 1.15f);
+            rb.angularVelocity = up * Random.Range(-25f, 25f) + Random.insideUnitSphere * 18f;
+            c.born = Time.time; c.landed = -1f; c.lastTink = 0f;
+            live.Add(c);
+        }
+
+        /// <summary>One bounce material per cartridge (a new one per case was a new native object every shot).</summary>
+        static PhysicsMaterial PhysMat(CaseKind kind)
+        {
+            if (physMats.TryGetValue(kind, out var pm) && pm != null) return pm;
+            return physMats[kind] = new PhysicsMaterial("Case") { bounciness = kind == CaseKind.TwelveGauge ? 0.2f : 0.35f, dynamicFriction = 0.6f, staticFriction = 0.8f, bounceCombine = PhysicsMaterialCombine.Maximum };
         }
 
         void OnCollisionEnter(Collision c)

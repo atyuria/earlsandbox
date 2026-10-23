@@ -124,7 +124,7 @@ namespace Carl
                 staggerDir = flat;
                 staggerLean = Mathf.Max(staggerLean, 10f + s * 18f);
                 // a stagger, not a drop: only a really big hit takes them straight down
-                if (balance < -1.6f) Fall("blown off their feet");
+                if (balance < (grit > 1f ? -2.6f : -1.6f)) Fall("blown off their feet");
                 else if (balance < 0f) LoseBalance(flat, Mathf.Clamp01(-balance), "knocked off balance");
             }
         }
@@ -678,7 +678,7 @@ namespace Carl
                     float k = Mathf.SmoothStep(0f, 1f, getUpT / 1.8f);
                     upright = k;
                     targetH = Mathf.Lerp(0.45f, targetH, k);
-                    if (getUpT > 1.8f) mode = BodyMode.Standing;
+                    if (getUpT > 1.8f) { mode = BodyMode.Standing; if (grit > 1f) standGrace = 2.5f; }
                 }
 
                 // sinking onto a weak leg while the other foot is in the air
@@ -737,9 +737,12 @@ namespace Carl
                 float tilt = Vector3.Angle(pelvis.transform.up, Vector3.up);
                 bool settling = mode == BodyMode.GettingUp && getUpT < 2.5f;
                 // (you hold on through a bigger lurch over a lip or a body before it's a fall)
-                unstableTimer = tilt > (grit > 1f ? 58f : 42f) && !settling ? unstableTimer + dt : Mathf.Max(0f, unstableTimer - dt);
-                lowTimer = h < 0.5f && mode == BodyMode.Standing ? lowTimer + dt : 0f;
-                if (!sinking && (unstableTimer > (grit > 1f ? 0.6f : 0.35f) || lowTimer > (grit > 1f ? 1.2f : 0.6f))) Topple(unstableTimer > 0.35f ? "tilted" : "too low", 0.8f);
+                // (just back on your feet you are still finding them: a moment's grace before a lurch counts as a fall)
+                standGrace = Mathf.Max(0f, standGrace - dt);
+                bool graced = standGrace > 0f;
+                unstableTimer = tilt > (grit > 1f ? (graced ? 75f : 65f) : 42f) && !settling ? unstableTimer + dt : Mathf.Max(0f, unstableTimer - dt);
+                lowTimer = h < 0.5f && mode == BodyMode.Standing && !graced ? lowTimer + dt : 0f;
+                if (!sinking && (unstableTimer > (grit > 1f ? 0.9f : 0.35f) || lowTimer > (grit > 1f ? 1.8f : 0.6f))) Topple(unstableTimer > 0.35f ? "tilted" : "too low", 0.8f);
                 if (mode == BodyMode.GettingUp && getUpT > (grit > 1f ? 4f : 3f) && tilt > (grit > 1f ? 50f : 35f)) Topple("failed to get up", 0.6f);
                 IsCrawling = false;
             }

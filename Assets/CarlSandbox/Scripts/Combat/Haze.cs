@@ -12,6 +12,7 @@ namespace Carl
     /// </summary>
     public class Haze : MonoBehaviour
     {
+        void Awake() { useGUILayout = false; }   // (its OnGUI draws directly: no layout pass needed)
         struct Cloud
         {
             public Vector3 p, v;
@@ -36,7 +37,7 @@ namespace Carl
         public static float AtCamera { get; private set; }
         public static int Count => I != null ? I.count : 0;
         /// <summary>Everything thrown up is this much thinner than it was first tuned (it was hiding too much).</summary>
-        const float Thickness = 0.65f;
+        const float Thickness = 0.32f;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         static void ResetStatics() { I = null; ShelterHeight = -1000f; AtCamera = 0f; }
@@ -69,7 +70,7 @@ namespace Carl
             r.sharedMaterial = m;
             r.renderMode = ParticleSystemRenderMode.Billboard;
             r.sortMode = ParticleSystemSortMode.Distance;
-            r.maxParticleSize = 4f;
+            r.maxParticleSize = 0.5f;   // (a puff right at the lens covering the screen four times over was most of the GPU in a firefight)
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             r.receiveShadows = false;
             r.SetActiveVertexStreams(new List<ParticleSystemVertexStream> { ParticleSystemVertexStream.Position, ParticleSystemVertexStream.Color, ParticleSystemVertexStream.UV, ParticleSystemVertexStream.Center });
@@ -101,7 +102,7 @@ namespace Carl
         public static void DirtHit(Vector3 pos, Vector3 normal, float power)
         {
             power = Mathf.Clamp(power, 0.3f, 2.5f);
-            int n = 2 + Mathf.RoundToInt(power * 1.5f);
+            int n = 1 + Mathf.RoundToInt(power * 0.8f);
             for (int i = 0; i < n; i++)
                 Puff(pos + normal * Random.Range(0.1f, 0.35f) + Random.insideUnitSphere * 0.12f, normal * Random.Range(0.3f, 1.1f) * power + Random.insideUnitSphere * 0.3f,
                     Random.Range(0.22f, 0.38f) * Mathf.Sqrt(power), Random.Range(0.35f, 0.6f), Tint(DirtCol));

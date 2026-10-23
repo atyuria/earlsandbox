@@ -101,6 +101,7 @@ namespace Carl
         {
             float dt = Time.deltaTime;
             if (dt <= 0f || WorldFreeze.On) return;
+            using var _prof = Prof.Bullets.Auto();
             for (int i = live.Count - 1; i >= 0; i--)
             {
                 var p = live[i];
@@ -296,7 +297,9 @@ namespace Carl
                 Fx.Sparks(point, -dir, 8);
             }
             DamageModel.ProjectileExpand = p.expand;
+            Prof.Hit.Begin();
             float left = bp.body.damage.ApplyProjectile(bp, point, dir, energy, p.diam, p.kind, out Vector3 exit, out bool exited);
+            Prof.Hit.End();
             DamageModel.ProjectileExpand = 1f;
             if (!exited || left <= 5f) { p.alive = false; return false; }
             p.vel = dir * Mathf.Sqrt(2f * left / p.mass);
@@ -406,6 +409,7 @@ namespace Carl
         ParticleSystem sparks, dust, smoke, fire, debris, flame;
         readonly List<(Transform t, Material m, float age, float dur, float size)> waves = new List<(Transform, Material, float, float, float)>();
         readonly List<(Light l, float t, float dur, float max)> flashes = new List<(Light, float, float, float)>();
+        readonly Stack<Light> flashPool = new Stack<Light>();
 
         public static void Create()
         {
@@ -468,7 +472,7 @@ namespace Carl
         public static void Dust(Vector3 pos, Vector3 normal, int n)
         {
             if (I == null) return;
-            for (int i = 0; i < n * 3; i++)
+            for (int i = 0; i < n * 2; i++)
                 Emit(I.dust, pos + Random.insideUnitSphere * 0.02f, (normal + Random.insideUnitSphere * 0.6f).normalized * Random.Range(0.4f, 2.2f), Random.Range(0.02f, 0.07f), new Color(0.72f, 0.72f, 0.7f, 0.6f), Random.Range(0.4f, 1f));
         }
 
@@ -485,7 +489,7 @@ namespace Carl
         {
             if (I == null) return;
             power = Mathf.Clamp(power, 0.4f, 2.5f);
-            int n = 20 + (int)(26f * power);
+            int n = 8 + (int)(10f * power);
             for (int i = 0; i < n; i++)
             {
                 Vector3 v = (normal * Random.Range(0.6f, 1.6f) + Random.insideUnitSphere * 0.7f) * Random.Range(0.5f, 2f) * power;
@@ -521,7 +525,7 @@ namespace Carl
                 // blown along the surface, away from the muzzle, and lifted off it
                 Vector3 along = Vector3.ProjectOnPlane(hit.point - muzzle + dir * 0.3f, hit.normal).normalized;
                 Haze.BlastDust(hit.point, hit.normal, along, k);
-                int m = 5 + (int)(14f * k);
+                int m = 2 + (int)(5f * k);
                 for (int i = 0; i < m; i++)
                     Emit(I.dust, hit.point + Random.insideUnitSphere * 0.05f, (along * Random.Range(0.8f, 2.5f) + hit.normal * Random.Range(0.2f, 0.9f) + Random.insideUnitSphere * 0.4f) * k,
                         Random.Range(0.05f, 0.14f), new Color(0.5f, 0.42f, 0.32f, 0.5f), Random.Range(0.8f, 1.8f));
@@ -614,9 +618,11 @@ namespace Carl
         public static void Flash(Vector3 pos, float intensity, float range, float duration)
         {
             if (I == null) return;
-            var go = new GameObject("Flash");
-            go.transform.position = pos;
-            var l = go.AddComponent<Light>();
+            // (the lights are reused: a fresh object and light for every shot of a full-auto burst was garbage)
+            Light l = I.flashPool.Count > 0 ? I.flashPool.Pop() : null;
+            if (l == null) l = new GameObject("Flash").AddComponent<Light>();
+            l.gameObject.SetActive(true);
+            l.transform.position = pos;
             l.type = LightType.Point;
             l.color = new Color(1f, 0.75f, 0.45f);
             l.range = range;
@@ -643,7 +649,7 @@ namespace Carl
                 f.t += Time.deltaTime;
                 if (f.l == null || f.t >= f.dur)
                 {
-                    if (f.l) Destroy(f.l.gameObject);
+                    if (f.l) { f.l.gameObject.SetActive(false); flashPool.Push(f.l); }
                     flashes.RemoveAt(i);
                     continue;
                 }

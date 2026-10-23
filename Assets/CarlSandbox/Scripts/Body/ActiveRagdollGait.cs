@@ -131,7 +131,7 @@ namespace Carl
                 bool needStep = spd > 0.08f || balanceErr > 0.12f || yawErr > 35f;
                 // the feet could not get back under the body in time: it goes over
                 stepFailT = balanceErr > 0.65f ? stepFailT + dt : 0f;
-                if (stepFailT > 0.5f) { stepFailT = 0f; LoseBalance(vCur, 0.4f, "couldn't get a foot under"); }
+                if (stepFailT > (grit > 1f ? 0.9f : 0.5f)) { stepFailT = 0f; LoseBalance(vCur, grit > 1f ? 0.2f : 0.4f, "couldn't get a foot under"); }
 
                 Leg pick = null; float bestScore = 0.06f;
                 foreach (var l in legs)

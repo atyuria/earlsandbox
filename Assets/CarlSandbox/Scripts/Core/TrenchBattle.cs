@@ -33,13 +33,25 @@ namespace Carl
         /// <summary>Gives every armed man on the map his job for the mode.</summary>
         void Assign()
         {
+            // of the men going across, only one or two (per side) climb out and cross the open: the rest work
+            // their way over along the communication trenches
+            int[] overTop = new int[2];
+            int[] allowed = { Random.Range(1, 3), Random.Range(1, 3) };
+            foreach (var g in EarlGunner.All)
+                if (g != null && g.assault && g.overTheTop && g.Fighting && g.team >= 0 && g.team < 2) overTop[g.team]++;
             foreach (var g in EarlGunner.All)
             {
                 if (g == null) continue;
                 bool attacker = Attacking ? g.team == Teams.Friendly : g.team == Teams.Enemy;
+                bool wasAssault = g.assault;
                 g.assault = attacker && !g.medic;
                 g.defend = !attacker;
-                if (g.assault && g.team == Teams.Enemy) g.overTheTop = Random.value < 0.5f;
+                if (g.assault && !wasAssault && g.team >= 0 && g.team < 2)
+                {
+                    g.overTheTop = overTop[g.team] < allowed[g.team];
+                    if (g.overTheTop) overTop[g.team]++;
+                }
+                else if (!g.assault) g.overTheTop = false;
                 if (g.defend && g.holdPoint == Vector3.zero && g.Body != null) g.holdPoint = g.Body.Pelvis.transform.position - Vector3.up * 0.95f;
             }
         }

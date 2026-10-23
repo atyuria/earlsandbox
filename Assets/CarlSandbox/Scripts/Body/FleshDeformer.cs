@@ -20,6 +20,15 @@ namespace Carl
         int normalFrame;
         float maxDent;
 
+        readonly System.Collections.Generic.List<int> moving = new System.Collections.Generic.List<int>();
+        bool[] isMoving;
+        static int normalsFrame, normalsLeft;
+        /// <summary>Slow motion on (T): only then does the flesh spring and wobble after a hit.</summary>
+        static bool SlowMo => Time.timeScale > 0f && Time.timeScale < 0.9f;
+        const int SimBudget = 10000;
+        static int simFrame, simLeft;
+        float owed;
+        void Mark(int i) { if (isMoving == null || isMoving.Length != cur.Length) isMoving = new bool[cur.Length]; if (!isMoving[i]) { isMoving[i] = true; moving.Add(i); } }
         const float Stiffness = 420f;
         const float Damping = 14f;
 
@@ -209,10 +218,11 @@ namespace Carl
                     if (off.magnitude > maxDent) off = off.normalized * maxDent;
                     target[i] = rest[i] + off;
                     touched.Add(i);
+                    Mark(i);
                 }
                 // wider soft wobble ring
                 float fw = Mathf.Clamp01(1f - d / (radius * 2f));
-                vel[i] += localDir * wobble * fw * fw;
+                if (SlowMo && fw > 0f) { vel[i] += localDir * wobble * fw * fw; Mark(i); }
             }
             active = true;
             UpdateExposure();
@@ -277,7 +287,8 @@ namespace Carl
         public void Jiggle(Vector3 localDir, float amount)
         {
             if (rest == null) return;
-            for (int i = 0; i < vel.Length; i++) vel[i] += localDir * amount * (0.6f + 0.4f * Mathf.Sin(i * 1.7f));
+            if (!SlowMo) return;   // (no wobble at full speed)
+            for (int i = 0; i < vel.Length; i++) { vel[i] += localDir * amount * (0.6f + 0.4f * Mathf.Sin(i * 1.7f)); Mark(i); }
             active = true;
         }
 
@@ -334,6 +345,8 @@ namespace Carl
             return colors[bi].r;
         }
 
+        static readonly Unity.Profiling.ProfilerMarker mSim = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Sim"), mUp = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Upload"), mNorm = new Unity.Profiling.ProfilerMarker("Carl.Flesh.Normals");
+
         void LateUpdate()
         {
             if (colorsDirty && mesh)
@@ -347,27 +360,59 @@ namespace Carl
                 exposedDirty = false;
             }
             if (!active || rest == null) return;
-            float dt = Mathf.Min(Time.deltaTime, 1f / 30f);
+            // at full speed there is no wobble: a dent goes straight to its shape. The springing flesh is only
+            // simulated in slow motion, where you can actually see it (and the frame can afford it)
+            if (!SlowMo)
+            {
+                for (int k = 0; k < moving.Count; k++) { int i = moving[k]; cur[i] = target[i]; vel[i] = Vector3.zero; isMoving[i] = false; }
+                moving.Clear();
+                mesh.vertices = cur;
+                // the shading: a few parts a frame (the rest keep their old shading a frame or two longer)
+                if (normalsFrame != Time.frameCount) { normalsFrame = Time.frameCount; normalsLeft = 4; }
+                if (normalsLeft <= 0) return;
+                normalsLeft--;
+                UpdateNormals();
+                mesh.RecalculateBounds();
+                active = false;
+                FollowLayers();
+                return;
+            }
+            // a frame's worth of flesh to spring back is shared out: past it, a part waits a frame and catches up
+            // with the time it missed (a blast sets every vertex on every body wobbling at once)
+            if (simFrame != Time.frameCount) { simFrame = Time.frameCount; simLeft = SimBudget; }
+            if (simLeft <= 0 && owed < 0.1f) { owed += Time.deltaTime; return; }
+            simLeft -= moving.Count;
+            float dt = Mathf.Min(Time.deltaTime + owed, 1f / 15f);
+            owed = 0f;
             if (dt <= 0) return;
             float maxV = 0f;
-            int steps = 2;
+            mSim.Begin();
+            int steps = dt > 1f / 30f ? 4 : 2;
             float h = dt / steps;
+            // only the vertices still springing back (the dented and wobbling ones), not the whole mesh
             for (int s = 0; s < steps; s++)
-            {
-                for (int i = 0; i < cur.Length; i++)
+                for (int k = 0; k < moving.Count; k++)
                 {
+                    int i = moving[k];
                     Vector3 a = (target[i] - cur[i]) * Stiffness - vel[i] * Damping;
                     vel[i] += a * h;
                     cur[i] += vel[i] * h;
                 }
-            }
-            for (int i = 0; i < cur.Length; i++)
+            for (int k = moving.Count - 1; k >= 0; k--)
             {
+                int i = moving[k];
                 float v = vel[i].sqrMagnitude;
                 if (v > maxV) maxV = v;
+                // settled: put it exactly where it rests and stop working on it
+                if (v < 1e-8f && (target[i] - cur[i]).sqrMagnitude < 1e-9f) { cur[i] = target[i]; vel[i] = Vector3.zero; isMoving[i] = false; moving[k] = moving[moving.Count - 1]; moving.RemoveAt(moving.Count - 1); }
             }
+            mSim.End(); mUp.Begin();
             mesh.vertices = cur;
-            if (++normalFrame % 2 == 0) UpdateNormals();
+            mUp.End(); mNorm.Begin();
+            // the shading follows a frame or two behind: only a few parts work out their normals each frame
+            if (normalsFrame != Time.frameCount) { normalsFrame = Time.frameCount; normalsLeft = 4; }
+            if (++normalFrame % 2 == 0 && normalsLeft > 0) { normalsLeft--; UpdateNormals(); }
+            mNorm.End();
             if (maxV < 1e-6f)
             {
                 UpdateNormals();

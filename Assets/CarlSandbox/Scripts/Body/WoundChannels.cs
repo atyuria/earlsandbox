@@ -50,13 +50,17 @@ namespace Carl
             return wc;
         }
 
+float nextRebuild;
         public void MarkDirty() => dirty = true;   // rebuilt once in LateUpdate, however many wounds a blast adds
 
         void LateUpdate()
         {
             if (!dirty || part == null || part.flesh == null) return;
+            // at most every eighth of a second: full auto into one part rebuilt the whole channel mesh every hit
+            if (Time.time < nextRebuild) return;
+            nextRebuild = Time.time + 0.12f;
             dirty = false;
-            Rebuild();
+            using (Prof.Channels.Auto()) Rebuild();
         }
 
         // rim vertices snapped onto the skin, cached per hole (snapping searches the whole mesh)

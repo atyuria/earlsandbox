@@ -119,11 +119,15 @@ namespace Carl
         // ------------------------------------------------------------ the player
 
         /// <summary>Line of sight from a point to the player, through bodies and loose objects but not walls.</summary>
+        static readonly RaycastHit[] clearBuf = new RaycastHit[32];
         public static bool Clear(Vector3 from, Vector3 to, HumanBody self)
         {
             Vector3 d = to - from; float len = d.magnitude;
-            foreach (var hit in Physics.RaycastAll(from, d / Mathf.Max(1e-4f, len), len, ~0, QueryTriggerInteraction.Ignore))
+            // (no garbage: every Earl checks this several times a second)
+            int n = Physics.RaycastNonAlloc(from, d / Mathf.Max(1e-4f, len), clearBuf, len, ~0, QueryTriggerInteraction.Ignore);
+            for (int i = 0; i < n; i++)
             {
+                var hit = clearBuf[i];
                 if (hit.collider is CharacterController) continue;
                 var hb = hit.collider.GetComponentInParent<HumanBody>();
                 if (hb != null) continue;

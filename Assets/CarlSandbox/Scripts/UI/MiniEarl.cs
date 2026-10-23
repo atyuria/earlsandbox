@@ -11,6 +11,7 @@ namespace Carl
     /// </summary>
     public class MiniEarl : MonoBehaviour
     {
+        void Awake() { useGUILayout = false; }   // (its OnGUI draws directly: no layout pass needed)
         Texture2D round, drop;
         GUIStyle tiny;
 

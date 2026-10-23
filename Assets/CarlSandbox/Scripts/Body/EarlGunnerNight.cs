@@ -96,8 +96,6 @@ namespace Carl
 
         // ------------------------------------------------------------ the battle
 
-        Vector3? via;
-        bool viaDone;
 
         /// <summary>Their front line's band of z (yours is below zero, theirs above).</summary>
         bool InTheirLine(Vector3 p) => team == Teams.Friendly ? p.z > 16f : p.z < -16f;

@@ -29,7 +29,7 @@ namespace Carl
         float playerYaw;
         bool slowMo, showHelp = true;
         readonly List<(string msg, float until)> toasts = new List<(string, float)>();
-        GUIStyle hudCard, hudSmall, hudBig, hudCenter, hudBar, hudBarSel, hudLabel;
+        GUIStyle hudCard, hudSmall, hudBig, hudCenter, hudBar, hudBarSel, hudLabel, hudGun, hudHelp;
         Texture2D scopeTex;
         float fpsSmooth = 60f;
         const float BaseFixedDt = 0.01f;
@@ -46,6 +46,9 @@ namespace Carl
         {
             Instance = this;
             Time.fixedDeltaTime = BaseFixedDt;
+            // no physics death spiral: a slow frame may catch up at most 4 physics steps (past that, the world runs a
+            // touch slower for that moment instead of every following frame getting slower and slower)
+            Time.maximumDeltaTime = 0.04f;
             Time.timeScale = 1f;
             Physics.defaultMaxAngularSpeed = 50f;
 
@@ -75,11 +78,8 @@ namespace Carl
             SquadCommand.Attach(gameObject);
             menus = gameObject.AddComponent<Menus>();
             menus.Init(this);
-            // a map behind the main menu (with nobody on it) while you choose
-            bool npcs = GameSettings.SpawnNpcs; GameSettings.SpawnNpcs = false;
-            LoadMap(Mathf.Clamp(PlayerPrefs.GetInt("earl.map", 0), 0, MapBuilder.Names.Length - 1));
-            GameSettings.SpawnNpcs = npcs;
-            menus.OpenMain();
+            // the game starts on the main menu: nothing is loaded until you choose a map and press PLAY
+            ToMainMenu();
         }
 
         Light sun;
@@ -175,8 +175,38 @@ namespace Carl
             RenderSettings.fog = false;
         }
 
+        GameObject menuCam;
+        /// <summary>On the main menu: no map, no you, no Earls (just the menu page).</summary>
+        public bool InMenu { get; private set; }
+
+        /// <summary>Out of the game to the main menu page: the map, everyone on it and your body are all gone.</summary>
+        public void ToMainMenu()
+        {
+            WorldFreeze.Set(false);
+            ClearAll();
+            TrenchBattle.Stop();
+            if (FpvDrone.Piloting != null) FpvDrone.Piloting.End("SIGNAL LOST");
+            if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); mapRoot = null; }
+            if (PlayerAvatar.Body != null) { HumanBody.All.Remove(PlayerAvatar.Body); Destroy(PlayerAvatar.Body.gameObject); PlayerAvatar.Body = null; }
+            player.gameObject.SetActive(false);
+            // a plain camera (and ears) while there is no world: the menu page covers the screen
+            if (menuCam == null)
+            {
+                menuCam = new GameObject("MenuCamera");
+                var c = menuCam.AddComponent<Camera>();
+                c.clearFlags = CameraClearFlags.SolidColor; c.backgroundColor = new Color(0.03f, 0.035f, 0.045f); c.cullingMask = 0;
+                menuCam.AddComponent<AudioListener>();
+            }
+            menuCam.SetActive(true);
+            InMenu = true;
+            menus.OpenMain();
+        }
+
         public void LoadMap(int index)
         {
+            InMenu = false;
+            if (menuCam != null) menuCam.SetActive(false);
+            player.gameObject.SetActive(true);
             WorldFreeze.Set(false);
             ClearAll();
             if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); }   // (gone now: the new map is laid out against what is there)
@@ -268,6 +298,8 @@ namespace Carl
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
+            // the HUD draws directly; only the menus need IMGUI's layout pass
+            useGUILayout = menus != null && menus.IsOpen;
 
             // the main menu (what you boot into): nothing else answers the keys until you press PLAY
             if (menus.open == MenuKind.Main) { WorldFreeze.Set(false); WorldFreeze.Tick(); return; }
@@ -506,6 +538,8 @@ namespace Carl
 
         void OnGUI()
         {
+            // the main menu page: nothing of the game behind it
+            if (menus != null && menus.open == MenuKind.Main) { GUI.depth = -200; menus.Draw(); return; }
             DrawHud();
             if (menus != null) menus.Draw();
         }
@@ -608,7 +642,7 @@ namespace Carl
             GUI.Box(new Rect(W - 230, H - 96, 214, 82), GUIContent.none, hudCard);
             GUI.Label(new Rect(W - 330, H - 64, 300, 50), weapons.AmmoText, hudBig);
             string fm = weapons.Armed ? weapons.FireMode(weapons.current) : "";
-            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Armed ? weapons.Current.name + (fm != "" ? "  ·  " + fm : "") : "", new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } });
+            GUI.Label(new Rect(W - 330, H - 88, 300, 20), weapons.Armed ? weapons.Current.name + (fm != "" ? "  ·  " + fm : "") : "", (hudGun ??= new GUIStyle(hudSmall) { alignment = TextAnchor.LowerRight, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) } }));
 
             if (showHelp && medical.selected == null && (menus == null || !menus.IsOpen))
             {
@@ -625,7 +659,7 @@ namespace Carl
                     "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
                     "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse";
                 GUI.Box(new Rect(12, 12, 620, 196), GUIContent.none, hudCard);
-                GUI.Label(new Rect(26, 22, 600, 180), help, new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 });
+                GUI.Label(new Rect(26, 22, 600, 180), help, (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 }));
             }
         }
     }

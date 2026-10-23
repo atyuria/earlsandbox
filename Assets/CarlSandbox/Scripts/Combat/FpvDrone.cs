@@ -15,6 +15,7 @@ namespace Carl
     /// </summary>
     public class FpvDrone : MonoBehaviour
     {
+        void Awake() { useGUILayout = false; }   // (its OnGUI draws directly: no layout pass needed)
         public enum Kind { Kamikaze, Bomber }
         public static FpvDrone Piloting;
         public static Kind Selected = Kind.Kamikaze;

@@ -136,11 +136,24 @@ namespace Carl
             g.transform.localRotation = Quaternion.Euler(tilt.x, yaw, tilt.z);
             g.transform.localScale = Vector3.one * scale;
             foreach (var mr in g.GetComponentsInChildren<MeshRenderer>()) mr.sharedMaterials = PropMaterials(id, mr.sharedMaterials);
+            // one box round the whole prop for its collision (the scanned meshes run to 100k triangles, and the
+            // bodies rolling about on them were most of the physics time); small bits and plants cast no shadow
+            var w2l = g.transform.worldToLocalMatrix;
+            Bounds box = default; bool any = false;
             foreach (var mf in g.GetComponentsInChildren<MeshFilter>())
             {
-                if (solid) mf.gameObject.AddComponent<MeshCollider>().sharedMesh = mf.sharedMesh;
                 mf.gameObject.isStatic = true;
+                if (mf.sharedMesh == null) continue;
+                var b = mf.sharedMesh.bounds; var m = w2l * mf.transform.localToWorldMatrix;
+                for (int c = 0; c < 8; c++)
+                {
+                    var p = m.MultiplyPoint3x4(new Vector3((c & 1) == 0 ? b.min.x : b.max.x, (c & 2) == 0 ? b.min.y : b.max.y, (c & 4) == 0 ? b.min.z : b.max.z));
+                    if (!any) { box = new Bounds(p, Vector3.zero); any = true; } else box.Encapsulate(p);
+                }
             }
+            if (solid && any) { var bc = g.AddComponent<BoxCollider>(); bc.center = box.center; bc.size = box.size; }
+            if (!solid || box.size.magnitude * scale < 0.9f)
+                foreach (var mr in g.GetComponentsInChildren<MeshRenderer>()) mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             return g;
         }
 
@@ -207,6 +220,9 @@ namespace Carl
             // the trenches: an overcast grey haze
             RenderSettings.fog = index == 3;
             if (index == 3) { RenderSettings.fogMode = FogMode.ExponentialSquared; RenderSettings.fogDensity = 0.014f; RenderSettings.fogColor = new Color(0.62f, 0.63f, 0.6f); }
+            // thin debris (twigs, wire strands, splinters) casts no shadow: hundreds of them, too fine to see
+            foreach (var mr in root.GetComponentsInChildren<MeshRenderer>())
+                if (mr.name == "Twig" || mr.name == "Strand" || mr.name == "Splinter") mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             Batch(root);
             return root;
         }
@@ -619,7 +635,9 @@ namespace Carl
             var enemy = data.lines.Find(l => l.kind == 1).pts;
             Vector2 sp = Vector2.Lerp(friendly[friendly.Length / 2], friendly[friendly.Length / 2 + 1], 0.5f);
             spawn = new Vector3(sp.x, H(sp.x, sp.y) + 0.1f, sp.y);
-            yaw = 0f;
+            // facing along the trench, not into its wall a step away (the gun and arms rammed into the boards)
+            Vector2 along = friendly[friendly.Length / 2 + 1] - friendly[friendly.Length / 2];
+            yaw = along.sqrMagnitude > 0.01f ? Mathf.Atan2(along.x, along.y) * Mathf.Rad2Deg : 0f;
             // the trench system is held by armed Earls (TrenchSquad): every spot along every trench floor, every
             // fighting position and dugout, is somewhere one of them could be
             TrenchSpots.Clear();

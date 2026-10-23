@@ -89,9 +89,17 @@ namespace Carl
             g.enabled = true;
         }
 
+        bool scannedLast = true;
+
         void LateUpdate()
         {
             foreach (var h in HumanBody.All) h.SetXray(on || h.forceXray);
+            // the armour pass is only needed while something is being scanned (and one frame after, to put it back)
+            bool anyForce = false;
+            foreach (var h in HumanBody.All) if (h != null && h.forceXray) { anyForce = true; break; }
+            bool scanNow = on || anyForce;
+            if (!scanNow && !scannedLast) { hoverLabel = null; return; }
+            scannedLast = scanNow;
             visited.Clear();
             foreach (var a in ArmourSystem.All)
                 if (a != null && a.part != null && a.part.body != null)

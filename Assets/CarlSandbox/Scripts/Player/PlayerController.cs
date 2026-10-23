@@ -132,7 +132,8 @@ namespace Carl
             }
             float roll = (Mathf.PerlinNoise(t * 0.4f, 5f) - 0.5f) * wob * 25f + (down && PlayerAvatar.Body == null ? 14f : 0f);   // in a body the head lies how it lies
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x, shakeOff.y, shakeOff.z + roll);
+            cam.transform.localRotation = Quaternion.Euler(pitch + shakeOff.x, shakeOff.y, shakeOff.z + roll)
+                * Quaternion.Euler(-WeaponController.BlindLook.y, WeaponController.BlindLook.x, 0f);   // (ALT + A / D: looking where the gun is pointing round the corner)
             var avatar = GetComponent<PlayerAvatar>();
             bool hasBody = avatar != null && PlayerAvatar.Body != null;
             // dead or out cold: no control at all

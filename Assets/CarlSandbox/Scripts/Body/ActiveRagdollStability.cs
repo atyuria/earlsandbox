@@ -65,7 +65,9 @@ namespace Carl
             flat.Normalize();
             float recover = Mathf.Clamp01(Steadiness * 0.95f + will * 0.15f - severity * 0.35f);
             // you: unless really hurt, a push or a misstep is a stagger, not a fall
-            if (grit > 1f) recover = Mathf.Max(recover, Mathf.Clamp01(Steadiness * 1.15f - severity * 0.2f));
+            if (grit > 1f) recover = Mathf.Max(recover, Mathf.Clamp01(Steadiness * 1.4f - severity * 0.15f));
+            // just back up: you stagger, you don't go straight back down
+            if (grit > 1f && standGrace > 0f && physio.CanStand) recover = 1f;
             if (CriticalCollapse) recover = 0f;
             if (Random.value < recover)
             {
@@ -84,6 +86,8 @@ namespace Carl
         bool sinkRolled;
         Vector3 sinkDir;
         float getUpPenalty;
+        /// <summary>Seconds of grace left after you got back on your feet (you, not the Earls).</summary>
+        [HideInInspector] public float standGrace;
         float swaySeed;
 
         // wall bracing
@@ -316,7 +320,7 @@ namespace Carl
             float p = Mathf.Pow(u, 1.6f) * 0.16f + panic * 0.006f * gaitRun + physio.Clumsiness * 0.05f;
             p *= Mathf.Lerp(0.5f, 1.4f, Mathf.InverseLerp(0.5f, 4f, spd));
             // you watch where you put your feet: far fewer missteps
-            if (grit > 1f) p *= 0.15f;
+            if (grit > 1f) p *= standGrace > 0f ? 0f : 0.05f;
             if (Random.value > p) return;
             // the foot catches: a short, crossed step, and the body pitches over it
             Vector3 short_ = l.from + (l.to - l.from) * Random.Range(0.15f, 0.45f);
@@ -393,7 +397,7 @@ namespace Carl
             if (mode != BodyMode.GettingUp || sinking) return;
             // a hurt person's attempt can fail partway up
             helpUp = Mathf.Max(0f, helpUp - dt * 0.5f);
-            if (getUpT > 0.4f && helpUp < 0.2f && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit) * (grit > 1f ? 0.2f : 1f))
+            if (getUpT > 0.4f && helpUp < 0.2f && !(grit > 1f && Steadiness > 0.6f) && Random.value < Unsteady * Unsteady * dt * 1.2f / (grit * grit) * (grit > 1f ? 0.2f : 1f))
             {
                 getUpPenalty += 1.5f;
                 Topple("failed to get up", 0.3f);

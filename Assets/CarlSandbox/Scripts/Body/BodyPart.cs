@@ -102,6 +102,10 @@ namespace Carl
 
         Vector3 lastSmearPos;
         float lastImpactTime;
+        /// <summary>When this body was made: for its first moments it is still being set down and settled (spawned
+        /// against a wall, the boards of a trench), and the world can't hurt it.</summary>
+        float born;
+        void Awake() { born = Time.time; }
 
         public string Name => Anatomy.PartName(id);
         public float OutRate { get { float r = 0; foreach (var w in wounds) r += w.extRate; return r; } }
@@ -138,6 +142,7 @@ namespace Carl
                 // gets hurt by the world
                 if (other == null && body.ragdoll != null && body.ragdoll.mode != BodyMode.Down && speed < 7f) return;
             }
+            if (other == null && Time.time - born < 2f) return;
             if (speed < ImpactHurtSpeed || Time.time - lastImpactTime < 0.15f) return;
             lastImpactTime = Time.time;
             var cp = c.GetContact(0);
@@ -309,7 +314,7 @@ namespace Carl
                     holeShapes[join] = new Vector4(sv.x, sv.y, sv.z, sh.w);
                     holeTimes[join] = Time.time;
                     if (flesh != null) flesh.Dent(nc, (Vector3)ax, nr * 1.6f, nr * 0.3f, 0.3f);
-                    PushHoles();
+                    { using (Prof.Holes.Auto()) PushHoles(); }
                     return;
                 }
             }
@@ -341,7 +346,7 @@ namespace Carl
                 Vector4 ax = holeAxes[n]; ax.w = Mathf.Min(MaxHoleDepth, Mathf.Max(ax.w, depth));
                 holeAxes[n] = ax;
                 holeTimes[n] = Time.time;
-                PushHoles();
+                { using (Prof.Holes.Auto()) PushHoles(); }
                 return;
             }
 
@@ -355,7 +360,7 @@ namespace Carl
             holeShapes.Add(new Vector4(sdir.x, sdir.y, sdir.z, Random.Range(0f, 97f)));
             holeTimes.Add(Time.time);
             body.EnsureInterior(this);
-            PushHoles();
+            { using (Prof.Holes.Auto()) PushHoles(); }
         }
 
         /// <summary>
@@ -377,7 +382,7 @@ namespace Carl
                 holeShapes[i] = new Vector4(sv.normalized.x, sv.normalized.y, sv.normalized.z, 0f) * (len / nw) + new Vector4(0, 0, 0, holeShapes[i].w);
                 Vector4 ax = holeAxes[i]; ax.w = Mathf.Min(MaxHoleDepth, Mathf.Max(ax.w, depth)); holeAxes[i] = ax;
                 holeTimes[i] = Time.time;
-                PushHoles();
+                { using (Prof.Holes.Auto()) PushHoles(); }
                 return true;
             }
             return false;
@@ -478,6 +483,8 @@ namespace Carl
             if (skinMaterial) { skinMaterial.SetTexture(HoleTexId, holeTex); skinMaterial.SetFloat(HoleCountId, holes.Count); }
             foreach (var fm in fleshMaterials) { fm.SetTexture(HoleTexId, holeTex); fm.SetFloat(HoleCountId, holes.Count); }
             if (fleshRoot) fleshRoot.gameObject.SetActive(holes.Count > 0 && !body.XrayVisible);
+            // the organs inside are only ever seen through a hole: until there is one, they aren't drawn at all
+            if (revealRoot) revealRoot.gameObject.SetActive((holes.Count > 0 || severed) && !body.XrayVisible);
             if (revealMaterial) { revealMaterial.SetTexture(HoleTexId, holeTex); revealMaterial.SetFloat(HoleCountId, holes.Count); revealMaterial.SetMatrix("_PartW2L", transform.worldToLocalMatrix); }
             if (channels == null && flesh != null) channels = WoundChannels.Create(this);
             if (channels != null) channels.MarkDirty();

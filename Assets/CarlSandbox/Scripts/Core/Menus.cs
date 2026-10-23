@@ -292,7 +292,7 @@ namespace Carl
 
         // ------------------------------------------------------------ the main menu (what the game boots into)
         int mainMap = -1;
-        bool mainSettings;
+
         Vector2 mainScroll;
 
         /// <summary>Back to the main menu: choose a map, the time of day, who is on it, then PLAY.</summary>
@@ -300,7 +300,7 @@ namespace Carl
         {
             open = MenuKind.Main;
             LastMenuFrame = Time.frameCount;
-            if (mainMap < 0) mainMap = game.mapIndex;
+            if (mainMap < 0) mainMap = Mathf.Clamp(PlayerPrefs.GetInt("earl.map", 0), 0, MapBuilder.Names.Length - 1);
             if (stage != null) stage.SetActive(false);
             if (ghost) ghost.SetActive(false);
             ApplyCursor();
@@ -313,62 +313,111 @@ namespace Carl
             "A street of houses with gardens, rooms to clear and cars parked out front.",
             "Zig-zag trenches in a shelled tree line either side of no-man's-land, held by armed squads.",
         };
+        int mainPage;                      // 0 play (map and setup), 1 settings
+        static Texture2D menuBg;
 
+        /// <summary>
+        /// The main menu page (what the game starts on; nothing is loaded behind it): PLAY, SETTINGS and QUIT
+        /// down the left; on the right the map to load (one card each), the time of day, whether there are Earls,
+        /// and on the trenches which side of the battle you're on - then START loads it.
+        /// </summary>
         void DrawMain()
         {
-            float pw = Mathf.Min(760f, Screen.width - 40f), ph = Mathf.Min(660f, Screen.height - 30f);
-            panel = new Rect(Screen.width / 2 - pw / 2, Screen.height / 2 - ph / 2, pw, ph);
-            panel2 = default;
-            GUILayout.BeginArea(panel, card);
-            GUILayout.Label("EARL SANDBOX", new GUIStyle(title) { fontSize = 34 });
-            GUILayout.Label("Choose where, when and who's there, then PLAY.", sub);
-            mainScroll = GUILayout.BeginScrollView(mainScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
-            Section("MAP");
-            GUILayout.BeginHorizontal();
-            for (int m = 0; m < MapBuilder.Names.Length; m++) if (Chip(MapBuilder.Names[m], mainMap == m, 0f, 40f)) mainMap = m;
-            GUILayout.EndHorizontal();
-            GUILayout.Label(MapBlurb[Mathf.Clamp(mainMap, 0, MapBlurb.Length - 1)], small);
-            Section("TIME OF DAY");
-            GUILayout.BeginHorizontal();
-            string[] tod = { "DAY", "DUSK", "NIGHT" };
-            for (int t = 0; t < 3; t++) if (Chip(tod[t], GameSettings.TimeOfDay == t, 0f, 34f)) GameSettings.TimeOfDay = t;
-            GUILayout.EndHorizontal();
-            GUILayout.Label(GameSettings.TimeOfDay == 2
-                ? "Dark. Earls carry torches but keep them off most of the time so they don't give themselves away; they see by your light, your muzzle flash and the noise you make."
-                : GameSettings.TimeOfDay == 1 ? "The sun low and red, long shadows, getting dark." : "Full daylight.", small);
-            Section("EARLS");
-            Check("SPAWN EARLS (NPCS)", ref GameSettings.SpawnNpcs);
-            GUILayout.Label(GameSettings.SpawnNpcs ? "The map is peopled: Earls standing about, or squads holding the trenches." : "An empty map: just you (spawn your own with F).", small);
-            if (mainMap == 3 && GameSettings.SpawnNpcs)
+            float W = Screen.width, H = Screen.height;
+            panel = new Rect(0, 0, W, H); panel2 = default;
+            // the page: dark, a little lighter toward the top, an orange stripe down the left
+            if (menuBg == null)
             {
-                Section("TRENCHES: YOUR SIDE");
-                GUILayout.BeginHorizontal();
-                if (Chip("DEFEND YOUR TRENCH", !GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = false;
-                if (Chip("ATTACK THEIR TRENCH", GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = true;
-                GUILayout.EndHorizontal();
-                GUILayout.Label(GameSettings.TrenchAttack
-                    ? "You and your squad go across: some over the top, some up the communication trench in the middle, into theirs. They hold it."
-                    : "You and your squad hold your line. They come across at you: some over the top through no-man's-land, some up the trench in the middle.", small);
+                menuBg = new Texture2D(1, 64) { wrapMode = TextureWrapMode.Clamp };
+                for (int y = 0; y < 64; y++) menuBg.SetPixel(0, y, Color.Lerp(new Color(0.025f, 0.028f, 0.036f), new Color(0.075f, 0.082f, 0.1f), y / 63f));
+                menuBg.Apply();
             }
-            Section("SETTINGS");
-            if (Chip(mainSettings ? "▾  HIDE SETTINGS" : "▸  SHOW SETTINGS", mainSettings, 0f, 30f)) mainSettings = !mainSettings;
-            if (mainSettings)
+            GUI.color = Color.white;
+            GUI.DrawTexture(new Rect(0, 0, W, H), menuBg, ScaleMode.StretchToFill);
+            GUI.color = Accent; GUI.DrawTexture(new Rect(0, 0, 6, H), white); GUI.color = Color.white;
+
+            float left = 56f, top = 54f, navW = 260f;
+            GUI.Label(new Rect(left, top, 700, 60), "EARL SANDBOX", new GUIStyle(title) { fontSize = 46 });
+            GUI.Label(new Rect(left + 3, top + 58, 700, 22), "A gore and ragdoll sandbox. Pick a map and go.", new GUIStyle(sub) { fontSize = 13 });
+
+            // ---- left: the menu
+            GUILayout.BeginArea(new Rect(left, top + 120, navW, H - top - 160));
+            if (GUILayout.Button("PLAY", mainPage == 0 ? bigOn : big, GUILayout.Height(52))) mainPage = 0;
+            GUILayout.Space(6);
+            if (GUILayout.Button("SETTINGS", mainPage == 1 ? bigOn : big, GUILayout.Height(52))) mainPage = 1;
+            GUILayout.Space(6);
+            if (GUILayout.Button("QUIT", big, GUILayout.Height(52))) Application.Quit();
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("In game: ESC for settings and back to this menu.", small);
+            GUILayout.EndArea();
+
+            // ---- right: what the selected page holds
+            var pr = new Rect(left + navW + 40, top + 120, Mathf.Min(W - (left + navW + 40) - 56, 900f), Mathf.Min(H - top - 230, 620f));
+            GUILayout.BeginArea(pr, card);
+            mainScroll = GUILayout.BeginScrollView(mainScroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+            if (mainPage == 0)
             {
+                Section("MAP");
+                for (int row = 0; row < 2; row++)
+                {
+                    GUILayout.BeginHorizontal();
+                    for (int col = 0; col < 2; col++)
+                    {
+                        int m = row * 2 + col;
+                        if (m >= MapBuilder.Names.Length) break;
+                        var txt = MapBuilder.Names[m] + "\n" + "<size=11>" + MapBlurb[m] + "</size>";
+                        var st = new GUIStyle(mainMap == m ? bigOn : big) { richText = true, wordWrap = true, alignment = TextAnchor.UpperLeft, padding = new RectOffset(14, 14, 12, 12) };
+                        if (GUILayout.Button(txt, st, GUILayout.Height(84), GUILayout.Width((pr.width - 48f) * 0.5f))) mainMap = m;
+                    }
+                    GUILayout.EndHorizontal();
+                }
+                Section("TIME OF DAY");
+                GUILayout.BeginHorizontal();
+                string[] tod = { "DAY", "DUSK", "NIGHT" };
+                for (int t = 0; t < 3; t++) if (Chip(tod[t], GameSettings.TimeOfDay == t, 0f, 34f)) GameSettings.TimeOfDay = t;
+                GUILayout.EndHorizontal();
+                GUILayout.Label(GameSettings.TimeOfDay == 2
+                    ? "Dark. Earls carry torches but keep them off most of the time so they don't give themselves away; they see by your light, your muzzle flash and the noise you make."
+                    : GameSettings.TimeOfDay == 1 ? "The sun low and red, long shadows, getting dark." : "Full daylight.", small);
+                Section("EARLS");
+                Check("SPAWN EARLS (NPCS)", ref GameSettings.SpawnNpcs);
+                GUILayout.Label(GameSettings.SpawnNpcs ? "The map is peopled: Earls standing about, or squads holding the trenches." : "An empty map: just you (spawn your own with F).", small);
+                if (mainMap == 3 && GameSettings.SpawnNpcs)
+                {
+                    Section("TRENCHES: YOUR SIDE");
+                    GUILayout.BeginHorizontal();
+                    if (Chip("DEFEND YOUR TRENCH", !GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = false;
+                    if (Chip("ATTACK THEIR TRENCH", GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = true;
+                    GUILayout.EndHorizontal();
+                    GUILayout.Label(GameSettings.TrenchAttack
+                        ? "You and your squad go across, most of you along the communication trenches, one or two over the top. They hold their line."
+                        : "You and your squad hold your line. They come across at you in waves, most along the trenches, one or two over the top.", small);
+                }
+            }
+            else
+            {
+                Section("GRAPHICS");
                 Graphics();
+                Section("CONTROLS");
                 GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
+                Section("AUDIO");
                 GameSettings.Volume = Slider("MASTER VOLUME", Mathf.RoundToInt(GameSettings.Volume * 100f) + "%", GameSettings.Volume, 0f, 1f);
+                Check("EARL VOICES", ref GameSettings.DummyVoices);
+                Section("BLOOD");
                 GameSettings.BloodQuality = Slider("BLOOD QUALITY", GameSettings.QualityName, GameSettings.BloodQuality, 0f, 1f);
                 GameSettings.BloodAmount = Slider("BLOOD AMOUNT", GameSettings.AmountName, GameSettings.BloodAmount, 0f, 1f);
+                Section("GAME");
                 GUILayout.BeginHorizontal();
                 Check("INFINITE AMMO", ref GameSettings.InfiniteAmmo);
                 Check("CROSSHAIR", ref GameSettings.Crosshair);
-                Check("EARL VOICES", ref GameSettings.DummyVoices);
                 GUILayout.EndHorizontal();
             }
             GUILayout.EndScrollView();
-            GUILayout.Space(8);
-            GUILayout.BeginHorizontal();
-            if (Chip("PLAY", true, 0f, 46f))
+            GUILayout.EndArea();
+
+            // ---- START: loads the chosen map
+            var sr = new Rect(pr.xMax - 260, pr.yMax + 14, 260, 50);
+            if (mainPage == 0 && GUI.Button(sr, "START  ·  " + MapBuilder.Names[Mathf.Clamp(mainMap, 0, MapBuilder.Names.Length - 1)], chipOn))
             {
                 PlayerPrefs.SetInt("earl.map", mainMap);
                 GameSettings.Save();
@@ -378,9 +427,6 @@ namespace Carl
                 ApplyCursor();
                 game.Toast("F SPAWN MENU · G GUNS · ESC SETTINGS · X X-RAY · MIDDLE CLICK MEDICAL");
             }
-            if (Chip("QUIT", false, 120f, 46f)) Application.Quit();
-            GUILayout.EndHorizontal();
-            GUILayout.EndArea();
         }
 
         /// <summary>The graphics level chips (LOW / MEDIUM / HIGH), applied at once.</summary>
@@ -430,7 +476,7 @@ namespace Carl
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
             if (Chip("RESUME", true, 0f, 38f)) Toggle(MenuKind.Settings);
-            if (Chip("MAIN MENU", false, 130f, 38f)) { GameSettings.Save(); OpenMain(); }
+            if (Chip("MAIN MENU", false, 130f, 38f)) { GameSettings.Save(); game.ToMainMenu(); }
             if (Chip("QUIT GAME", false, 140f, 38f)) Application.Quit();
             GUILayout.EndHorizontal();
             GUILayout.EndArea();

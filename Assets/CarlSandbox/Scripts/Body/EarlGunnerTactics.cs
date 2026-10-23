@@ -644,13 +644,6 @@ namespace Carl
                 Wander(legs, i => !TrenchNav.Field[i] && (team == Teams.Friendly ? TrenchNav.Nodes[i].z > 12f : TrenchNav.Nodes[i].z < -12f));
                 return;
             }
-            // those not going straight over the top go by the middle of no-man's-land first
-            if (!overTheTop && !viaDone)
-            {
-                if (via == null) via = TrenchNav.RandomNear(new Vector3(Random.Range(-4f, 4f), 1.8f, Random.Range(-2f, 2f)), 6f, i => TrenchNav.Field[i]);
-                if (via == null || FlatDist(here, via.Value) < 2.5f || InTheirLine(here)) viaDone = true;
-                else { MoveTo(via.Value, (here.y > 1.4f ? 3.2f : 2f) * legs, 0.45f); AimAt(here + rag.moveDir * 8f + Vector3.up * 0.6f, false); return; }
-            }
             bool fast = here.y > 1.4f;      // out in the open: run
             MoveTo(objective.Value, (fast ? 3.4f : 2f) * legs, overTheTop ? 0.45f : 25f);
             AimAt(here + rag.moveDir * 8f + Vector3.up * 0.6f, false);

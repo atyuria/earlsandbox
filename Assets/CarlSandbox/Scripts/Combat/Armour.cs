@@ -363,6 +363,10 @@ namespace Carl
                 if (p == null || p.fallen || p.part == null) continue;
                 if (only != null && p.part.body != only) continue;
                 if (exclude != null && p.part.body == exclude) continue;
+                // nowhere near the line (most pieces, most of the time): skip the exact test
+                Vector3 c = p.transform.position, oc = c - origin;
+                float along = Vector3.Dot(oc, dir);
+                if (along < -0.6f || along > dist + 0.6f || (oc - dir * along).sqrMagnitude > 0.36f) continue;
                 if (p.Raycast(origin, dir, dist, out float d, out Vector3 l) && d < dist) { dist = d; local = l; best = p; }
             }
             return best;

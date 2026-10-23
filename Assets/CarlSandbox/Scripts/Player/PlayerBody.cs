@@ -12,6 +12,7 @@ namespace Carl
     /// </summary>
     public class PlayerBody : MonoBehaviour
     {
+        void Awake() { useGUILayout = false; }   // (its OnGUI draws directly: no layout pass needed)
         public static PlayerBody I;
         public const float NormalBlood = 5000f;
 
@@ -337,6 +338,8 @@ namespace Carl
 
         void Fill(Rect r, Texture t, Color c) { GUI.color = c; GUI.DrawTexture(r, t, ScaleMode.StretchToFill); }
 
+        GUIStyle injStyle, deadBig, deadSmall;   // (made once, not every frame)
+
         void OnGUI()
         {
             if (vignette == null)
@@ -382,7 +385,7 @@ namespace Carl
             // going dark (passing out, dying): at once from a shot, slowly fading when you bleed out
             if (dark > 0.005f) Fill(all, white, new Color(0, 0, 0, dark * (dead || passedOut ? 0.985f : 1f)));
             GUI.color = Color.white;
-            var st = new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, normal = { textColor = new Color(1f, 0.35f, 0.3f) } };
+            var st = injStyle ??= new GUIStyle(GUI.skin.label) { fontSize = 13, fontStyle = FontStyle.Bold, normal = { textColor = new Color(1f, 0.35f, 0.3f) } };
             // the health panel (H) lists them properly and sits where these would be
             // with a body, the little Earl in the corner shows all this at a glance (MiniEarl); the list is only
             // for the old bodiless player
@@ -391,9 +394,9 @@ namespace Carl
             if (bleed > 1f && !panelOpen) GUI.Label(new Rect(18, H - 116, 600, 20), $"BLEEDING {bleed:0} ML/S  ·  BLOOD {frac * 100f:0}%", st);
             if (dead || passedOut)
             {
-                var big = new GUIStyle(GUI.skin.label) { fontSize = 34, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.8f, 0.1f, 0.1f) } };
+                var big = deadBig ??= new GUIStyle(GUI.skin.label) { fontSize = 34, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = new Color(0.8f, 0.1f, 0.1f) } };
                 GUI.Label(new Rect(0, H * 0.4f, W, 50), dead ? "YOU DIED" : "UNCONSCIOUS", big);
-                var sm = new GUIStyle(big) { fontSize = 15, normal = { textColor = new Color(0.8f, 0.8f, 0.8f) } };
+                var sm = deadSmall ??= new GUIStyle(big) { fontSize = 15, normal = { textColor = new Color(0.8f, 0.8f, 0.8f) } };
                 GUI.Label(new Rect(0, H * 0.4f + 46, W, 30), dead ? $"{cause}  ·  ENTER to start again" : "you may come round  ·  ENTER to give up", sm);
             }
         }
