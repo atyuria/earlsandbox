@@ -29,7 +29,8 @@ namespace Carl
         /// <summary>Shooting at a drone, or running from one. True if that's what he's doing this frame.</summary>
         bool DroneBehaviour(float legs)
         {
-            if (FpvDrone.Active.Count == 0) { droneT = null; return false; }
+            // (your drones are your side's: only the other side shoots at them, or runs from them)
+            if (FpvDrone.Active.Count == 0 || !Teams.Hostile(team, Teams.Friendly)) { droneT = null; return false; }
             if (Time.time > droneCheck)
             {
                 droneCheck = Time.time + 0.25f + Random.value * 0.1f;
