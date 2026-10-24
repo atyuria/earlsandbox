@@ -111,6 +111,12 @@ namespace Carl
         public bool light;                // weapon light (X300) under the rail
         public bool laser;                // PEQ-15 style aiming laser: a red dot where the barrel points
         public bool magnifier;            // 3x flip magnifier behind a red dot / holo
+        /// <summary>The gunsmith's build (barrel, cover, handguard, muzzle, grip, stock, magazine), on the guns that have one.</summary>
+        public GunBuild build;
+        /// <summary>Which optic, foregrip, light and laser (Attachments ids; null: the first of the kind).</summary>
+        public string optic, foregrip, lightId, laserId;
+        /// <summary>Which rail the light / laser goes on: -1 its usual place, 0 right, 1 left, 2 top, 3 bottom (ahead of the foregrip).</summary>
+        public int lightSide = -1, laserSide = -1;
         public float FuseSeconds => fuse == 0 ? -1f : fuse + 1f;
         public string FuseName => fuse == 0 ? "IMPACT" : $"{fuse + 1} SEC";
     }

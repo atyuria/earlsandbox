@@ -1,0 +1,11 @@
+== droneopts  (15:37:16)
+PASS  P with no drone down does nothing
+PASS  held in the hand; LEFT CLICK puts it down and it leaves your hands
+set down: parked True, flying False, height over feet -0.03 m
+PASS  P sets the carried drone down on the floor
+PASS  P again: you're flying it, from the floor
+big shaped charge: target 517 wounds, the men 2.2 m either side 4
+big fragmentation: target 99 wounds, the men either side 13
+PASS  fragmentation spreads out; the shaped charge stays on what it hits
+timed drop: grenade impact False, fuse 3.2 s, power 2.2, 420 fragments
+PASS  timed grenades: a fuse and a bigger charge

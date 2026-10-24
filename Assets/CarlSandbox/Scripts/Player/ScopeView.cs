@@ -60,7 +60,7 @@ namespace Carl
         {
             var s = w.Loadout.sight;
             if (w.Current.scope) return "Gun_";
-            return s == SightKind.RedDot ? "Att_RedDot" : s == SightKind.Holo ? "Att_Holo" : "Att_Scope";
+            return Attachments.OpticOf(w.Loadout)?.model ?? (s == SightKind.RedDot ? "Att_RedDot" : s == SightKind.Holo ? "Att_Holo" : "Att_Scope");
         }
 
         /// <summary>Find the optic's glass on the model and put the picture there.</summary>
@@ -120,7 +120,10 @@ namespace Carl
         {
             if (w == null) return;
             float mag = Magnification(w);
-            bool want = mag > 0f && w.AimAmount > 0.02f;
+            // (a 1x red dot or holo is looked straight through: no picture in it, its reticle is projected at infinity
+            // on the glass - WeaponController's reticle quad - so the dot stays on the target and the window moves
+            // round it. Only magnifying optics get a picture.)
+            bool want = mag > 1.01f && w.AimAmount > 0.02f;
             if (!want)
             {
                 if (scopeCam != null && scopeCam.enabled) scopeCam.enabled = false;

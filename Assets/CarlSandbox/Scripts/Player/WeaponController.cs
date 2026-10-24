@@ -25,6 +25,7 @@ namespace Carl
         public bool tracer;
         public int pellets = 1;        // shot per trigger pull (buckshot)
         public float Energy => 0.5f * bulletMass * muzzleVelocity * muzzleVelocity;
+        public WeaponDef Clone() => (WeaponDef)MemberwiseClone();
     }
 
     /// <summary>Weapons, viewmodels and the physics grab (F).</summary>
@@ -69,7 +70,14 @@ namespace Carl
             new WeaponDef { name = "RPK-74", type = WeaponType.Gun, auto = true, rpm = 600, muzzleVelocity = 960, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 45, reloadTime = 2.9f, recoil = 1.0f, spread = 0.26f, zoomFov = 55, loudness = 78, tracer = true },
             new WeaponDef { name = "PKM", type = WeaponType.Gun, auto = true, rpm = 650, muzzleVelocity = 825, bulletMass = 0.0096f, diameter = 0.0079f, magazine = 100, reloadTime = 6.5f, recoil = 2.4f, spread = 0.34f, zoomFov = 55, loudness = 95, tracer = true },
             new WeaponDef { name = "M249", type = WeaponType.Gun, auto = true, rpm = 800, muzzleVelocity = 915, bulletMass = 0.004f, diameter = 0.0057f, magazine = 200, reloadTime = 7f, recoil = 1.3f, spread = 0.34f, zoomFov = 55, loudness = 80, tracer = true },
+            // ---- the FPV drones: carried in the hand like the kits; LEFT CLICK sets it down, P flies the one that's down
+            new WeaponDef { name = "KAMIKAZE DRONE", type = WeaponType.Medical },
+            new WeaponDef { name = "GRENADE DRONE", type = WeaponType.Medical },
         };
+
+        /// <summary>Is this one of the drones (carried in the hand, set down with a click, flown with P)?</summary>
+        public static bool IsDrone(WeaponDef d) => d != null && (d.name == "KAMIKAZE DRONE" || d.name == "GRENADE DRONE");
+        public static FpvDrone.Kind DroneKind(WeaponDef d) => d.name == "KAMIKAZE DRONE" ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber;
 
         /// <summary>Is this the flamethrower (a gun in the hands, but it throws fire, not rounds)?</summary>
         public static bool IsFlamer(WeaponDef d) => d != null && d.name == "FLAMETHROWER";
@@ -119,6 +127,100 @@ namespace Carl
         public float pointAimT;  // point aim with right mouse: canted, up at the eye
 
         /// <summary>A copy of weapon i as it is set up now (attachments on, no hands), for the gun menu's showcase.</summary>
+        public float Mass(int i) => GunMass(defs[i]);
+
+        public static readonly string[] SideNames = { "RIGHT", "LEFT", "TOP", "BOTTOM" };
+
+        Mesh GunMesh(int i)
+        {
+            if (i < 0 || i >= models.Count || models[i] == null) return null;
+            foreach (var f in models[i].GetComponentsInChildren<MeshFilter>(true))
+                if (f.transform.parent == models[i].transform && (f.name.StartsWith("Gun_") || f.name.StartsWith("Build_"))) return f.sharedMesh;
+            return null;
+        }
+
+        /// <summary>
+        /// Where a light (laser false) or laser goes on gun i, on the rail it's put on: the gun's usual place (-1), or
+        /// the right, left, top or bottom (ahead of a foregrip) of the handguard, found on the handguard's own surface.
+        /// A light hangs off its clamp (turned to face out of that side); a laser sits on its.
+        /// </summary>
+        public (Vector3 pos, Vector3 euler) RailSpot(int i, int side, bool laser)
+        {
+            var d = defs[i];
+            var basic = laser ? LaserMount(d) : LightMount(d.name);
+            if (side < 0 || IsPistol(d)) return basic;
+            float z = LightMount(d.name).pos.z, yc = LightMount(d.name).pos.y;
+            if (side == 3 && loadouts[i].grip != GripKind.None && i < mountUnder.Count) z = mountUnder[i].z + 0.075f;
+            var mesh = GunMesh(i);
+            float right = 0.024f, left = -0.024f, top = 0.03f, bottom = -0.03f;
+            if (mesh != null)
+            {
+                float r0 = float.MinValue, l0 = float.MaxValue, t0 = float.MinValue, b0 = float.MaxValue;
+                foreach (var v in mesh.vertices)
+                {
+                    if (Mathf.Abs(v.z - z) > 0.02f) continue;
+                    if (Mathf.Abs(v.y - yc) < 0.012f) { r0 = Mathf.Max(r0, v.x); l0 = Mathf.Min(l0, v.x); }
+                    if (Mathf.Abs(v.x) < 0.008f && Mathf.Abs(v.y - yc) < 0.07f) { t0 = Mathf.Max(t0, v.y); b0 = Mathf.Min(b0, v.y); }
+                }
+                if (r0 > float.MinValue) { right = r0; left = l0; }
+                if (t0 > float.MinValue) { top = t0; bottom = b0; }
+            }
+            switch (side)
+            {
+                case 0: return (new Vector3(right, yc, z), new Vector3(0f, 0f, laser ? -90f : 90f));
+                case 1: return (new Vector3(left, yc, z), new Vector3(0f, 0f, laser ? 90f : -90f));
+                case 2: return (new Vector3(0f, top, z), new Vector3(0f, 0f, laser ? 0f : 180f));
+                default: return (new Vector3(0f, bottom, z), new Vector3(0f, 0f, laser ? 180f : 0f));
+            }
+        }
+
+        /// <summary>The rail each actually goes on (the usual places: light right, laser left).</summary>
+        static int Resolved(int side, bool laser) => side >= 0 ? side : laser ? 1 : 0;
+
+        /// <summary>The laser's spot, moved back along the rail if the light is on the same one.</summary>
+        (Vector3 pos, Vector3 euler) LaserSpot(int i)
+        {
+            var L = loadouts[i];
+            var s = RailSpot(i, L.laserSide, true);
+            if (L.light && !IsPistol(defs[i]) && (L.laserSide >= 0 || L.lightSide >= 0) && Resolved(L.laserSide, true) == Resolved(L.lightSide, false)) s.pos.z -= 0.075f;
+            return s;
+        }
+
+        /// <summary>Where each of the gunsmith's slots is on gun i (its own space): the points you click on.</summary>
+        public Dictionary<string, Vector3> SmithPoints(int i)
+        {
+            var p = new Dictionary<string, Vector3>();
+            if (i < 0 || i >= models.Count || i >= gripPts.Count) return p;
+            var d = defs[i];
+            Vector3 grip = gripPts[i], fore = i < forePts.Count ? forePts[i] : grip, muz = muzzles[i].localPosition;
+            Vector3 top = i < mountTop.Count ? mountTop[i] : grip + Vector3.up * 0.1f, under = i < mountUnder.Count ? mountUnder[i] : fore;
+            var ap = i < animPts.Count ? animPts[i] : (top: grip, bottom: grip, charge: grip);
+            p["MUZZLE"] = muz - Vector3.forward * 0.02f;
+            p["BARREL"] = new Vector3(0f, 0f, Mathf.Lerp(fore.z, muz.z, 0.72f));
+            p["HANDGUARD"] = fore + new Vector3(0f, 0.012f, -0.04f);
+            p["GRIP"] = grip + new Vector3(0f, -0.04f, -0.012f);
+            p["STOCK"] = new Vector3(0f, -0.03f, grip.z - 0.22f);
+            p["MAG"] = IsPistol(d) ? grip + new Vector3(0f, -0.045f, -0.004f) : Vector3.Lerp(ap.top, ap.bottom, 0.55f);
+            p["COVER"] = new Vector3(0f, top.y - 0.004f, Mathf.Min(top.z - 0.09f, grip.z + 0.02f));
+            p["SIGHT"] = top + new Vector3(0f, 0.03f, 0.02f);
+            p["FOREGRIP"] = under + new Vector3(0f, -0.03f, 0.02f);
+            var lm = LightMount(d.name);
+            var ls = RailSpot(i, loadouts[i].lightSide, false); p["LIGHT"] = ls.pos + Quaternion.Euler(ls.euler) * new Vector3(0f, -0.022f, 0.02f);
+            var zs = LaserSpot(i); p["LASER"] = zs.pos + Quaternion.Euler(zs.euler) * new Vector3(0f, 0.022f, 0f);
+            p["MAGNIFIER"] = top + new Vector3(0f, 0.03f, -0.07f);
+            p["SWITCH"] = grip + new Vector3(0f, 0.11f, -0.03f);
+            if (IsPistol(d))
+            {
+                // a pistol: the slide's back plate, the optic cut on the slide, the light and laser on the dust cover rail
+                var pm = ModelLibrary.Get(modelNames[i]);
+                p["SWITCH"] = pm != null && pm.points.TryGetValue("SlideBack", out var sb) ? sb + new Vector3(0f, 0f, 0.006f) : grip + new Vector3(0f, 0.07f, -0.035f);
+                p["SIGHT"] = top + new Vector3(0f, 0.008f, 0f);
+                p["LIGHT"] = lm.pos + new Vector3(0f, -0.012f, -0.01f);
+                p["LASER"] = lm.pos + new Vector3(0.012f, -0.006f, -0.03f);
+            }
+            return p;
+        }
+
         public GameObject PreviewModel(int i)
         {
             if (i < 0 || i >= models.Count || models[i] == null) return null;
@@ -259,6 +361,7 @@ namespace Carl
                 if (Current.type == WeaponType.Knife) return "—";
                 if (Current.type == WeaponType.Grenade || Current.type == WeaponType.Tool) return "∞";
                 if (IsRadio(Current)) return Radio.Open ? "PICK THE TARGET" : "LMB CALL IN";
+                if (IsDrone(Current)) return "LMB: PUT DOWN";
                 if (Current.type == WeaponType.Medical) return MedKit.Busy ? "TREATING" : "LMB TREAT";
                 if (IsFlamer(Current)) return reloading ? "NEW TANK" : $"FUEL {ammo[current] * 100 / Mathf.Max(1, MagSize(current))}%";
                 return reloading ? "RELOADING" : $"{ammo[current]:00} / {MagSize(current)}";
@@ -356,7 +459,7 @@ namespace Carl
             Part(p, PrimitiveType.Cylinder, pos, new Vector3(d, len * 0.5f, d), c, new Vector3(90, 0, 0), 0.5f, 0.7f);
 
         static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery", "Med_Radio", "Gun_Flamer",
-            "Gun_AK74", "Gun_AK74M", "Gun_AK105", "Gun_AKS74U", "Gun_AK12", "Gun_RPK74", "Gun_PKM", "Gun_M249" };
+            "Gun_AK74", "Gun_AK74M", "Gun_AK105", "Gun_AKS74U", "Gun_AK12", "Gun_RPK74", "Gun_PKM", "Gun_M249", "Drone_Kamikaze", "Drone_Bomber" };
 
         /// <summary>
         /// The flamethrower (no sculpted model of it either): the wand - a pistol grip and a fore grip on a long tube
@@ -385,6 +488,47 @@ namespace Carl
         static Dictionary<string, Vector3> BuiltPoints(string name) => name == "Gun_Flamer"
             ? new Dictionary<string, Vector3> { ["Grip"] = Vector3.zero, ["Muzzle"] = new Vector3(0f, 0.05f, 0.58f), ["Fore"] = new Vector3(0f, -0.03f, 0.3f) }
             : new Dictionary<string, Vector3>();
+
+        /// <summary>
+        /// A drone held in the hand by its bottom plate, nose forward: the carbon frame, four arms, motors and
+        /// props, and its payload (the taped-on warhead or the grenades on their release).
+        /// </summary>
+        static Vector3[] DroneModel(Transform root, bool kamikaze)
+        {
+            var g = new GameObject(kamikaze ? "Gun_DroneK" : "Gun_DroneB").transform;
+            g.SetParent(root, false);
+            // (a full-size 7" quad: a good 40 cm across the props, held out in front by its bottom plate)
+            g.localPosition = new Vector3(-0.02f, 0.045f, 0.2f);
+            g.localRotation = Quaternion.Euler(-10f, 0f, 0f);
+            g.localScale = Vector3.one * 1.15f;
+            Color carbon = new Color(0.07f, 0.07f, 0.08f), motor = new Color(0.26f, 0.27f, 0.29f), bat = new Color(0.15f, 0.3f, 0.6f);
+            var plate = Part(g, PrimitiveType.Cube, Vector3.zero, new Vector3(0.1f, 0.012f, 0.2f), carbon, default, 0.45f, 0.1f);
+            Part(g, PrimitiveType.Cube, new Vector3(0f, 0.032f, -0.01f), new Vector3(0.08f, 0.008f, 0.12f), carbon, default, 0.45f, 0.1f);
+            Part(g, PrimitiveType.Cube, new Vector3(0f, 0.058f, -0.055f), new Vector3(0.05f, 0.035f, 0.075f), bat, default, 0.3f, 0f);
+            Part(g, PrimitiveType.Cube, new Vector3(0f, 0.022f, 0.035f), new Vector3(0.028f, 0.026f, 0.022f), motor, default, 0.5f, 0.6f);
+            for (int i = 0; i < 4; i++)
+            {
+                float a = (45f + i * 90f) * Mathf.Deg2Rad;
+                Vector3 tip = new Vector3(Mathf.Sin(a), 0f, Mathf.Cos(a)) * 0.17f;
+                Part(g, PrimitiveType.Cube, tip * 0.5f, new Vector3(0.022f, 0.01f, 0.17f), carbon, Quaternion.LookRotation(tip).eulerAngles, 0.45f, 0.1f);
+                Part(g, PrimitiveType.Cylinder, tip + Vector3.up * 0.014f, new Vector3(0.028f, 0.012f, 0.028f), motor, default, 0.5f, 0.6f);
+                Part(g, PrimitiveType.Cube, tip + Vector3.up * 0.029f, new Vector3(0.13f, 0.003f, 0.014f), carbon, new Vector3(0f, i * 40f, 0f), 0.3f, 0f);
+            }
+            if (kamikaze)
+            {
+                Color olive = new Color(0.24f, 0.27f, 0.17f);
+                Part(g, PrimitiveType.Cylinder, new Vector3(0f, -0.045f, 0.04f), new Vector3(0.05f, 0.11f, 0.05f), olive, new Vector3(90f, 0f, 0f), 0.35f, 0f);
+                Part(g, PrimitiveType.Sphere, new Vector3(0f, -0.045f, 0.17f), new Vector3(0.05f, 0.05f, 0.09f), olive, default, 0.35f, 0f);
+                Part(g, PrimitiveType.Cube, new Vector3(0f, -0.018f, 0.04f), new Vector3(0.06f, 0.01f, 0.03f), new Color(0.7f, 0.7f, 0.65f), default, 0.2f, 0f);
+            }
+            else
+                for (int i = 0; i < 3; i++) Part(g, PrimitiveType.Sphere, new Vector3((i - 1) * 0.05f, -0.045f, 0f), new Vector3(0.038f, 0.05f, 0.038f), new Color(0.25f, 0.3f, 0.2f), default, 0.3f, 0f);
+            plate.name = "Gun_DroneBody";
+            var mesh = plate.GetComponent<MeshFilter>().sharedMesh.vertices;
+            var v = new Vector3[mesh.Length];
+            for (int k = 0; k < v.Length; k++) v[k] = root.InverseTransformPoint(plate.transform.TransformPoint(mesh[k]));
+            return v;
+        }
 
         /// <summary>The radio handset (there's no sculpted model of it: a box, a keypad, an antenna), its grip at the origin.</summary>
         static Vector3[] RadioModel(Transform root)
@@ -416,9 +560,8 @@ namespace Carl
             if (d.scope) return scopeY[i];
             switch (Loadout.sight)
             {
-                case SightKind.RedDot: return mountTop[i].y + 0.03f;
-                case SightKind.Holo: return mountTop[i].y + 0.032f;
-                case SightKind.Scope4x: case SightKind.Scope8x: return mountTop[i].y + 0.04f;
+                case SightKind.RedDot: case SightKind.Holo: case SightKind.Scope4x: case SightKind.Scope8x:
+                    return mountTop[i].y + (Attachments.OpticOf(Loadout)?.eye ?? 0.03f);
                 default: return ironY[i];
             }
         }
@@ -435,7 +578,7 @@ namespace Carl
                 // (anything without a model in the library is built here: the radio)
                 Vector3[] built = null;
                 if (model != null) ModelLibrary.SpawnWithMag(name, root, ModelLibrary.GunMaterial, false);
-                else built = name == "Gun_Flamer" ? FlamerModel(root) : RadioModel(root);
+                else built = name == "Gun_Flamer" ? FlamerModel(root) : name.StartsWith("Drone_") ? DroneModel(root, name == "Drone_Kamikaze") : RadioModel(root);
                 var points = model != null ? model.points : BuiltPoints(name);
                 Vector3 grip = points.TryGetValue("Grip", out var g) ? g : Vector3.zero;
                 AddAnimPoints(points, grip);
@@ -512,6 +655,8 @@ namespace Carl
             ["Med_Bandage"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
             ["Med_Surgery"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),  // held in a fist
             ["Med_Radio"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
+            ["Drone_Kamikaze"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
+            ["Drone_Bomber"] = (Vector3.zero, new Vector3(10f, 0f, -15f), default, default),
         };
         static bool PistolModel(string weapon) => weapon == "Gun_Glock" || weapon == "Gun_Beretta" || weapon == "Gun_Taser";
         /// <summary>The left hand round a rifle's handguard: fist along the barrel, forearm back, down and to the left.</summary>
@@ -746,6 +891,79 @@ namespace Carl
             }
         }
 
+        // ------------------------------------------------------------ the gunsmith: a gun rebuilt from its parts
+        readonly Dictionary<int, WeaponDef> factoryDefs = new Dictionary<int, WeaponDef>();
+
+        /// <summary>
+        /// The gun in slot i as its loadout's build (GunBuilder): its model put together from the parts, everything
+        /// that hangs off the model's shape (muzzle, the support hand on the handguard, the rail, the magazine for
+        /// reloads, the sight line) found again, and its numbers from the parts.
+        /// </summary>
+        public void ApplyBuild(int i)
+        {
+            var d = defs[i]; var L = loadouts[i];
+            if (!GunBuilder.Supports(d.name) || i >= models.Count || models[i] == null) return;
+            if (!factoryDefs.ContainsKey(i)) factoryDefs[i] = d.Clone();
+            if (L.build == null) L.build = GunBuilder.Stock(d.name);
+            string key = GunBuilder.Model(d.name, L.build);
+            var m = ModelLibrary.Get(key);
+            if (m == null) return;
+            var root = models[i].transform;
+            MeshFilter main = null;
+            foreach (var f in root.GetComponentsInChildren<MeshFilter>(true))
+                if (f.transform.parent == root && (f.name.StartsWith("Gun_") || f.name.StartsWith("Build_"))) { main = f; break; }
+            if (main == null) return;
+            Material[] Mats(ModelLibrary.Model x) { var a = new Material[x.materials.Length]; for (int k = 0; k < a.Length; k++) a[k] = ModelLibrary.GunMaterial(x.materials[k]); return a; }
+            main.sharedMesh = m.mesh; main.GetComponent<MeshRenderer>().sharedMaterials = Mats(m); main.name = key;
+            var mag = ModelLibrary.Get(key + "_Mag");
+            var magT = main.transform.Find("Mag");
+            if (magT != null && mag != null) { magT.GetComponent<MeshFilter>().sharedMesh = mag.mesh; magT.GetComponent<MeshRenderer>().sharedMaterials = Mats(mag); }
+            ironMesh.Remove(i);
+            // what hangs off its shape
+            var pts = m.points; var mv = m.mesh.vertices;
+            Vector3 grip = gripPts[i];
+            Vector3 muzzle = pts.TryGetValue("Muzzle", out var mz) ? mz : muzzles[i].localPosition;
+            while (baseMuzzle.Count < muzzles.Count) baseMuzzle.Add(muzzles[baseMuzzle.Count].localPosition);
+            baseMuzzle[i] = muzzle; muzzles[i].localPosition = muzzle;
+            if (pts.TryGetValue("Fore", out var fore)) forePts[i] = fore;
+            if (i < animPts.Count)
+                animPts[i] = (pts.TryGetValue("MagTop", out var mt) ? mt : animPts[i].top, pts.TryGetValue("MagBottom", out var mb) ? mb : animPts[i].bottom, pts.TryGetValue("Charge", out var ch) ? ch : animPts[i].charge);
+            if (pts.TryGetValue("Iron", out var ir)) ironY[i] = ir.y;
+            float zA = Mathf.Lerp(grip.z, muzzle.z, 0.05f), zB = Mathf.Lerp(grip.z, muzzle.z, 0.35f), zC = Mathf.Lerp(grip.z, muzzle.z, 0.5f), zD = Mathf.Lerp(grip.z, muzzle.z, 0.68f);
+            float top = float.MinValue, under = float.MaxValue;
+            foreach (var v in mv)
+            {
+                if (v.z > zA && v.z < zB) top = Mathf.Max(top, v.y);
+                if (v.z > zC && v.z < zD && Mathf.Abs(v.x) < 0.03f) under = Mathf.Min(under, v.y);
+            }
+            // (the optics go on the dust cover's rail; with no rail on it, on the side mount's height over the cover)
+            mountTop[i] = new Vector3(0f, top == float.MinValue ? 0.05f : top, (zA + zB) * 0.5f);
+            mountUnder[i] = new Vector3(0f, under == float.MaxValue ? -0.03f : under, (zC + zD) * 0.5f);
+            // the support hand round the new handguard
+            if (i < supportCup.Count && supportCup[i] != null)
+            {
+                float zmin = forePts[i].z - 0.025f, zmax = forePts[i].z + 0.025f;
+                float lo = float.MaxValue, hi = float.MinValue, left = float.MaxValue, right = float.MinValue;
+                foreach (var v in mv)
+                {
+                    if (v.z < zmin || v.z > zmax || Mathf.Abs(v.x) > 0.05f || v.y > grip.y + 0.15f || v.y < grip.y - 0.02f) continue;
+                    lo = Mathf.Min(lo, v.y); hi = Mathf.Max(hi, v.y); left = Mathf.Min(left, v.x); right = Mathf.Max(right, v.x);
+                }
+                Vector3 c = forePts[i]; float r = 0.026f;
+                if (lo < hi) { float h = Mathf.Min(hi - lo, 0.06f); c = new Vector3((left + right) * 0.5f, lo + h * 0.5f, forePts[i].z); r = Mathf.Clamp(Mathf.Max(h, right - left) * 0.5f, 0.018f, 0.034f); }
+                while (supportCentre.Count <= i) supportCentre.Add(Vector3.zero);
+                while (supportRadius.Count <= i) supportRadius.Add(0.026f);
+                Vector3 delta = c - supportCentre[i];
+                supportCentre[i] = c; supportRadius[i] = r;
+                supportCup[i].transform.localPosition += delta;
+            }
+            // its numbers
+            GunBuilder.Stats(d.name, L.build, factoryDefs[i], d);
+            L.suppressor = GunBuilder.Suppressed(L.build);
+            if (!GunBuilder.Railed(L.build)) L.grip = GripKind.None;
+            RefreshAttachments();
+        }
+
         /// <summary>Rebuilds the sight and grip models on the weapon after the loadout changed.</summary>
         public void RefreshAttachments()
         {
@@ -761,7 +979,8 @@ namespace Carl
                 var top = mountTop[i];
                 if (!d.scope)
                 {
-                    string m = L.sight == SightKind.RedDot ? "Att_RedDot" : L.sight == SightKind.Holo ? "Att_Holo" : (L.sight == SightKind.Scope4x || L.sight == SightKind.Scope8x) ? "Att_Scope" : null;
+                    var oi = Attachments.OpticOf(L);
+                    string m = oi?.model;
                     if (m != null)
                     {
                         var g = ModelLibrary.Spawn(m, root, ModelLibrary.GunMaterial, false);
@@ -775,10 +994,10 @@ namespace Carl
                             {
                                 var ret = new GameObject("Reticle");
                                 ret.transform.SetParent(g.transform, false);
-                                ret.transform.localPosition = L.sight == SightKind.RedDot ? new Vector3(0f, 0.03f, 0.027f) : new Vector3(0f, 0.033f, 0.017f);
-                                ret.AddComponent<MeshFilter>().sharedMesh = L.sight == SightKind.RedDot ? ProcMesh.Rect(0.021f, 0.021f) : ProcMesh.Rect(0.031f, 0.023f);
+                                ret.transform.localPosition = oi.reticle;
+                                ret.AddComponent<MeshFilter>().sharedMesh = ProcMesh.Rect(oi.retSize.x, oi.retSize.y);
                                 var rm = new Material(Mats.Find("Carl/Reticle"));
-                                rm.SetFloat("_Shape", L.sight == SightKind.Holo ? 1f : 0f);
+                                rm.SetFloat("_Shape", oi.retShape);
                                 var rr = ret.AddComponent<MeshRenderer>(); rr.sharedMaterial = rm; rr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                                 reticles.Add(rr);
                             }
@@ -786,16 +1005,16 @@ namespace Carl
                     }
                 }
                 if (IsGlock(i)) GlockParts(i, root, L);
-                bool gripOn = L.grip != GripKind.None && GripsFor(d);
+                bool gripOn = L.grip != GripKind.None && GripsFor(d) && (L.build == null || GunBuilder.Railed(L.build));
                 if (gripOn)
                 {
-                    var g = ModelLibrary.Spawn(L.grip == GripKind.Vertical ? "Att_GripVertical" : "Att_GripAngled", root, ModelLibrary.GunMaterial, false);
+                    var g = ModelLibrary.Spawn(Attachments.GripOf(L)?.model ?? "Att_GripVertical", root, ModelLibrary.GunMaterial, false);
                     if (g != null) { g.transform.localPosition = mountUnder[i]; attach.Add(g); }
                 }
                 PlaceSupportHand(i, gripOn ? L.grip : GripKind.None, mountUnder[i]);
                 RailAndMuzzle(i, root, d, L);
                 rigKey = null;   // the hands go back on it for the new setup
-                ShowIrons(i, d.scope || L.sight == SightKind.Iron);
+                if (L.build == null || GunBuilder.IsStock(d.name, L.build)) ShowIrons(i, d.scope || L.sight == SightKind.Iron);
             }
         }
 
@@ -869,7 +1088,7 @@ namespace Carl
             while (baseMuzzle.Count < muzzles.Count) baseMuzzle.Add(muzzles[baseMuzzle.Count].localPosition);
             muzzles[i].localPosition = baseMuzzle[i];
             lights[i] = null; laserEmit[i] = null;
-            if (L.suppressor && SuppressorFor(d))
+            if (L.suppressor && SuppressorFor(d) && L.build == null)
             {
                 // screwed onto the muzzle: the gun gets that much longer, and the muzzle is now its front
                 var g = ModelLibrary.Spawn(IsPistol(d) ? "Att_SuppPistol" : "Att_SuppRifle", root, ModelLibrary.GunMaterial, false);
@@ -883,15 +1102,17 @@ namespace Carl
             }
             if (L.light && LightFor(d))
             {
-                var g = ModelLibrary.Spawn("Att_Light", root, ModelLibrary.GunMaterial, false);
+                string lmodel = Attachments.LightOf(L)?.model ?? "Att_Light";
+                var g = ModelLibrary.Spawn(lmodel, root, ModelLibrary.GunMaterial, false);
                 if (g != null)
                 {
-                    var mnt = LightMount(d.name);
+                    var lmd = ModelLibrary.Get(lmodel);
+                    var mnt = RailSpot(i, L.lightSide, false);
                     g.transform.localPosition = mnt.pos; g.transform.localRotation = Quaternion.Euler(mnt.euler);
                     attach.Add(g);
                     var lo = new GameObject("Beam");
                     lo.transform.SetParent(g.transform, false);
-                    lo.transform.localPosition = new Vector3(0f, -0.022f, 0.05f);
+                    lo.transform.localPosition = lmd != null && lmd.points.TryGetValue("Lens", out var lens) ? lens + Vector3.forward * 0.003f : new Vector3(0f, -0.022f, 0.05f);
                     var lt = lo.AddComponent<Light>();
                     // 1000 lumens of tight hotspot and wide spill
                     lt.type = LightType.Spot; lt.spotAngle = 40f; lt.innerSpotAngle = 10f; lt.range = 55f; lt.intensity = 14f;
@@ -902,14 +1123,16 @@ namespace Carl
             }
             if (L.laser && LaserFor(d))
             {
-                var g = ModelLibrary.Spawn("Att_Laser", root, ModelLibrary.GunMaterial, false);
+                string zmodel = Attachments.LaserOf(L)?.model ?? "Att_Laser";
+                var g = ModelLibrary.Spawn(zmodel, root, ModelLibrary.GunMaterial, false);
                 if (g != null)
                 {
-                    var lm = LaserMount(d);
+                    var zmd = ModelLibrary.Get(zmodel);
+                    var lm = LaserSpot(i);
                     g.transform.localPosition = lm.pos; g.transform.localRotation = Quaternion.Euler(lm.euler);
                     attach.Add(g);
                     var e = new GameObject("LaserEmit").transform;
-                    e.SetParent(g.transform, false); e.localPosition = new Vector3(-0.009f, 0.03f, 0.043f);
+                    e.SetParent(g.transform, false); e.localPosition = zmd != null && zmd.points.TryGetValue("Beam", out var bm) ? bm + Vector3.forward * 0.001f : new Vector3(-0.009f, 0.03f, 0.043f);
                     laserEmit[i] = e;
                 }
             }
@@ -919,7 +1142,7 @@ namespace Carl
                 if (g != null) { g.transform.localPosition = mountTop[i] + new Vector3(0f, 0f, -0.07f); attach.Add(g); }
                 // the red dot / holo moves forward on the rail to make room
                 foreach (var a in attach)
-                    if (a != null && a != g && a.transform.parent == root && (a.name.StartsWith("Att_RedDot") || a.name.StartsWith("Att_Holo")))
+                    if (a != null && a != g && a.transform.parent == root && a.name == Attachments.OpticOf(L)?.model)
                         a.transform.localPosition = mountTop[i] + new Vector3(0f, 0f, 0.05f);
             }
         }
@@ -2930,7 +3153,11 @@ namespace Carl
             if (held && Armed) { vmRoot.gameObject.SetActive(true); ShowHeldGun(!Scoped); }
             else vmRoot.gameObject.SetActive(!Scoped);
             // the projected reticle (at infinity, so it is only seen looking more or less through the glass)
-            foreach (var r in reticles) if (r) r.enabled = false;   // (the optic draws its reticle in its own picture now: ScopeView)
+            // 1x red dots and holos: you look straight through the glass at the world and the reticle is projected at
+            // infinity on it (Carl/Reticle), so it holds on the target while the sight window moves about it. Behind a
+            // magnifier the optic's picture (ScopeView) has the reticle instead.
+            bool oneX = Armed && Current.type == WeaponType.Gun && (Loadout.sight == SightKind.RedDot || Loadout.sight == SightKind.Holo) && !(Loadout.magnifier && MagnifierFor(Current));
+            foreach (var r in reticles) if (r) r.enabled = oneX;
 
             flashTimer -= dt;
             bool showFlash = flashTimer > 0f && d.type == WeaponType.Gun;

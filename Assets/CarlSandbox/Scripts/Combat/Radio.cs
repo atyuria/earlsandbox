@@ -608,7 +608,7 @@ namespace Carl
                 var r = Grenade.Throw(p, Vector3.zero);
                 r.fuse = 0.0001f + i * 0.02f; r.shrapnel = Mathf.RoundToInt(90 * size); r.team = Teams.Friendly;
             }
-            Fx.Explosion(c + Vector3.up * 1.5f * size);
+            Fx.Explosion(c + Vector3.up * 1.5f * size, size * size);
             Sfx.Play("explosion", c, 1f, 1f, 40f * size, 0.05f, 900f, 22000f);
             HumanBrain.BroadcastNoise(c, 400f, 1f);
             // knocked flat: anyone close enough who isn't behind something solid

@@ -395,10 +395,19 @@ namespace Carl
             float pain = p.EffectivePain;
             float spike = pain - v.lastPain;
             v.lastPain = Mathf.Lerp(v.lastPain, pain, dt * 2f);
+            // no head, no voice: whatever he was saying stops with it
+            if (Gone(h, PartId.Head)) { if (v.src.isPlaying) v.src.Stop(); v.wasDead = true; return; }
             if (p.dead)
             {
-                // one last wet breath
-                if (!v.wasDead) { v.wasDead = true; if (Random.value < 0.5f) Say(h, v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.6f, 0.95f); }
+                // cut off mid-word, then (sometimes) one last wet breath
+                if (!v.wasDead) { v.wasDead = true; v.src.Stop(); if (Random.value < 0.5f) Say(h, v, p.airwayBlood > 0.2f ? "gurgle" : "moan", 0.6f, 0.95f); }
+                return;
+            }
+            // out cold: silent (a line he was in the middle of trails off)
+            if (p.consciousness < 0.3f)
+            {
+                if (v.src.isPlaying) v.vol = Mathf.MoveTowards(v.vol, 0f, dt * 2.5f);
+                if (v.src.isPlaying && v.vol < 0.02f) v.src.Stop();
                 return;
             }
             v.wasDead = false;

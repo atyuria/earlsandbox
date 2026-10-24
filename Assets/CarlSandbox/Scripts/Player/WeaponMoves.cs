@@ -127,6 +127,27 @@ namespace Carl
             return true;
         }
 
+        /// <summary>
+        /// From a to b without going through the gun: the way between is pushed out from the bore line (under the
+        /// gun if it would go through the middle) to keep the hand clear of it; the ends are exactly where they are.
+        /// </summary>
+        Vector3 Around(Vector3 a, Vector3 b, float t)
+        {
+            Vector3 p = Vector3.LerpUnclamped(a, b, Mathf.Clamp01(t));
+            Quaternion inv = Quaternion.Inverse(gr);
+            Vector3 l = inv * (p - gp);
+            Vector2 r = new Vector2(l.x, l.y + 0.01f);
+            const float clear = 0.065f;
+            float m = r.magnitude;
+            if (m < clear)
+            {
+                Vector2 dir = m > 0.012f ? r / m : new Vector2(0f, -1f);
+                float push = (clear - m) * Mathf.Sin(Mathf.PI * Mathf.Clamp01(t));
+                l += new Vector3(dir.x, dir.y, 0f) * push;
+            }
+            return gp + gr * l;
+        }
+
         bool SupportTargetAt(Hold h, Vector3 gunPos, Quaternion gunRot, out Vector3 target)
         {
             target = default;
@@ -135,8 +156,8 @@ namespace Carl
             var me = PlayerAvatar.Body;
             var p = animPts[current];
             Vector3 rest = GunPt(h.gunLocal);
-            Vector3 grab = GunPt(Vector3.Lerp(p.top, p.bottom, 0.45f));
-            Vector3 below = GunPt(Vector3.Lerp(p.top, p.bottom, 0.45f) + new Vector3(0f, -0.14f, 0.03f));
+            Vector3 grab = GunPt(Around(p.top, p.bottom, 0.45f));
+            Vector3 below = GunPt(Around(p.top, p.bottom, 0.45f) + new Vector3(0f, -0.14f, 0.03f));
             Vector3 down = grab + Vector3.down * 0.18f;
             Vector3 pouch = rest;
             if (me != null && me.Chest != null)
@@ -150,20 +171,20 @@ namespace Carl
             switch (st.move)
             {
                 case Move.MagOut:
-                    target = u < 0.45f ? Vector3.Lerp(rest, grab, S(u / 0.45f)) : Vector3.Lerp(grab, st.keep ? below : down, S((u - 0.45f) / 0.55f));
+                    target = u < 0.45f ? Around(rest, grab, S(u / 0.45f)) : Around(grab, st.keep ? below : down, S((u - 0.45f) / 0.55f));
                     break;
                 case Move.Pouch:
-                    target = u < 0.5f ? Vector3.Lerp(down, pouch, S(u / 0.5f)) : Vector3.Lerp(pouch, below, S((u - 0.5f) / 0.5f));
+                    target = u < 0.5f ? Around(down, pouch, S(u / 0.5f)) : Around(pouch, below, S((u - 0.5f) / 0.5f));
                     break;
                 case Move.MagIn:
-                    target = u < 0.72f ? Vector3.Lerp(below, grab, S(u / 0.72f)) : Vector3.Lerp(grab, rest, S((u - 0.72f) / 0.28f));
+                    target = u < 0.72f ? Around(below, grab, S(u / 0.72f)) : Around(grab, rest, S((u - 0.72f) / 0.28f));
                     break;
                 case Move.Rack:
-                    target = u < 0.4f ? Vector3.Lerp(rest, ch, S(u / 0.4f)) : u < 0.58f ? Vector3.Lerp(ch, chBack, S((u - 0.4f) / 0.18f)) : u < 0.66f ? Vector3.Lerp(chBack, ch, (u - 0.58f) / 0.08f) : Vector3.Lerp(ch, rest, S((u - 0.66f) / 0.34f));
+                    target = u < 0.4f ? Around(rest, ch, S(u / 0.4f)) : u < 0.58f ? Around(ch, chBack, S((u - 0.4f) / 0.18f)) : u < 0.66f ? Around(chBack, ch, (u - 0.58f) / 0.08f) : Around(ch, rest, S((u - 0.66f) / 0.34f));
                     break;
                 case Move.Slap:
                     Vector3 bot = GunPt(p.bottom), under = GunPt(p.bottom + new Vector3(0f, -0.07f, 0f));
-                    target = u < 0.38f ? Vector3.Lerp(rest, under, S(u / 0.38f)) : u < 0.46f ? Vector3.Lerp(under, bot, (u - 0.38f) / 0.08f) : Vector3.Lerp(bot, rest, S((u - 0.46f) / 0.54f));
+                    target = u < 0.38f ? Around(rest, under, S(u / 0.38f)) : u < 0.46f ? Around(under, bot, (u - 0.38f) / 0.08f) : Around(bot, rest, S((u - 0.46f) / 0.54f));
                     break;
             }
             return true;

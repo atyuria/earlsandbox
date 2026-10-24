@@ -1,0 +1,16 @@
+== pilots  (16:17:22)
+  t 1: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 0.82 sees True 44m wait 11 status ''  |  B kit Bomber fighting True down False sup 1.17 sees True 44m wait 8 status ''
+  t 5: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 1.33 sees True 40m wait 6 status ''  |  B kit Bomber fighting True down False sup 1.44 sees True 40m wait 3 status ''
+  t 10: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 0.27 sees True 35m wait 1 status ''  |  B kit Bomber fighting True down False sup 0.68 sees True 33m wait -1 status ''
+  t 14: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 0.00 sees True 32m wait -3 status 'GOING TO FLY A DRONE'  |  B kit Bomber fighting True down False sup 1.43 sees True 30m wait -5 status 'GOING TO FLY A DRONE'
+  t 18: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 0.00 sees True 30m wait -7 status 'GOING TO FLY A DRONE'  |  B kit Bomber fighting True down False sup 1.26 sees True 30m wait -10 status 'GOING TO FLY A DRONE'
+  t 23: drones up 0, rounds at drones 0  |  K kit Kamikaze fighting True down False sup 0.00 sees True 30m wait -12 status 'GOING TO FLY A DRONE'  |  B kit Bomber fighting True down False sup 1.40 sees True 30m wait -14 status 'GOING TO FLY A DRONE'
+first drone up after 23.4 s (k GOING TO FLY A DRONE / b GOING TO FLY A DRONE)
+  t 28: drones up 1, rounds at drones 0  |  K kit  fighting True down False sup 0.00 sees False wait -17 status ''  |  B kit  fighting True down False sup 0.00 sees True 31m wait -19 status 'FLYING A DRONE'
+  t 32: drones up 1, rounds at drones 1  |  K kit  fighting True down False sup 0.00 sees True 31m wait -21 status ''  |  B kit  fighting True down False sup 0.00 sees True 31m wait -23 status 'FLYING A DRONE'
+  t 37: drones up 1, rounds at drones 1  |  K kit  fighting True down False sup 0.00 sees False wait -25 status ''  |  B kit  fighting True down False sup 0.00 sees True 30m wait -28 status 'FLYING A DRONE'
+  t 41: drones up 1, rounds at drones 1  |  K kit  fighting True down False sup 0.00 sees True 30m wait -30 status ''  |  B kit  fighting True down False sup 0.00 sees True 29m wait -32 status 'FLYING A DRONE'
+  t 47: drones up 0, rounds at drones 1  |  K kit  fighting True down False sup 0.00 sees True 30m wait -36 status ''  |  B kit  fighting True down False sup 0.00 sees True 27m wait 2 status 'FLYING A DRONE'
+launched 2, your men fired 1 rounds at drones, wounds on your men 0 -> 54, last drone end: LANDED
+PASS  both pilots got their drones up
+PASS  your men shoot at the enemy drones

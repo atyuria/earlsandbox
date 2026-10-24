@@ -105,6 +105,7 @@ namespace Carl
                 }
                 else
                 {
+                    doorways.Add((r.TransformPoint(mid), r.TransformDirection(dir), o.width));
                     // door frame (trim only - the doorway itself is open)
                     Box(r, "DoorFrame", mid + Vector3.up * o.top, new Vector3(o.width + 0.1f, 0.08f, t + 0.03f), frame, rot, false);
                     for (int s = -1; s <= 1; s += 2)
@@ -116,6 +117,208 @@ namespace Carl
         }
 
         static Opening Door(float at) => new Opening(at, 1.0f, 0f, 2.15f);
+
+        // ============================================================ the shelled street (WAR)
+
+        /// <summary>Build the street as it is after weeks of shelling (WAR mode).</summary>
+        public static bool Wrecked;
+
+        /// <summary>
+        /// Shell holes punched through walls, tops of walls brought down, roofs half gone, every window blown in,
+        /// soot and dirt over everything, burnt-out cars, craters in the road and the gardens, fences flattened, rubble
+        /// and wreckage everywhere.
+        /// </summary>
+        static void Wreck(Transform root)
+        {
+            var rnd = new System.Random(4271);
+            float R(float a, float b) => a + (float)rnd.NextDouble() * (b - a);
+            var soot = new Dictionary<Material, Material>();
+            Material Sooty(Material m)
+            {
+                if (m == null) return null;
+                if (!soot.TryGetValue(m, out var d))
+                {
+                    d = new Material(m);
+                    Color c = m.HasProperty("_BaseColor") ? m.GetColor("_BaseColor") : m.HasProperty("_Color") ? m.color : Color.gray;
+                    float l = (c.r + c.g + c.b) / 3f;
+                    c = Color.Lerp(c, new Color(l, l, l), 0.4f) * 0.55f; c.a = 1f;
+                    if (d.HasProperty("_BaseColor")) d.SetColor("_BaseColor", c);
+                    if (d.HasProperty("_Color")) d.SetColor("_Color", c);
+                    soot[m] = d;
+                }
+                return d;
+            }
+            var rubble = Mats.Lit(new Color(0.4f, 0.37f, 0.33f), 0.05f);
+            var charred = Mats.Lit(new Color(0.06f, 0.055f, 0.05f), 0.15f);
+            var rust = Mats.Lit(new Color(0.24f, 0.12f, 0.07f), 0.1f);
+            var mud = Mats.Lit(new Color(0.26f, 0.23f, 0.16f), 0.05f);
+            var crater = Mats.Lit(new Color(0.12f, 0.1f, 0.08f), 0.05f);
+
+            void Rubble(Transform parent, Vector3 at, Vector3 spread, int n, Material m)
+            {
+                for (int k = 0; k < n; k++)
+                {
+                    float sz = R(0.08f, 0.35f);
+                    var g = Box(parent, "Rubble", at + new Vector3(R(-spread.x, spread.x), sz * 0.3f, R(-spread.z, spread.z)), new Vector3(sz * R(0.7f, 1.6f), sz * R(0.4f, 0.9f), sz * R(0.7f, 1.4f)), m, R(0f, 360f), k % 3 == 0);
+                    g.transform.localRotation *= Quaternion.Euler(R(-25f, 25f), 0f, R(-25f, 25f));
+                }
+            }
+
+            // ---- the walls: holes, broken tops, soot
+            var walls = new List<Transform>();
+            foreach (var t in root.GetComponentsInChildren<Transform>()) if (t.name == "Wall") walls.Add(t);
+            foreach (var w in walls)
+            {
+                var mr = w.GetComponent<MeshRenderer>();
+                if (mr != null) mr.sharedMaterial = Sooty(mr.sharedMaterial);
+                Vector3 sc = w.localScale;
+                bool outer = sc.z > 0.15f;
+                if (sc.x < 1.8f || sc.y < 2f) continue;
+                double roll = rnd.NextDouble();
+                var par = w.parent; Vector3 c = w.localPosition; Quaternion q = w.localRotation; var m = mr.sharedMaterial;
+                Vector3 X = q * Vector3.right, Y = Vector3.up, Z = q * Vector3.forward;
+                void Piece(float x0, float x1, float y0, float y1)
+                {
+                    if (x1 - x0 < 0.05f || y1 - y0 < 0.05f) return;
+                    var g = Box(par, "Wall", c + X * ((x0 + x1) * 0.5f) + Y * ((y0 + y1) * 0.5f - sc.y * 0.5f), new Vector3(x1 - x0, y1 - y0, sc.z), m);
+                    g.transform.localRotation = q;
+                }
+                if (roll < (outer ? 0.4 : 0.25))
+                {
+                    // a shell hole straight through it
+                    float hw = R(0.7f, 1.4f), u = R(-sc.x * 0.5f + hw * 0.5f + 0.2f, sc.x * 0.5f - hw * 0.5f - 0.2f);
+                    float y0 = R(0.1f, 0.8f), y1 = Mathf.Min(sc.y - 0.25f, y0 + R(0.9f, 1.5f));
+                    Piece(-sc.x * 0.5f, u - hw * 0.5f, 0f, sc.y);
+                    Piece(u + hw * 0.5f, sc.x * 0.5f, 0f, sc.y);
+                    Piece(u - hw * 0.5f, u + hw * 0.5f, 0f, y0);
+                    Piece(u - hw * 0.5f, u + hw * 0.5f, y1, sc.y);
+                    // ragged edges: broken bricks sticking into the hole
+                    for (int k = 0; k < 6; k++)
+                    {
+                        float ex = u + (k % 2 == 0 ? -1f : 1f) * hw * 0.5f * R(0.6f, 0.95f), ey = R(y0, y1);
+                        var b = Box(par, "Wall", c + X * ex + Y * (ey - sc.y * 0.5f), new Vector3(R(0.12f, 0.3f), R(0.1f, 0.25f), sc.z), m, 0f, false);
+                        b.transform.localRotation = q * Quaternion.Euler(0f, 0f, R(-20f, 20f));
+                    }
+                    Vector3 foot = c + X * u + Y * (-sc.y * 0.5f);
+                    Rubble(par, foot + Z * 0.6f, new Vector3(0.6f, 0f, 0.4f), 7, rubble);
+                    Rubble(par, foot - Z * 0.6f, new Vector3(0.6f, 0f, 0.4f), 6, rubble);
+                    Object.Destroy(w.gameObject);
+                }
+                else if (roll < (outer ? 0.55 : 0.35))
+                {
+                    // the top of it brought down
+                    float keep = R(0.45f, 0.75f) * sc.y;
+                    w.localScale = new Vector3(sc.x, keep, sc.z);
+                    w.localPosition = c + Y * ((keep - sc.y) * 0.5f);
+                    Rubble(par, c + Y * (-sc.y * 0.5f) + Z * 0.7f, new Vector3(sc.x * 0.4f, 0f, 0.5f), 9, rubble);
+                }
+            }
+            // ---- roofs half gone, soot on what is left
+            foreach (var t in root.GetComponentsInChildren<Transform>())
+            {
+                if (t.name != "Roof" && t.name != "Gable" && t.name != "Ridge" && t.name != "DoorFrame" && t.name != "Frame" && t.name != "Sill") continue;
+                if (t.name == "Roof" && rnd.NextDouble() < 0.4) { Object.Destroy(t.gameObject); continue; }
+                var mr = t.GetComponent<MeshRenderer>(); if (mr != null) mr.sharedMaterial = Sooty(mr.sharedMaterial);
+            }
+            // ---- every window blown in (glass on the floor inside), fences down, lamps knocked over
+            foreach (var g in root.GetComponentsInChildren<WindowGlass>()) Object.Destroy(g.gameObject);
+            foreach (var t in root.GetComponentsInChildren<Transform>())
+            {
+                if (t.name == "Fence" && rnd.NextDouble() < 0.55) Object.Destroy(t.gameObject);
+                else if (t.name == "Lamp" && rnd.NextDouble() < 0.4) t.localRotation = Quaternion.Euler(R(-18f, 18f), 0f, R(-18f, 18f));
+                else if (t.name == "Ground" || t.name == "Path") { var mr = t.GetComponent<MeshRenderer>(); if (mr != null) mr.sharedMaterial = mud; }
+                else if (t.name == "Road" || t.name == "Pavement") { var mr = t.GetComponent<MeshRenderer>(); if (mr != null) mr.sharedMaterial = Sooty(mr.sharedMaterial); }
+            }
+            // ---- burnt-out cars
+            foreach (var t in root.GetComponentsInChildren<Transform>())
+            {
+                if (t.name != "Car") continue;
+                int k = 0;
+                foreach (var mr in t.GetComponentsInChildren<MeshRenderer>())
+                {
+                    var mats = mr.sharedMaterials;
+                    for (int i = 0; i < mats.Length; i++) mats[i] = (k++ % 3 == 0) ? rust : charred;
+                    mr.sharedMaterials = mats;
+                }
+                t.localRotation *= Quaternion.Euler(R(-4f, 4f), R(-25f, 25f), R(-6f, 6f));
+            }
+            // ---- craters in the road and the gardens, wreckage everywhere
+            for (int k = 0; k < 16; k++)
+            {
+                Vector3 p = new Vector3(R(-26f, 26f), 0.02f, R(-52f, 52f));
+                float d = R(1.6f, 3.4f);
+                var cr = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                cr.name = "Crater"; Object.Destroy(cr.GetComponent<Collider>());
+                cr.transform.SetParent(root, false); cr.transform.localPosition = p; cr.transform.localScale = new Vector3(d, 0.02f, d * R(0.8f, 1.2f));
+                cr.GetComponent<MeshRenderer>().sharedMaterial = crater;
+                Rubble(root, p, new Vector3(d * 0.6f, 0f, d * 0.6f), 8, mud);
+            }
+            for (int k = 0; k < 70; k++)
+                Rubble(root, new Vector3(R(-28f, 28f), 0f, R(-54f, 54f)), new Vector3(0.4f, 0f, 0.4f), 2, k % 2 == 0 ? rubble : charred);
+        }
+
+        /// <summary>Every doorway built (where, which way the wall runs, how wide): kept clear of furniture.</summary>
+        static readonly List<(Vector3 at, Vector3 along, float width)> doorways = new List<(Vector3, Vector3, float)>();
+        static readonly string[] furniture = { "Table", "Chair", "Sofa", "Bed", "Kitchen", "Shelf", "Tv" };
+
+        /// <summary>Does this piece of furniture stand in any doorway's way (the opening and a stride either side)?</summary>
+        static bool BlocksDoor(Transform g)
+        {
+            var rs = g.GetComponentsInChildren<Renderer>();
+            if (rs.Length == 0) return false;
+            Bounds b = rs[0].bounds; foreach (var r in rs) b.Encapsulate(r.bounds);
+            b.Expand(new Vector3(-0.04f, 0f, -0.04f));
+            foreach (var d in doorways)
+            {
+                if (Mathf.Abs(d.at.y - b.min.y) > 1.5f) continue;     // another floor
+                Vector3 n = Vector3.Cross(Vector3.up, d.along);
+                // the furniture's footprint in the doorway's frame
+                float a0 = float.MaxValue, a1 = float.MinValue, n0 = float.MaxValue, n1 = float.MinValue;
+                for (int k = 0; k < 4; k++)
+                {
+                    Vector3 c = new Vector3(k % 2 == 0 ? b.min.x : b.max.x, d.at.y, k < 2 ? b.min.z : b.max.z) - d.at;
+                    float u = Vector3.Dot(c, d.along), v = Vector3.Dot(c, n);
+                    a0 = Mathf.Min(a0, u); a1 = Mathf.Max(a1, u); n0 = Mathf.Min(n0, v); n1 = Mathf.Max(n1, v);
+                }
+                float hw = d.width * 0.5f + 0.15f;
+                if (a1 > -hw && a0 < hw && n1 > -0.85f && n0 < 0.85f) return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Furniture never stands in a doorway: anything that does is slid along to clear it, or taken out if it can't
+        /// be (shelves and fridges were blocking doors outright).
+        /// </summary>
+        static void ClearDoorways(Transform root)
+        {
+            var groups = new List<Transform>();
+            foreach (var t in root.GetComponentsInChildren<Transform>())
+                if (System.Array.IndexOf(furniture, t.name) >= 0) groups.Add(t);
+            foreach (var g in groups)
+            {
+                if (!BlocksDoor(g)) continue;
+                Vector3 start = g.position; bool ok = false;
+                foreach (float step in new[] { 0.5f, -0.5f, 1f, -1f, 1.5f, -1.5f, 2f, -2f })
+                {
+                    // along its own length (it stands against a wall)
+                    g.position = start + g.right * step;
+                    if (!BlocksDoor(g) && !InWall(g)) { ok = true; break; }
+                }
+                if (!ok) { g.position = start; g.gameObject.SetActive(false); Object.Destroy(g.gameObject); }
+            }
+            doorways.Clear();
+        }
+
+        static bool InWall(Transform g)
+        {
+            var rs = g.GetComponentsInChildren<Renderer>();
+            Bounds b = rs[0].bounds; foreach (var r in rs) b.Encapsulate(r.bounds);
+            Physics.SyncTransforms();
+            foreach (var c in Physics.OverlapBox(b.center, b.extents * 0.92f, Quaternion.identity))
+                if (c.name == "Wall" && !c.transform.IsChildOf(g)) return true;
+            return false;
+        }
         static Opening Window(float at, float w = 1.2f) => new Opening(at, w, 0.9f, 2.0f);
 
         static void PitchedRoof(Transform r, float w, float d, float baseY, float pitchH, Material m, Material gable)
@@ -245,6 +448,7 @@ namespace Carl
         public static void Neighbourhood(Transform r, out Vector3 spawn, out float yaw, out Vector3[] carls)
         {
             InitMats();
+            doorways.Clear();
             var spawns = new List<Vector3>();
             Box(r, "Ground", new Vector3(0, -0.25f, 0), new Vector3(140f, 0.5f, 140f), grass);
             Box(r, "Road", new Vector3(0, 0.01f, 0), new Vector3(8f, 0.02f, 120f), asphalt);
@@ -295,6 +499,8 @@ namespace Carl
                 var bc = car.gameObject.AddComponent<BoxCollider>();
                 bc.center = new Vector3(0f, 0.78f, 0f); bc.size = new Vector3(1.8f, 1.35f, saloon ? 4.6f : 4.05f);
             }
+            ClearDoorways(r);
+            if (Wrecked) Wreck(r);
             spawn = new Vector3(0f, 0.1f, -56f);
             yaw = 0f;
             carls = spawns.ToArray();

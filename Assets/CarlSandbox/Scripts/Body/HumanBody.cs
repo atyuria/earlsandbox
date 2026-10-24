@@ -99,6 +99,20 @@ namespace Carl
         /// Dress him: 0 bare (the mannequin), 1 EMR (Russia), 2 MM-14 (Ukraine) - a uniform over the torso, arms and
         /// legs, boots on the feet; head, neck and hands stay bare.
         /// </summary>
+        /// <summary>Street clothes: a T-shirt of that code (4 blue, 5 red), jeans, sneakers; forearms, hands and head bare.</summary>
+        public void SetOutfit(int shirt)
+        {
+            foreach (var bp in partList)
+            {
+                if (bp == null || bp.skinMaterial == null) continue;
+                var id = bp.id;
+                float u = id == PartId.Chest || id == PartId.Abdomen || id == PartId.UpperArmL || id == PartId.UpperArmR ? shirt
+                        : id == PartId.Pelvis || id == PartId.ThighL || id == PartId.ThighR || id == PartId.ShinL || id == PartId.ShinR ? 6f
+                        : id == PartId.FootL || id == PartId.FootR ? 7f : 0f;
+                bp.skinMaterial.SetFloat(UniformId, u);
+            }
+        }
+
         public void SetUniform(int camo)
         {
             foreach (var bp in partList)

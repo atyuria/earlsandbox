@@ -1,0 +1,11 @@
+== gunsmith  (15:19:50)
+stock: model Gun_AK74M  mag 30  recoil 1.00  spread 0.28  v 900  loud 75  reload 2.30  suppressed False
+krinkov: model Build_AK_206.hinged.plum.booster.plum.skel.545p  mag 30  recoil 1.60  spread 0.38  v 738  loud 78  reload 2.30  suppressed False
+zhukov_pbs: model Build_AK_415.railed.zhukov.pbs4.moe.zhukov.545x60  mag 60  recoil 0.96  spread 0.28  v 900  loud 23  reload 2.88  suppressed True
+rpk_b10: model Build_AK_590.railed.b10.dtk1.rk3.ak12.545x45  mag 45  recoil 0.76  spread 0.21  v 954  loud 77  reload 2.58  suppressed False
+nostock: model Build_AK_314.ribbed.poly.thread.poly.none.545b  mag 30  recoil 2.54  spread 0.50  v 837  loud 70  reload 2.30  suppressed False
+PASS  no stock, bare muzzle: much more recoil
+ar_sbr: 267.raptor.ras.socom.hogue.moe.d60  mag 60  recoil 0.99  spread 0.33  v 808  loud 30
+ar_m4: 368.milspec.m4.a2.a2.m4.stanag20  mag 20  recoil 1.14  spread 0.28  v 912  loud 79
+ar_dmr: 508.milspec.mlok13.pa.k2.prs.pmag40  mag 40  recoil 0.68  spread 0.19  v 996  loud 90
+Earls with a rebuilt rifle: 3 of 5

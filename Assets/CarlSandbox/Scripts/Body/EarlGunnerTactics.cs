@@ -108,15 +108,37 @@ namespace Carl
                 Vector3 fl = Vector3.ProjectOnPlane(c - eye, Vector3.up);
                 if (face.sqrMagnitude > 0.01f && Vector3.Angle(face, fl) > 115f && cand[i].d > 25f && h != lastEnemy) continue;
                 bool torso = Clear(eye, c, body), head = !torso && Clear(eye, hd, body);
-                if (!torso && !head) continue;
                 Vector3 at = torso ? c + Vector3.up * 0.05f : hd;
+                if (!torso && !head)
+                {
+                    // round a corner, behind a lip: the middle of him hidden but a shoulder, an arm, a hip or a leg
+                    // showing is still a man to shoot at (the nearer ones only, within sensible range)
+                    if (i >= 3 || cand[i].d > 70f * 70f || !SomePartShows(h, eye, out at)) continue;
+                }
                 if (Haze.Transmit(eye, at) < 0.3f) continue;     // lost in the dust and smoke
                 if (!Visible(h, eye, cand[i].d)) continue;          // at night: nothing gives him away
                 enemy = h; enemyAim = at; sees = true; headOnly = !torso;
                 break;
             }
+            // (a man not seen for a moment: when he shows again, the reaction time starts over)
+            if (sees && Time.time - lastSeen > 1.5f) acquiredAt = Time.time;
             if (sees) { lastSeen = Time.time; lastSeenPos = enemyAim; lastEnemy = enemy; Learn(enemyAim, 1f, true); }
             else if (SandboxGame.Night) SpotLights(eye);
+        }
+
+        static readonly PartId[] showParts = { PartId.UpperArmL, PartId.UpperArmR, PartId.Pelvis, PartId.ThighL, PartId.ThighR, PartId.ForearmL, PartId.ForearmR };
+        /// <summary>Any of these parts of him in plain sight from the eye (and where).</summary>
+        bool SomePartShows(HumanBody h, Vector3 eye, out Vector3 at)
+        {
+            at = default;
+            foreach (var id in showParts)
+            {
+                var bp = h[id];
+                if (bp == null || bp.severed) continue;
+                Vector3 p = bp.transform.position;
+                if (Clear(eye, p, body)) { at = p; return true; }
+            }
+            return false;
         }
 
         // ------------------------------------------------------------ getting about

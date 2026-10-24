@@ -1,0 +1,2 @@
+== pilotlook  (16:20:48)
+piloting True after 17.3 s, status FLYING A DRONE

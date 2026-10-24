@@ -1,0 +1,10 @@
+== antidrone  (14:43:06)
+hovering: down after 11.0 s (24 rounds at it), ended True; mean gun-off 1.4 deg, aim-pt-off 0.7 deg
+PASS  a drone hanging still in front of him gets shot down
+jinking: lasted 15.7 s (31 rounds at it), ended True
+FAIL  dodging about keeps it up much longer
+high up (32 m): 2 rounds at it in 10 s
+PASS  a dropper high up mostly goes unseen
+  (0 hits; ended: TEST OVER)
+revealed, hovering 35 m up over 4 alerted men: lasted 20.0 s, 59 rounds at it, down False
+PASS  even once they know it's up there, a speck 35 m up is hard to hit

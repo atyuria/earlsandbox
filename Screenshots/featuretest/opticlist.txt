@@ -1,0 +1,10 @@
+== opticlist  (16:21:53)
+Aimpoint ACRO P-2: light x300, laser peq15, grip bcm
+Trijicon RMR Type 2: light m600, laser perst, grip rvg
+Holosun HS510C: light klesch, laser dbal, grip rk2
+Kobra EKP-8-18: light x300, laser peq15, grip afg
+EOTech EXPS3: light m600, laser perst, grip stop
+Trijicon ACOG TA31 4x32: light klesch, laser dbal, grip bcm
+PSO-1 4x24: light x300, laser peq15, grip rvg
+Vortex Razor 1-8x LPVO (at 4x): light m600, laser perst, grip rk2
+Vortex Razor 1-8x LPVO (at 8x): light klesch, laser dbal, grip afg

@@ -23,6 +23,44 @@ namespace Carl
 
         static readonly Dictionary<string, Model> cache = new Dictionary<string, Model>();
 
+        public static bool Has(string key) => cache.TryGetValue(key, out var m) && m.mesh != null;
+
+        /// <summary>
+        /// Several models put together into one (a gun from its parts), each moved by its offset; their named points
+        /// are all kept (a later part's point wins). Kept under the key, so Get(key) and Spawn(key) find it.
+        /// </summary>
+        public static Model Combine(string key, IList<(string model, Vector3 offset)> parts)
+        {
+            if (cache.TryGetValue(key, out var have) && have.mesh != null) return have;
+            var verts = new List<Vector3>();
+            var subs = new Dictionary<string, List<int>>();
+            var order = new List<string>();
+            var m = new Model();
+            foreach (var (name, off) in parts)
+            {
+                var p = Get(name);
+                if (p == null) continue;
+                int b = verts.Count;
+                foreach (var v in p.mesh.vertices) verts.Add(v + off);
+                for (int s = 0; s < p.mesh.subMeshCount && s < p.materials.Length; s++)
+                {
+                    if (!subs.TryGetValue(p.materials[s], out var list)) { subs[p.materials[s]] = list = new List<int>(); order.Add(p.materials[s]); }
+                    foreach (int t in p.mesh.GetTriangles(s)) list.Add(t + b);
+                }
+                foreach (var kv in p.points) m.points[kv.Key] = kv.Value + off;
+            }
+            var mesh = new Mesh { name = key, indexFormat = verts.Count > 65000 ? UnityEngine.Rendering.IndexFormat.UInt32 : UnityEngine.Rendering.IndexFormat.UInt16 };
+            mesh.SetVertices(verts);
+            mesh.subMeshCount = order.Count;
+            m.materials = order.ToArray();
+            for (int s = 0; s < order.Count; s++) mesh.SetTriangles(subs[order[s]], s);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            m.mesh = mesh;
+            cache[key] = m;
+            return m;
+        }
+
         public static Model Get(string name, bool mirrorX = false)
         {
             string key = name + (mirrorX ? "_M" : "");

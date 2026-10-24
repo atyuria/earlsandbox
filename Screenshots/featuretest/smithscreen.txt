@@ -1,0 +1,3 @@
+== smithscreen  (15:44:37)
+PASS  a saved preset loads back the same build
+PASS  G / ESC out of the gunsmith goes back to the gun menu

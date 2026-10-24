@@ -49,6 +49,7 @@ namespace Carl
                 L.light = UnityEngine.Random.value < 0.3f;
             }
             L.suppressor = UnityEngine.Random.value < 0.35f;
+            Attachments.Randomise(L, Nations.Active ? -1 : -1);
             return L;
         }
 
@@ -67,11 +68,11 @@ namespace Carl
                 g.transform.localPosition = at; g.transform.localRotation = Quaternion.Euler(euler);
                 g.layer = layer;
             }
-            string sight = L.sight == SightKind.RedDot ? "Att_RedDot" : L.sight == SightKind.Holo ? "Att_Holo" : (L.sight == SightKind.Scope4x || L.sight == SightKind.Scope8x) ? "Att_Scope" : null;
+            string sight = Attachments.OpticOf(L)?.model;
             if (sight != null) Put(sight, m.top);
-            if (L.grip != GripKind.None) Put(L.grip == GripKind.Vertical ? "Att_GripVertical" : "Att_GripAngled", m.under);
-            if (L.light) Put("Att_Light", new Vector3(0.026f, -0.004f, Mathf.Lerp(m.grip.z, m.muzzle.z, 0.5f)), new Vector3(0f, 0f, 90f));
-            if (L.suppressor)
+            if (L.grip != GripKind.None) Put(Attachments.GripOf(L)?.model ?? "Att_GripVertical", m.under);
+            if (L.light) Put(Attachments.LightOf(L)?.model ?? "Att_Light", new Vector3(0.026f, -0.004f, Mathf.Lerp(m.grip.z, m.muzzle.z, 0.5f)), new Vector3(0f, 0f, 90f));
+            if (L.suppressor && !model.StartsWith("Build_"))
             {
                 bool pistol = model == "Gun_Glock" || model == "Gun_Beretta";
                 string can = pistol ? "Att_SuppPistol" : "Att_SuppRifle";

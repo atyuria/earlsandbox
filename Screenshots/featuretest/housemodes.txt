@@ -1,0 +1,11 @@
+== housemodes  (14:52:11)
+hood: mode 1, wrecked False: 0 craters, 0 rubble, 68 windows; friendly 5 up / 0 down, enemy 12 up / 0 down  [ x17]
+  after 25 s: friendly 5 up / 0 down, enemy 12 up / 0 down  [ x17]
+PASS  hood: both sides spawned
+war_attack: mode 2, wrecked True: 16 craters, 771 rubble, 0 windows; friendly 8 up / 0 down, enemy 10 up / 0 down  [ x18]
+  after 25 s: friendly 8 up / 0 down, enemy 8 up / 2 down  [ x16]
+PASS  war_attack: both sides spawned
+war_defend: mode 2, wrecked True: 16 craters, 771 rubble, 0 windows; friendly 11 up / 0 down, enemy 0 up / 0 down  [ x11]
+  after 20 s: friendly 11 up / 0 down, enemy 5 up / 0 down  [ x16]
+PASS  war_defend: both sides spawned
+PASS  war street is wrecked

@@ -56,8 +56,94 @@ namespace Carl
         static readonly Vector3 CamMount = new Vector3(0f, 0.04f, 0.03f);
         const float CamUptilt = 14f;
 
+        // ---- the options (G menu, MISC)
+        /// <summary>The dropper's grenades: false impact (go off on landing), true timed (a bigger charge on a fuse).</summary>
+        public static bool TimedBombs;
+        /// <summary>The kamikaze's warhead, 0 small .. 1 huge: a bigger bang, but a heavier, slower, shorter-lived drone.</summary>
+        public static float WarheadSize;
+        /// <summary>The kamikaze's warhead: false fragmentation (spread out wide), true shaped (a small, precise blast where it hits).</summary>
+        public static bool ShapedCharge;
+        /// <summary>The one sitting on the floor, waiting for you to fly it.</summary>
+        public static FpvDrone Parked;
+        bool parked;
+        float speedK = 1f, power = 1f;
+        // this drone's own payload (copied from the options above when you take off; an Earl's are his own)
+        float warhead; bool shaped, timed;
+
+        // ---- an Earl's drone (LaunchAI): flown by him from where he stands, hunting the other side
+        /// <summary>Whose side it is on (yours: Teams.Friendly).</summary>
+        public int team = Teams.Friendly;
+        /// <summary>The Earl flying it (null: you).</summary>
+        public EarlGunner pilot;
+        public bool IsAI => ai;
+        bool ai;
+        HumanBody aiTarget;
+        float aiRetarget, aiJinkT, aiDropT, aiHomeT = -1f;
+        Vector3 aiJink, aiHome;
+        bool aiDiving;
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        static void ResetStatics() { Piloting = null; Selected = Kind.Kamikaze; Active.Clear(); }
+        static void ResetStatics() { Piloting = null; Selected = Kind.Kamikaze; Active.Clear(); Parked = null; }
+
+        /// <summary>P: fly the drone you set down. With none down, nothing (take one from G, MISC, and click to set it down).</summary>
+        public static void PressP()
+        {
+            if (Piloting != null) return;
+            if (Parked != null && !Parked.ended) { Parked.TakeOff(); return; }
+            SandboxGame.Instance?.Toast("NO DRONE DOWN  ·  TAKE ONE IN G (MISC), HOLD IT AND LEFT CLICK TO SET IT DOWN");
+        }
+
+        /// <summary>LEFT CLICK with a drone in your hand: it goes down on the floor in front of you, out of your hands.</summary>
+        public static bool SetDownHeld()
+        {
+            var w = SandboxGame.Instance != null ? SandboxGame.Instance.weapons : null;
+            if (w == null || !w.Armed || !WeaponController.IsDrone(w.Current) || Piloting != null) return false;
+            int i = w.current;
+            if (Place(WeaponController.DroneKind(w.Current)) == null) return false;
+            w.Give(i, false);
+            return true;
+        }
+
+        /// <summary>Set it down on the floor a stride in front of you, props still. P to fly it.</summary>
+        public static FpvDrone Place(Kind k)
+        {
+            var g = SandboxGame.Instance;
+            if (g == null || Piloting != null) return null;
+            if (Parked != null && !Parked.ended) Destroy(Parked.gameObject);
+            var pc = g.player.cam.transform;
+            Vector3 fwd = Vector3.ProjectOnPlane(pc.forward, Vector3.up).normalized;
+            if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
+            Vector3 at = pc.position + fwd * 1.1f;
+            if (Physics.Raycast(at + Vector3.up * 0.3f, Vector3.down, out var hit, 4f, ~0, QueryTriggerInteraction.Ignore)
+                && hit.collider.GetComponentInParent<HumanBody>() == null) at = hit.point + Vector3.up * 0.08f;
+            else at = pc.position + fwd * 1.1f - Vector3.up * 1.5f;
+            var go = new GameObject(NameOf(k));
+            go.transform.position = at;
+            var d = go.AddComponent<FpvDrone>();
+            d.kind = k; d.parked = true;
+            d.warhead = WarheadSize; d.shaped = ShapedCharge; d.timed = TimedBombs;
+            d.yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
+            d.Build();
+            Parked = d;
+            g.Toast(NameOf(k) + " ON THE FLOOR  ·  P TO FLY IT");
+            return d;
+        }
+
+        /// <summary>From the floor into the air: you're flying it.</summary>
+        void TakeOff()
+        {
+            parked = false;
+            if (Parked == this) Parked = null;
+            home = transform.position;
+            armed = 0f;
+            rb.useGravity = false;
+            rb.linearVelocity = Vector3.up * 1.5f;
+            cam.enabled = true;
+            cam.tag = "MainCamera";
+            var al = cam.GetComponent<AudioListener>(); if (al) al.enabled = true;
+            buzz.Play();
+            GoLive();
+        }
 
         public static string NameOf(Kind k) => k == Kind.Kamikaze ? "FPV KAMIKAZE DRONE" : "FPV GRENADE DRONE";
 
@@ -76,7 +162,30 @@ namespace Carl
             go.transform.position = pc.position + fwd * 0.9f + Vector3.up * 0.25f;
             var d = go.AddComponent<FpvDrone>();
             d.kind = k;
+            d.warhead = WarheadSize; d.shaped = ShapedCharge; d.timed = TimedBombs;
             d.yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
+            d.Build();
+            return d;
+        }
+
+        /// <summary>
+        /// An Earl's drone off his hands, a metre in front of him: its own warhead or grenades (his choice, at random),
+        /// flown by him until it's done, shot down, or something happens to him.
+        /// </summary>
+        public static FpvDrone LaunchAI(EarlGunner pilot, Kind k)
+        {
+            var b = pilot != null ? pilot.Body : null;
+            if (b == null || b.Chest == null) return null;
+            Vector3 fwd = Vector3.ProjectOnPlane(b.Chest.transform.forward, Vector3.up).normalized;
+            if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
+            var go = new GameObject(NameOf(k) + " (" + (pilot.team == Teams.Friendly ? "FRIENDLY" : "ENEMY") + ")");
+            go.transform.position = b.Chest.transform.position + fwd * 0.8f + Vector3.up * 0.7f;
+            var d = go.AddComponent<FpvDrone>();
+            d.kind = k; d.ai = true; d.pilot = pilot; d.team = pilot.team;
+            d.warhead = Random.value < 0.6f ? Random.Range(0f, 0.45f) : Random.Range(0.45f, 1f);
+            d.shaped = Random.value < 0.4f; d.timed = Random.value < 0.5f;
+            d.yaw = Mathf.Atan2(fwd.x, fwd.z) * Mathf.Rad2Deg;
+            d.aiHome = go.transform.position;
             d.Build();
             return d;
         }
@@ -84,11 +193,15 @@ namespace Carl
         void Build()
         {
             home = transform.position;
-            battery = kind == Kind.Kamikaze ? 100f : 150f;
-            bombs = kind == Kind.Bomber ? 3 : 0;
+            // a big warhead: a heavy drone, slow and short on battery
+            if (kind == Kind.Kamikaze) { power = Mathf.Lerp(1f, 4.5f, warhead); speedK = Mathf.Lerp(1f, 0.5f, warhead); }
+            battery = kind == Kind.Kamikaze ? Mathf.Lerp(100f, 65f, warhead) : 150f;
+            maxBattery = battery;
+            // timed grenades are bigger: two of them on the release, not three
+            bombs = kind == Kind.Bomber ? (timed ? 2 : 3) : 0;
             hp = kind == Kind.Kamikaze ? 1 : 2;
             rb = gameObject.AddComponent<Rigidbody>();
-            rb.mass = kind == Kind.Kamikaze ? 1.6f : 2.2f;
+            rb.mass = kind == Kind.Kamikaze ? 1.6f + warhead * 2.4f : 2.2f;
             rb.useGravity = false;
             rb.linearDamping = 0.2f;
             rb.angularDamping = 5f;
@@ -98,7 +211,8 @@ namespace Carl
             var col = gameObject.AddComponent<BoxCollider>();
             col.size = new Vector3(0.42f, 0.14f, 0.42f);
             // your own body doesn't knock it out of the air as it takes off
-            if (PlayerAvatar.Body != null) foreach (var bp in PlayerAvatar.Body.partList) if (bp != null && bp.col != null) Physics.IgnoreCollision(col, bp.col);
+            var launcher = ai ? pilot?.Body : PlayerAvatar.Body;
+            if (launcher != null) foreach (var bp in launcher.partList) if (bp != null && bp.col != null) Physics.IgnoreCollision(col, bp.col);
 
             // the airframe: carbon plate, four arms, motors and props, the camera up front, the payload under it
             visual = new GameObject("Airframe").transform;
@@ -127,20 +241,35 @@ namespace Carl
             {
                 // an RPG-7 warhead taped on under it, nose forward
                 var olive = Mats.Lit(new Color(0.24f, 0.27f, 0.17f), 0.35f);
-                var w = Part(PrimitiveType.Cylinder, new Vector3(0f, -0.045f, 0.04f), new Vector3(0.05f, 0.11f, 0.05f), olive);
+                float ws = Mathf.Lerp(1f, 1.9f, warhead);
+                var w = Part(PrimitiveType.Cylinder, new Vector3(0f, -0.045f * ws, 0.04f), new Vector3(0.05f * ws, 0.11f * ws, 0.05f * ws), olive);
                 w.localRotation = Quaternion.Euler(90f, 0f, 0f);
-                Part(PrimitiveType.Sphere, new Vector3(0f, -0.045f, 0.17f), new Vector3(0.05f, 0.05f, 0.09f), olive);
-                Part(PrimitiveType.Cylinder, new Vector3(0f, -0.045f, 0.24f), new Vector3(0.012f, 0.03f, 0.012f), motor).localRotation = Quaternion.Euler(90f, 0f, 0f);
+                // (a shaped charge's nose is the RPG's long cone and probe; fragmentation a blunt sleeve)
+                if (shaped)
+                {
+                    Part(PrimitiveType.Sphere, new Vector3(0f, -0.045f * ws, 0.04f + 0.13f * ws), new Vector3(0.05f * ws, 0.05f * ws, 0.11f * ws), olive);
+                    Part(PrimitiveType.Cylinder, new Vector3(0f, -0.045f * ws, 0.04f + 0.21f * ws), new Vector3(0.012f, 0.03f * ws, 0.012f), motor).localRotation = Quaternion.Euler(90f, 0f, 0f);
+                }
+                else Part(PrimitiveType.Cylinder, new Vector3(0f, -0.045f * ws, 0.04f + 0.11f * ws), new Vector3(0.062f * ws, 0.025f * ws, 0.062f * ws), Mats.Lit(new Color(0.3f, 0.3f, 0.28f), 0.4f, 0.6f)).localRotation = Quaternion.Euler(90f, 0f, 0f);
                 Part(PrimitiveType.Cube, new Vector3(0f, -0.018f, 0.04f), new Vector3(0.06f, 0.01f, 0.03f), Mats.Lit(new Color(0.7f, 0.7f, 0.65f), 0.2f));   // the tape
             }
             else
             {
                 // the release: three small grenades hanging in a row
-                for (int i = 0; i < 3; i++) Part(PrimitiveType.Sphere, new Vector3((i - 1) * 0.05f, -0.045f, 0f), new Vector3(0.038f, 0.05f, 0.038f), Mats.Lit(new Color(0.25f, 0.3f, 0.2f), 0.3f)).name = "Bomb" + i;
+                if (timed)
+                    for (int i = 0; i < 2; i++) Part(PrimitiveType.Sphere, new Vector3((i - 0.5f) * 0.07f, -0.055f, 0f), new Vector3(0.055f, 0.075f, 0.055f), Mats.Lit(new Color(0.22f, 0.26f, 0.18f), 0.3f)).name = "Bomb" + i;
+                else
+                    for (int i = 0; i < 3; i++) Part(PrimitiveType.Sphere, new Vector3((i - 1) * 0.05f, -0.045f, 0f), new Vector3(0.038f, 0.05f, 0.038f), Mats.Lit(new Color(0.25f, 0.3f, 0.2f), 0.3f)).name = "Bomb" + i;
                 Part(PrimitiveType.Cube, new Vector3(0f, -0.02f, 0f), new Vector3(0.16f, 0.012f, 0.03f), motor);
             }
 
-            // its camera (the picture you fly by), bolted to the frame; and its buzz
+            // its buzz: loud - you hear one coming a long way off
+            buzz = gameObject.AddComponent<AudioSource>();
+            buzz.clip = BuzzClip();
+            buzz.loop = true; buzz.spatialBlend = 1f; buzz.minDistance = 7f; buzz.maxDistance = 240f; buzz.volume = 0.95f * GameSettings.Volume; buzz.playOnAwake = false;
+            buzz.rolloffMode = AudioRolloffMode.Logarithmic; buzz.dopplerLevel = 0.6f;
+            if (ai) { buzz.Play(); GoLive(); return; }
+            // its camera (the picture you fly by), bolted to the frame
             var cg = new GameObject("FPV Camera");
             cg.transform.SetParent(visual, false);
             // the kamikaze's looks ahead; the dropper's hangs under it looking straight down at where it'll drop
@@ -158,13 +287,24 @@ namespace Carl
             cg.tag = "MainCamera";
             cg.AddComponent<AudioListener>();
             Haze.PrepareCamera(cam);
-            buzz = gameObject.AddComponent<AudioSource>();
-            buzz.clip = BuzzClip();
-            buzz.loop = true; buzz.spatialBlend = 1f; buzz.minDistance = 3f; buzz.maxDistance = 120f; buzz.volume = 0.5f * GameSettings.Volume;
+            if (parked)
+            {
+                // on the floor: dead, waiting; nothing of it running yet
+                cam.enabled = false; cam.tag = "Untagged";
+                cam.GetComponent<AudioListener>().enabled = false;
+                rb.useGravity = true;
+                visual.rotation = Quaternion.Euler(0f, yaw, 0f);
+                return;
+            }
             buzz.Play();
+            GoLive();
+        }
 
-            Piloting = this;
+        void GoLive()
+        {
             Active.Add(this);
+            if (ai) return;
+            Piloting = this;
             var main = SandboxGame.Instance.player.cam;
             main.enabled = false;
             var ml = main.GetComponent<AudioListener>(); if (ml) ml.enabled = false;
@@ -230,9 +370,12 @@ namespace Carl
             return buzzClip;
         }
 
+        float maxBattery = 100f;
+
         void Update()
         {
-            if (ended) return;
+            if (ended || parked) return;
+            if (ai) { AIUpdate(); return; }
             var kb = Keyboard.current; var mouse = Mouse.current;
             armed += Time.deltaTime;
             hitFlash = Mathf.Max(0f, hitFlash - Time.unscaledDeltaTime);
@@ -276,9 +419,12 @@ namespace Carl
                 foreach (var e in EarlGunner.All)
                 {
                     if (e == null || e.team == Teams.Friendly || !e.Fighting || e.Body == null) continue;
-                    if (Vector3.Distance(e.Body.Center, f.last) > 10f) continue;
-                    alive++;
-                    e.Learn(transform.position, 0.9f, false);
+                    // only those it went off near know to look up (and roughly where), not the whole area
+                    float d = Vector3.Distance(e.Body.Center, f.last);
+                    if (d > 16f) continue;
+                    if (d <= 10f) alive++;
+                    e.droneAlertUntil = Time.time + Random.Range(15f, 30f);
+                    e.Learn(transform.position + Random.insideUnitSphere * 12f, 0.6f, false);
                 }
                 if (alive > 0)
                 {
@@ -291,7 +437,7 @@ namespace Carl
 
         void FixedUpdate()
         {
-            if (ended || WorldFreeze.On) return;
+            if (ended || parked || WorldFreeze.On) return;
             var kb = Keyboard.current;
             Vector3 input = Vector3.zero; float vert = 0f; bool boost = false;
             if (kb != null)
@@ -307,7 +453,7 @@ namespace Carl
             var look = Quaternion.Euler(pitch, yaw, 0f);
             if (autopilot.HasValue) { input = Vector3.zero; vert = 0f; }
             Vector3 flatRight = Quaternion.Euler(0f, yaw, 0f) * Vector3.right;
-            float top = kind == Kind.Kamikaze ? (boost ? 30f : 16f) : (boost ? 16f : 9f);
+            float top = (kind == Kind.Kamikaze ? (boost ? 30f : 16f) : (boost ? 16f : 9f)) * speedK;
             // (the dropper looks straight down: forward is flat ahead of it, the way the top of the picture faces)
             if (kind == Kind.Bomber) look = Quaternion.Euler(0f, yaw, 0f);
             Vector3 wish = (look * Vector3.forward) * input.z * top + flatRight * input.x * top * 0.6f + Vector3.up * vert * (kind == Kind.Kamikaze ? 8f : 6f);
@@ -315,7 +461,7 @@ namespace Carl
             float range = Vector3.Distance(transform.position, home);
             if (range > 260f && Random.value < Mathf.InverseLerp(260f, 400f, range)) wish = rb.linearVelocity * 0.98f;
             if (autopilot.HasValue) wish = autopilot.Value;
-            float accel = kind == Kind.Kamikaze ? 30f : 18f;
+            float accel = (kind == Kind.Kamikaze ? 30f : 18f) * Mathf.Lerp(1f, speedK, 0.8f);
             rb.linearVelocity = Vector3.MoveTowards(rb.linearVelocity, wish, accel * Time.fixedDeltaTime);
             // shot up: a motor or a prop gone, it wallows and shudders
             if (wobble > 0f) rb.AddForce((Random.insideUnitSphere * 9f + Vector3.down * 2.5f) * wobble, ForceMode.Acceleration);
@@ -333,7 +479,7 @@ namespace Carl
 
         void OnCollisionEnter(Collision c)
         {
-            if (ended) return;
+            if (ended || parked) return;
             float hit = c.relativeVelocity.magnitude;
             if (kind == Kind.Kamikaze)
             {
@@ -348,6 +494,7 @@ namespace Carl
         public void Shot(Vector3 at, Vector3 dir)
         {
             if (ended) return;
+            Hits++;
             Fx.Sparks(at, -dir, 10);
             Sfx.Play("impact_metal", at, 0.7f, 1f, 2f, 0.1f);
             hitFlash = 0.35f;
@@ -356,7 +503,8 @@ namespace Carl
             if (hp <= 0) { End("SHOT DOWN"); return; }
             wobble += 0.6f;
             battery -= 15f;
-            SandboxGame.Instance?.Toast("DRONE HIT  ·  KEEP MOVING");
+            ShotAtUntil = Time.time + 4f;
+            if (!ai) SandboxGame.Instance?.Toast("DRONE HIT  ·  KEEP MOVING");
         }
 
         public void Detonate()
@@ -364,38 +512,68 @@ namespace Carl
             if (ended) return;
             Vector3 p = transform.position;
             var g = Grenade.Throw(p, Vector3.zero);
-            g.team = Teams.Friendly;
+            g.team = team;
             g.fuse = 0.0001f;
-            g.shrapnel = 320;           // a shaped charge's case and the drone's own bits
+            g.power = power;
+            if (shaped)
+            {
+                // the jet goes the way it was flying (or looking, hanging still): small and precise where it hits
+                Vector3 v = rb.linearVelocity;
+                g.jet = v.sqrMagnitude > 4f ? v.normalized : Quaternion.Euler(pitch, yaw, 0f) * Vector3.forward;
+                g.shrapnel = (int)(160 * Mathf.Sqrt(power));
+            }
+            else g.shrapnel = (int)(320 * Mathf.Sqrt(power));   // the case and the drone's own bits, everywhere
             HumanBrain.BroadcastNoise(p, 120f, 1f);
             End("DETONATED", true);
         }
 
         public void Drop()
         {
-            if (bombs <= 0) { SandboxGame.Instance?.Toast("NO GRENADES LEFT"); return; }
+            if (bombs <= 0) { if (!ai) SandboxGame.Instance?.Toast("NO GRENADES LEFT"); return; }
             bombs--;
+            if (ai) Debug.Log($"[Drone] {kind} drops: {(aiTarget != null ? "over " + Vector3.ProjectOnPlane(aiTarget.Center - transform.position, Vector3.up).magnitude.ToString("0.0") + " m off, " + (transform.position.y - aiTarget.Center.y).ToString("0") + " m up" : "no target")}");
             var hanging = visual.Find("Bomb" + bombs);
             if (hanging) hanging.gameObject.SetActive(false);
             var g = Grenade.Throw(transform.position - Vector3.up * 0.12f, rb.linearVelocity);
-            g.team = Teams.Friendly;
-            g.impact = true;            // goes off on whatever it lands on
-            g.fuse = 12f;
+            g.team = team;
+            if (timed)
+            {
+                // a bigger charge on a fuse: lands, rolls, and goes off a few seconds later
+                g.impact = false; g.fuse = 3.2f; g.power = 2.2f; g.shrapnel = 420;
+            }
+            else
+            {
+                g.impact = true;            // goes off on whatever it lands on
+                g.fuse = 12f;
+            }
             foreach (var mine in GetComponentsInChildren<Collider>()) Physics.IgnoreCollision(mine, g.GetComponent<Collider>());
             falling.Add((g, g.transform.position));
             Sfx.Play("click_empty", transform.position, 0.5f, 1f, 1f, 0.05f);
-            SandboxGame.Instance?.Toast(bombs > 0 ? $"DROPPED  ·  {bombs} LEFT" : "DROPPED  ·  EMPTY (E TO END)");
+            if (!ai) SandboxGame.Instance?.Toast(bombs > 0 ? $"DROPPED  ·  {bombs} LEFT" : "DROPPED  ·  EMPTY (E TO END)");
         }
 
         /// <summary>Back to your own eyes. The drone falls out of the sky (or is gone, if it blew up).</summary>
+        /// <summary>Playtests: why the last one ended, and rounds that have hit drones.</summary>
+        public static string LastEnd; public static int Hits;
         public void End(string why, bool destroy = false)
         {
             if (ended) return;
+            LastEnd = why;
             ended = true;
             Active.Remove(this);
             Unhook();
             if (Piloting == this) Piloting = null;
             var g = SandboxGame.Instance;
+            if (ai)
+            {
+                Debug.Log($"[Drone] {(team == Teams.Friendly ? "friendly" : "enemy")} {kind} ended: {why}  (target {(aiTarget != null ? Vector3.Distance(aiTarget.Center, transform.position).ToString("0.0") + " m" : "none")}, {battery:0} s battery left)");
+                if (g != null && Teams.Hostile(Teams.Friendly, team) && (why == "SHOT DOWN" || why == "SIGNAL LOST") && PlayerAvatar.Body != null && Vector3.Distance(PlayerAvatar.Body.Center, transform.position) < 80f) g.Toast("ENEMY DRONE " + why);
+                if (destroy) { Destroy(gameObject); return; }
+                buzz.Stop();
+                rb.useGravity = true; rb.constraints = RigidbodyConstraints.None; rb.angularDamping = 0.5f;
+                Destroy(gameObject, 30f);
+                return;
+            }
             if (g != null && g.player != null)
             {
                 g.player.cam.enabled = true;
@@ -414,7 +592,114 @@ namespace Carl
             Destroy(gameObject, 30f);
         }
 
-        void OnDestroy() { Active.Remove(this); Unhook(); if (Piloting == this) End("SIGNAL LOST"); }
+        // ------------------------------------------------------------ an Earl flying it
+
+        static readonly RaycastHit[] aiHits = new RaycastHit[8];
+
+        float GroundY(Vector3 p)
+        {
+            int n = Physics.RaycastNonAlloc(p + Vector3.up * 0.5f, Vector3.down, aiHits, 80f, ~0, QueryTriggerInteraction.Ignore);
+            float best = -1000f;
+            for (int i = 0; i < n; i++) if (aiHits[i].collider.attachedRigidbody == null && aiHits[i].point.y > best) best = aiHits[i].point.y;
+            return best > -999f ? best : p.y - 10f;
+        }
+
+        /// <summary>The nearest man of the other side (you included, if it's theirs): the one to go for.</summary>
+        HumanBody PickTarget()
+        {
+            HumanBody best = null; float bd = 160f;
+            foreach (var h in HumanBody.All)
+            {
+                if (h == null || h.Dead || h.Head == null || !Teams.Hostile(team, Teams.Of(h))) continue;
+                float d = Vector3.Distance(h.Center, transform.position);
+                // (one lying still out of it isn't worth a drone)
+                if (h != PlayerAvatar.Body && h.ragdoll.IsDown && h.physio.consciousness < 0.3f) continue;
+                if (d < bd) { bd = d; best = h; }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Flying an Earl's drone: the kamikaze cruises in well up, jinking, then dives straight onto its man and goes
+        /// off; the dropper climbs over its man, steadies, drops, and lets go the rest one by one before turning home.
+        /// Loses the link when its pilot is hit, knocked down or out of it.
+        /// </summary>
+        void AIUpdate()
+        {
+            float dt = Time.deltaTime;
+            armed += dt;
+            battery -= dt;
+            if (battery <= 0f) { End("BATTERY FLAT"); return; }
+            if (pilot == null || !pilot.Fighting || pilot.Body == null || pilot.Body.ragdoll.IsDown) { End("SIGNAL LOST"); return; }
+            float spd = rb.linearVelocity.magnitude;
+            for (int i = 0; i < 4; i++) if (props[i]) props[i].Rotate(0f, (i % 2 == 0 ? 1f : -1f) * 3000f * dt, 0f, Space.Self);
+            buzz.pitch = (0.85f + spd * 0.025f) * Time.timeScale;
+            if (Time.frameCount % 30 == 0) Intel.Noise(transform.position, team, 45f);
+            if (Time.time > aiRetarget || aiTarget == null || aiTarget.Dead) { aiRetarget = Time.time + 1.2f; if (!aiDiving) aiTarget = PickTarget(); }
+            Vector3 p = transform.position;
+            float ground = GroundY(p);
+            // (indoors, or under anything: it keeps a couple of metres under it)
+            float ceiling = Physics.Raycast(p, Vector3.up, out var up, 40f, ~0, QueryTriggerInteraction.Ignore) && up.collider.attachedRigidbody == null ? up.point.y - 2f : float.MaxValue;
+            Vector3 want;
+            bool jink = true;
+            if (aiTarget == null || (kind == Kind.Bomber && bombs <= 0))
+            {
+                // nobody to go for (or nothing left to drop): back towards him, high, then down on the ground
+                if (aiHomeT < 0f) aiHomeT = Time.time;
+                Vector3 to = aiHome + Vector3.up * 12f - p;
+                want = Vector3.ClampMagnitude(to * 0.8f, 9f);
+                if (Time.time - aiHomeT > 30f || to.magnitude < 4f) { End("LANDED"); return; }
+            }
+            else
+            {
+                aiHomeT = -1f;
+                Vector3 tc = aiTarget.Center;
+                Vector3 to = tc - p, flat = Vector3.ProjectOnPlane(to, Vector3.up);
+                float hd = flat.magnitude;
+                if (kind == Kind.Kamikaze)
+                {
+                    float top = 16f * speedK;
+                    if (!aiDiving && hd > 16f)
+                    {
+                        // in high and fast, so they hear it before they see it
+                        float alt = Mathf.Max(tc.y + 7f, ground + 6f);
+                        want = flat.normalized * top + Vector3.up * Mathf.Clamp((alt - p.y) * 1.5f, -5f, 5f);
+                    }
+                    else
+                    {
+                        // the dive: straight at him, leading him a little, flat out
+                        aiDiving = true; jink = false;
+                        var tv = aiTarget.Pelvis != null && aiTarget.Pelvis.rb != null ? aiTarget.Pelvis.rb.linearVelocity : Vector3.zero;
+                        Vector3 aim = tc + tv * Mathf.Clamp(to.magnitude / 25f, 0f, 0.6f) - p;
+                        want = aim.normalized * Mathf.Max(top * 1.6f, 14f);
+                        if (to.magnitude < 1.4f && armed > 0.5f) { Detonate(); return; }
+                    }
+                }
+                else
+                {
+                    // the dropper: over him, high, steady - then let go (the grenade keeps the drone's drift)
+                    float alt = Mathf.Max(tc.y + 15f, ground + 13f);
+                    Vector3 over = new Vector3(tc.x, alt, tc.z) - p;
+                    want = Vector3.ClampMagnitude(new Vector3(over.x * 1.3f, over.y * 0.9f, over.z * 1.3f), 9f * speedK + 2f);
+                    jink = hd > 6f;
+                    if (hd < 1.3f && Mathf.Abs(over.y) < 3f && rb.linearVelocity.magnitude < 1.8f && Time.time > aiDropT && armed > 2f) { Drop(); aiDropT = Time.time + 3.5f; }
+                }
+            }
+            // a pilot dodging: a little side to side, a lot once they're shooting at it
+            if (Time.time > aiJinkT) { aiJinkT = Time.time + Random.Range(0.5f, 1.3f); aiJink = Random.insideUnitSphere * (Time.time < ShotAtUntil ? 6f : 1.8f); aiJink.y *= 0.4f; }
+            if (jink) want += aiJink;
+            // climb over whatever is in the way
+            if (!aiDiving && want.sqrMagnitude > 0.1f && Physics.Raycast(p, want.normalized, out var hit, 5f, ~0, QueryTriggerInteraction.Ignore) && hit.collider.attachedRigidbody == null) want += Vector3.up * 7f;
+            if (!aiDiving && p.y - ground < 2.5f) want.y = Mathf.Max(want.y, 3f);
+            if (p.y > ceiling) want.y = Mathf.Min(want.y, -2f);
+            else if (p.y > ceiling - 1.5f) want.y = Mathf.Min(want.y, 0f);
+            autopilot = want;
+            Vector3 hv = Vector3.ProjectOnPlane(want, Vector3.up);
+            if (hv.sqrMagnitude > 0.5f) yaw = Mathf.MoveTowardsAngle(yaw, Mathf.Atan2(hv.x, hv.z) * Mathf.Rad2Deg, 240f * dt);
+            pitch = aiDiving ? Mathf.Clamp(-Mathf.Atan2(want.y, hv.magnitude + 0.01f) * Mathf.Rad2Deg, -80f, 80f) : 0f;
+        }
+
+        void OnDestroy() { Active.Remove(this); Unhook(); if (Parked == this) Parked = null; if (Piloting == this) End("SIGNAL LOST"); }
 
         // ------------------------------------------------------------ the goggles
 
@@ -437,7 +722,7 @@ namespace Carl
 
         void OnGUI()
         {
-            if (ended) return;
+            if (ended || parked || ai) return;
             GUI.depth = -80;
             if (hud == null)
             {
@@ -469,7 +754,7 @@ namespace Carl
             // the OSD: mode top left, speed top right, the pack voltage bottom left
             float s = Mathf.Clamp(H / 1080f, 0.6f, 1.6f);
             hud.fontSize = hudR.fontSize = Mathf.RoundToInt(30 * s);
-            float bat = Mathf.Clamp01(battery / (kind == Kind.Kamikaze ? 100f : 150f));
+            float bat = Mathf.Clamp01(battery / maxBattery);
             float volts = Mathf.Lerp(3.3f, 4.2f, Mathf.Pow(bat, 0.7f));
             Shadowed(new Rect(56 * s, 40 * s, 400, 50 * s), "Acro", hud);
             Shadowed(new Rect(W - 456 * s - 56 * s, 40 * s, 456 * s, 50 * s), $"{rb.linearVelocity.magnitude * 3.6f:0} km/h", hudR);

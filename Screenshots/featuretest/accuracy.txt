@@ -1,0 +1,5 @@
+== accuracy  (16:39:35)
+enemy skill 1.00
+  15 m: 33 rounds, 33 hit you (100%), first hit after 0.5 s
+  35 m: 34 rounds, 33 hit you (97%), first hit after 1.4 s
+  60 m: 30 rounds, 21 hit you (70%), first hit after 0.6 s

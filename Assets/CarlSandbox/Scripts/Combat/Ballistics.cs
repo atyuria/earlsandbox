@@ -9,6 +9,8 @@ namespace Carl
     /// </summary>
     public class Ballistics : MonoBehaviour
     {
+        /// <summary>Playtests: rounds that have hit you.</summary>
+        public static int PlayerHits;
         public static Ballistics Instance;
         /// <summary>Set around a Fire() call by whoever is shooting, so their own rounds (and ricochets) never hit them.</summary>
         public static HumanBody FiringBody;
@@ -206,6 +208,7 @@ namespace Carl
                 var bp = hit.collider.GetComponent<BodyPart>();
                 if (bp != null && bp.body != null)
                 {
+                    if (p.kind == HitKind.Bullet && bp.body == PlayerAvatar.Body) PlayerHits++;
                     if (!HitBody(p, bp, hit.point, dir, ref remaining)) break;
                     continue;
                 }
@@ -258,7 +261,7 @@ namespace Carl
                     p.ricochets++;
                     Fx.Sparks(hit.point, Vector3.Reflect(dir, hit.normal), 12);
                     Fx.Dust(hit.point, hit.normal, 3);
-                    BloodSystem.Instance?.Mark(hit.point, hit.normal, 0.02f, 0.6f);
+                    if (hit.rigidbody == null) BloodSystem.Instance?.Mark(hit.point, hit.normal, 0.02f, 0.6f);
                     Vector3 refl = Vector3.Reflect(dir, hit.normal);
                     refl = (refl + Random.insideUnitSphere * 0.12f + hit.normal * 0.05f).normalized; // deformed bullets tumble off-line
                     p.vel = refl * p.vel.magnitude * Mathf.Lerp(0.45f, 0.75f, Random.value);
@@ -407,7 +410,7 @@ namespace Carl
             p.walls++;
             p.pen *= Mathf.Lerp(1f, 0.6f, frac);
             Fx.Dust(back.point, dir, 6);
-            BloodSystem.Instance?.Mark(back.point, back.normal, Mathf.Clamp(p.diam * 6f, 0.04f, 0.12f), 0.7f);
+            if (back.rigidbody == null) BloodSystem.Instance?.Mark(back.point, back.normal, Mathf.Clamp(p.diam * 6f, 0.04f, 0.12f), 0.7f);
             return p.vel.magnitude > 30f;
         }
 
@@ -621,8 +624,9 @@ namespace Carl
             }
         }
 
-        public static void Explosion(Vector3 pos)
+        public static void Explosion(Vector3 pos, float power = 1f)
         {
+            MasterLimiter.Blast(pos, power);
             if (I == null) return;
             // white-hot core and an orange fireball that rolls up and out
             for (int i = 0; i < 12; i++)

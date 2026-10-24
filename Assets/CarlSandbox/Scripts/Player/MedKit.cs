@@ -29,7 +29,7 @@ namespace Carl
         {
             kit = false;
             var w = W;
-            if (w == null || !w.Armed || w.Current.type != WeaponType.Medical || WeaponController.IsRadio(w.Current)) return false;
+            if (w == null || !w.Armed || w.Current.type != WeaponType.Medical || WeaponController.IsRadio(w.Current) || WeaponController.IsDrone(w.Current)) return false;
             kit = w.Current.name == "SURGERY KIT";
             return true;
         }

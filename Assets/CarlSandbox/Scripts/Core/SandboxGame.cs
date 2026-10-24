@@ -202,6 +202,7 @@ namespace Carl
             WorldFreeze.Set(false);
             ClearAll();
             TrenchBattle.Stop();
+            HouseBattle.Stop();
             if (FpvDrone.Piloting != null) FpvDrone.Piloting.End("SIGNAL LOST");
             if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); mapRoot = null; }
             if (PlayerAvatar.Body != null) { HumanBody.All.Remove(PlayerAvatar.Body); Destroy(PlayerAvatar.Body.gameObject); PlayerAvatar.Body = null; }
@@ -236,8 +237,13 @@ namespace Carl
             ClearAll();
             if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); }   // (gone now: the new map is laid out against what is there)
             mapIndex = index;
+            bool houses = MapBuilder.Names[index] == "HOUSES";
+            int houseMode = houses && GameSettings.SpawnNpcs ? GameSettings.HouseMode : HouseBattle.Normal;
+            Houses.Wrecked = houseMode == HouseBattle.War;
+            HouseBattle.Stop();
+            HouseBattle.Mode = houseMode;
             mapRoot = MapBuilder.Build(index, out var spawn, out playerYaw, out var carls);
-            Nations.Active = MapBuilder.Names[index] == "TRENCHES";
+            Nations.Active = MapBuilder.Names[index] == "TRENCHES" || houseMode == HouseBattle.War;
             Nations.NewBattle();
             dressed = null;
             DressPlayer();
@@ -247,7 +253,8 @@ namespace Carl
             Haze.PrepareCamera(player.cam);
             SpawnPoint = spawn;
             player.Teleport(spawn, playerYaw);
-            if (GameSettings.SpawnNpcs) foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
+            if (GameSettings.SpawnNpcs && houseMode == HouseBattle.Normal) foreach (var c in carls) SpawnCarl(c + Vector3.up * 0.02f, Random.Range(0f, 360f));
+            if (houseMode != HouseBattle.Normal) { Physics.SyncTransforms(); HouseBattle.Begin(spawn, carls, houseMode); }
             TrenchSquad.Clear();
             if (MapBuilder.Names[index] == "TRENCHES" && GameSettings.SpawnNpcs)
             {
@@ -275,6 +282,15 @@ namespace Carl
             dressed = me;
             int nation = Nations.Of(Teams.Friendly);
             me.SetUniform(Nations.Active ? Nations.Uniform(nation) : 0);
+            if (HouseBattle.Mode == HouseBattle.Hood)
+            {
+                // your gang's colours, and a Glock
+                me.SetOutfit(GameSettings.Gang == HouseBattle.Crips ? 4 : 5);
+                Teams.RemoveArmband(me);
+                int glock = weapons.defs.FindIndex(d => d.name == "GLOCK 17");
+                if (glock >= 0) { weapons.Give(glock, true); weapons.Select(glock); }
+                return;
+            }
             if (Nations.Active)
             {
                 Teams.Armband(me, Teams.Friendly);
@@ -351,7 +367,7 @@ namespace Carl
 
             using var pmScope = PM_Update.Auto();
             BodyLod.Tick();
-            if (Nations.Active && PlayerAvatar.Body != null && dressed != PlayerAvatar.Body && !InMenu) DressPlayer();
+            if ((Nations.Active || HouseBattle.Mode == HouseBattle.Hood) && PlayerAvatar.Body != null && dressed != PlayerAvatar.Body && !InMenu) DressPlayer();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;
@@ -362,6 +378,7 @@ namespace Carl
             if (menus.open == MenuKind.Main) { WorldFreeze.Set(false); WorldFreeze.Tick(); return; }
             // the radio's map is up: its keys are its own (ESC backs out of it, not into the settings)
             if (Radio.Open || Radio.ClosedFrame >= Time.frameCount - 1) return;
+            if (menus.Typing) { if (kb.escapeKey.wasPressedThisFrame) GUIUtility.keyboardControl = 0; return; }
             if (kb.escapeKey.wasPressedThisFrame)
             {
                 if (menus.IsOpen && menus.open != MenuKind.Settings) menus.Toggle(menus.open);
@@ -405,7 +422,10 @@ namespace Carl
             }
             if (kb.cKey.wasPressedThisFrame) { ClearAll(); Toast("CLEARED"); }
             // P: up goes the drone you last picked (G menu, MISC)
-            if (kb.pKey.wasPressedThisFrame && !menus.IsOpen && FpvDrone.Piloting == null && Cursor.lockState == CursorLockMode.Locked) FpvDrone.Launch(FpvDrone.Selected);
+            if (kb.pKey.wasPressedThisFrame && !menus.IsOpen && FpvDrone.Piloting == null && Cursor.lockState == CursorLockMode.Locked) FpvDrone.PressP();
+            // a drone in your hand: LEFT CLICK puts it down on the floor in front of you
+            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && !menus.IsOpen && FpvDrone.Piloting == null && Cursor.lockState == CursorLockMode.Locked
+                && weapons.Armed && WeaponController.IsDrone(weapons.Current)) FpvDrone.SetDownHeld();
             if (kb.f1Key.wasPressedThisFrame) LoadMap(0);
             if (kb.f2Key.wasPressedThisFrame) LoadMap(1);
             if (kb.f3Key.wasPressedThisFrame) LoadMap(2);
@@ -600,9 +620,12 @@ namespace Carl
         void OnGUI()
         {
             // the main menu page: nothing of the game behind it
-            if (menus != null && menus.open == MenuKind.Main) { GUI.depth = -200; menus.Draw(); return; }
+            // (a menu opened this frame, after the layout pass was decided, is drawn from the next frame: its layout
+            // calls need the pass)
+            bool canMenu = menus != null && useGUILayout;
+            if (menus != null && menus.open == MenuKind.Main) { GUI.depth = -200; if (canMenu) menus.Draw(); return; }
             DrawHud();
-            if (menus != null) menus.Draw();
+            if (canMenu) menus.Draw();
         }
 
         void DrawHud()
@@ -707,21 +730,9 @@ namespace Carl
 
             if (showHelp && medical.selected == null && (menus == null || !menus.IsOpen))
             {
-                string help =
-                    "<b><color=#F58F29>CONTROLS</color></b>\n" +
-                    "WASD move · SHIFT sprint · SPACE jump (hold: get up) · CTRL crouch · Y drop down · Z fire mode\n" +
-                    "LMB fire / stab / swing · RMB aim / slash · R reload · B point aim on/off (RMB with it: raise it, no sights) · ALT hold: swing blade\n" +
-                    "ALT + D / ALT + A: gun out round the corner right / left (mouse left-right: how far out · hold RMB + mouse: point it · LMB fire)\n" +
-                    "1-9 or wheel: weapons (take them in the G menu; BANDAGE / SURGERY KIT: LMB treat a wound)\n" +
-                    "F spawn menu  ·  G gun menu  ·  V free camera on/off  ·  T slow-mo  ·  K end it\n" +
-                    "X real-time x-ray  ·  MIDDLE CLICK medical panel  ·  L flashlight  ·  O laser  ·  J clear a jam  ·  P fly a drone (pick one in G, MISC)\n" +
-                    "Friendlies (green armband): look at one, HOLD R to recruit  ·  HOLD MIDDLE MOUSE: squad orders\n" +
-                    "PHYSICS GUN (always on you): hold LMB grab/drag · RMB throw · rub bodies on walls  ·  Q / E hold: lean\n" +
-                    "F1 The Lab  ·  F2 The Yard  ·  F3 Houses  ·  F4 Trenches  ·  C clear  ·  SHIFT+K kill all\n" +
-                    "H your injuries  ·  N visor up/down  ·  TAB hide help  ·  ESC free mouse\n" +
-                    "RADIO (G menu, MISC): hold it + LMB, or M - map from above: 1 bombing run · 2 gun run · 3 artillery · 4 missile, LMB on the circle";
-                GUI.Box(new Rect(12, 12, 620, 212), GUIContent.none, hudCard);
-                GUI.Label(new Rect(26, 22, 600, 196), help, (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = true, fontSize = 12 }));
+                // the full list of keys is in ESC > CONTROLS; just the way there up here
+                GUI.Box(new Rect(12, 12, 392, 30), GUIContent.none, hudCard);
+                GUI.Label(new Rect(22, 17, 380, 22), "<b><color=#F58F29>ESC</color></b>  controls & settings   ·   <b><color=#F58F29>G</color></b> guns   ·   <b><color=#F58F29>F</color></b> spawn   ·   <b><color=#F58F29>TAB</color></b> hide", (hudHelp ??= new GUIStyle(hudSmall) { richText = true, wordWrap = false, fontSize = 13 }));
             }
         }
     }

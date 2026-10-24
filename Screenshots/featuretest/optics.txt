@@ -1,8 +1,0 @@
-== optics  (19:55:25)
-PASS  RedDot: picture in picture in the glass, not black (brightness 0.64)
-PASS  Holo: picture in picture in the glass, not black (brightness 0.64)
-PASS  Scope4x: picture in picture in the glass, not black (brightness 0.58)
-PASS  the AWP's 8x scope has its eyepiece
-PASS  the world round the scope stays nearly normal (fov 56)
-PASS  B: point aim, held low
-PASS  point aim + right mouse: canted aim at the eye

@@ -86,6 +86,19 @@ namespace Carl
                 case "nightearls": body = NightEarls(); break;
                 case "blind": body = BlindTest(); break;
                 case "spacing": body = SpacingTest(); break;
+                case "housemodes": body = HouseModesTest(); break;
+                case "peek": body = PeekTest(); break;
+                case "gunsmith": body = GunsmithTest(); break;
+                case "opticlist": body = OpticsTest(); break;
+                case "smithmenu": body = SmithMenuTest(); break;
+                case "droneopts": body = DroneOptionsTest(); break;
+                case "smithscreen": body = SmithScreenTest(); break;
+                case "gmenu": body = GMenuTest(); break;
+                case "smithguns": body = SmithGunsTest(); break;
+                case "pilots": body = PilotsTest(); break;
+                case "pilotlook": body = PilotLookTest(); break;
+                case "mounts": body = MountsTest(); break;
+                case "accuracy": body = AccuracyTest(); break;
                 default: Line("unknown scenario"); break;
             }
             if (body != null) yield return body;
@@ -729,8 +742,9 @@ namespace Carl
             float t0 = Time.time; int shots0 = EarlGunner.DroneShots;
             while (d != null && !d.Ended && Time.time - t0 < 20f) { d.autopilot = Vector3.ClampMagnitude((hover - d.transform.position) * 2f, 8f); yield return null; }
             float still = Time.time - t0;
-            Line($"hovering: down after {still:0.0} s ({EarlGunner.DroneShots - shots0} rounds at it), ended {d == null || d.Ended}");
+            Line($"hovering: down after {still:0.0} s ({EarlGunner.DroneShots - shots0} rounds at it), ended {d == null || d.Ended}; mean gun-off {EarlGunner.DroneMissSum / Mathf.Max(1, EarlGunner.DroneShots - shots0):0.0} deg, aim-pt-off {EarlGunner.DroneAimErrSum / Mathf.Max(1, EarlGunner.DroneShots - shots0):0.0} deg");
             Check(d == null || d.Ended, "a drone hanging still in front of him gets shot down");
+            if (d != null && !d.Ended) d.End("TEST OVER");
             yield return new WaitForSeconds(1.5f);
             // jinking: side to side and up and down, changing every half second or so
             var j = FpvDrone.Launch(FpvDrone.Kind.Bomber);
@@ -760,6 +774,26 @@ namespace Carl
             Line($"high up (32 m): {EarlGunner.DroneShots - shots0} rounds at it in 10 s");
             Check(EarlGunner.DroneShots - shots0 < 15, "a dropper high up mostly goes unseen");
             if (h != null && !h.Ended) h.End("TEST OVER");
+            yield return new WaitForSeconds(1.5f);
+            // after a missed drop: the men it went off by know to look up; others further off don't
+            ClearEarls();
+            var near = new System.Collections.Generic.List<EarlGunner>();
+            for (int k = 0; k < 4; k++) near.Add(Gunner(at + side * (k - 1.5f) * 2.5f, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y));
+            for (int k = 0; k < 3; k++) Gunner(at + fwd * 40f + side * (k - 1f) * 3f, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            yield return new WaitForSeconds(2f);
+            var r = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            Vector3 over = at + Vector3.up * 35f;
+            var rrb = r.GetComponent<Rigidbody>();
+            rrb.position = over; r.transform.position = over; rrb.linearVelocity = Vector3.zero;
+            foreach (var e in near) if (e != null) e.droneAlertUntil = Time.time + 25f;
+            r.RevealedUntil = Time.time + 45f;
+            shots0 = EarlGunner.DroneShots; t0 = Time.time; int hits0 = FpvDrone.Hits;
+            while (r != null && !r.Ended && Time.time - t0 < 20f) { r.autopilot = Vector3.ClampMagnitude((over - r.transform.position) * 2f, 6f); yield return null; }
+            float lasted = Time.time - t0;
+            Line($"  ({FpvDrone.Hits - hits0} hits; ended: {FpvDrone.LastEnd})");
+            Line($"revealed, hovering 35 m up over 4 alerted men: lasted {lasted:0.0} s, {EarlGunner.DroneShots - shots0} rounds at it, down {r == null || r.Ended}");
+            Check(lasted > 19f, "even once they know it's up there, a speck 35 m up is hard to hit");
+            if (r != null && !r.Ended) r.End("TEST OVER");
         }
 
         /// <summary>You, sprinting with a rifle up through the trenches, turning hard: you should never go over.</summary>
@@ -1208,6 +1242,514 @@ namespace Carl
             GameSettings.InfiniteAmmo = true;
         }
         public static string ReloadGun = "AK-74";
+
+        /// <summary>Earls with FPV drones: they go somewhere covered, goggles on, and send them at the other side.</summary>
+        IEnumerator PilotsTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            GameSettings.Invincible = true;
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            // your side: two riflemen standing in the open 45 m off
+            var a = Gunner(me + fwd * 8f + side * 3f, Teams.Friendly, Quaternion.LookRotation(fwd).eulerAngles.y);
+            var b = Gunner(me + fwd * 8f - side * 3f, Teams.Friendly, Quaternion.LookRotation(fwd).eulerAngles.y);
+            // theirs: two pilots
+            var k = Gunner(me + fwd * 52f + side * 4f, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            var bo = Gunner(me + fwd * 52f - side * 4f, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            k.droneKit = FpvDrone.Kind.Kamikaze; bo.droneKit = FpvDrone.Kind.Bomber;
+            int l0 = EarlGunner.DronesLaunched, s0 = EarlGunner.DroneShots;
+            int wa = Wounds(a.Body) + Wounds(b.Body);
+            float t0 = Time.time; bool saw = false;
+            while (Time.time - t0 < 50f)
+            {
+                if (!saw && (k.Piloting || bo.Piloting)) { saw = true; Line($"first drone up after {Time.time - t0:0.0} s (k {k.Status} / b {bo.Status})"); }
+                if (Time.frameCount % 500 == 0) Line($"  t {Time.time - t0:0}: drones up {FpvDrone.Active.Count}, rounds at drones {EarlGunner.DroneShots - s0}  |  K {k.PilotDebug}  |  B {bo.PilotDebug}");
+                yield return null;
+                if (saw && Mathf.Abs(Time.time - t0 - 14f) < 0.02f) { }
+            }
+            Line($"launched {EarlGunner.DronesLaunched - l0}, your men fired {EarlGunner.DroneShots - s0} rounds at drones, wounds on your men {wa} -> {Wounds(a.Body) + Wounds(b.Body)}, last drone end: {FpvDrone.LastEnd}");
+            Check(EarlGunner.DronesLaunched - l0 == 2, "both pilots got their drones up");
+            Check(EarlGunner.DroneShots - s0 > 0, "your men shoot at the enemy drones");
+            GameSettings.Invincible = false;
+        }
+
+        /// <summary>
+        /// How well an Earl shoots you, standing in the open in front of him at 15, 35 and 60 m, at the enemy skill
+        /// setting: rounds fired, rounds that hit you, and how long to the first hit.
+        /// </summary>
+        IEnumerator AccuracyTest()
+        {
+            Game.LoadMap(1);
+            yield return new WaitForSeconds(1.5f);
+            bool inv = GameSettings.Invincible; GameSettings.Invincible = true;
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Line($"enemy skill {GameSettings.EnemySkill:0.00}");
+            foreach (float dist in new[] { 15f, 35f, 60f })
+            {
+                ClearEarls();
+                Vector3 at = me + fwd * dist;
+                if (Physics.Raycast(at + Vector3.up * 20f, Vector3.down, out var gh, 40f, ~0, QueryTriggerInteraction.Ignore)) at = gh.point;
+                var g = Gunner(at, Teams.Enemy, Quaternion.LookRotation(-fwd).eulerAngles.y);
+                g.defend = true; g.holdPoint = at;
+                int s0 = EarlGunner.ShotsFired, h0 = Ballistics.PlayerHits;
+                float t0 = Time.time, first = -1f;
+                while (Time.time - t0 < 12f) { if (first < 0f && Ballistics.PlayerHits > h0) first = Time.time - t0; yield return null; }
+                int shots = EarlGunner.ShotsFired - s0, hits = Ballistics.PlayerHits - h0;
+                Line($"  {dist:0} m: {shots} rounds, {hits} hit you ({(shots > 0 ? 100f * hits / shots : 0f):0}%), first hit after {(first < 0 ? "-" : first.ToString("0.0") + " s")}");
+            }
+            GameSettings.Invincible = inv;
+        }
+
+        /// <summary>A light and a laser on each rail of an AK-74M in the gunsmith.</summary>
+        IEnumerator MountsTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            int i = Idx("AK-74M");
+            Wpn.Give(i, true);
+            var L = Wpn.loadouts[i];
+            L.build = new GunBuild { platform = "AK", parts = new[] { "415", "railed", "b10", "dtk1", "rk3", "zhukov", "545b" } };
+            L.grip = GripKind.Vertical; L.foregrip = "rvg"; L.light = true; L.lightId = "m600"; L.laser = true; L.laserId = "perst";
+            Wpn.ApplyBuild(i);
+            Game.menus.ShowGunPage(i);
+            yield return null;
+            Game.menus.OpenGunsmith(i);
+            Game.menus.SmithSelect("LIGHT");
+            foreach (var (ls, zs) in new[] { (0, 1), (1, 0), (2, 2), (3, 3) })
+            {
+                L.lightSide = ls; L.laserSide = zs; Wpn.RefreshAttachments();
+                yield return new WaitForSeconds(1.2f);
+                yield return GrabView($"mount_light{WeaponController.SideNames[ls]}_laser{WeaponController.SideNames[zs]}");
+            }
+            Game.menus.Toggle(MenuKind.Gunsmith); Game.menus.Toggle(MenuKind.Gun);
+        }
+
+        /// <summary>A pilot with his goggles on, close up.</summary>
+        IEnumerator PilotLookTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            var p = Gunner(me + fwd * 3f, Teams.Friendly, Quaternion.LookRotation(-fwd).eulerAngles.y);
+            p.droneKit = FpvDrone.Kind.Bomber;
+            var e = Gunner(me - fwd * 60f, Teams.Enemy, 0f); e.Body.brain.aiEnabled = false;
+            float t0 = Time.time;
+            while (!p.Piloting && Time.time - t0 < 25f) yield return null;
+            yield return new WaitForSeconds(1.5f);
+            Line($"piloting {p.Piloting} after {Time.time - t0:0.0} s, status {p.Status}");
+            yield return GrabView("pilot_look");
+            // and a camera in front of his face
+            var head = p.Body.Head.transform;
+            Vector3 face = Vector3.ProjectOnPlane(p.Body.Chest.transform.forward, Vector3.up).normalized;
+            var cg = new GameObject("TestCam"); var c = cg.AddComponent<Camera>();
+            c.transform.position = head.position + face * 1.1f + Vector3.up * 0.05f + Vector3.Cross(Vector3.up, face) * 0.35f;
+            c.transform.LookAt(head.position - Vector3.up * 0.25f);
+            c.fieldOfView = 40f;
+            var rt = new RenderTexture(1280, 720, 24); c.targetTexture = rt; c.Render();
+            RenderTexture.active = rt; var tex = new Texture2D(1280, 720, TextureFormat.RGB24, false); tex.ReadPixels(new Rect(0, 0, 1280, 720), 0, 0); tex.Apply(); RenderTexture.active = null;
+            File.WriteAllBytes(Path.Combine(dir, "pilot_face.png"), tex.EncodeToPNG());
+            Destroy(cg); rt.Release();
+        }
+
+        IEnumerator SmithGunsTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            foreach (var (gun, slot) in new[] { ("AR-15", "B2"), ("GLOCK 17", "GMAG"), ("AK-47", "B6") })
+            {
+                Game.menus.ShowGunPage(Idx(gun));
+                yield return null;
+                Game.menus.OpenGunsmith(Idx(gun));
+                Game.menus.SmithSelect(slot);
+                yield return new WaitForSeconds(1.5f);
+                yield return GrabView("smithgun_" + gun.Replace(" ", ""));
+                Game.menus.Toggle(MenuKind.Gunsmith);
+                Game.menus.Toggle(MenuKind.Gun);
+                yield return null;
+            }
+        }
+
+        /// <summary>The G menu opened and closed on a few pages (for GUI errors).</summary>
+        IEnumerator GMenuTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            Debug.Log("[FeatureTest] step: open G");
+            Game.menus.Toggle(MenuKind.Gun);
+            yield return new WaitForSeconds(1f);
+            Debug.Log("[FeatureTest] step: AK-74M page");
+            Game.menus.ShowGunPage(Idx("AK-74M"));
+            yield return new WaitForSeconds(1f);
+            Debug.Log("[FeatureTest] step: drone page");
+            Game.menus.ShowGunPage(Idx("KAMIKAZE DRONE"));
+            yield return new WaitForSeconds(1f);
+            Debug.Log("[FeatureTest] step: close");
+            Game.menus.Toggle(MenuKind.Gun);
+            yield return new WaitForSeconds(0.5f);
+            Debug.Log("[FeatureTest] step: settings");
+            Game.menus.Toggle(MenuKind.Settings);
+            yield return new WaitForSeconds(0.5f);
+            Game.menus.ShowControls(0);
+            yield return new WaitForSeconds(0.5f);
+            Debug.Log("[FeatureTest] step: close settings");
+            Game.menus.Toggle(MenuKind.Settings);
+            yield return new WaitForSeconds(0.5f);
+        }
+
+        /// <summary>The gunsmith screen: slots, parts with their pictures, presets saved and loaded; the controls page.</summary>
+        IEnumerator SmithScreenTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            int i = Idx("AK-74M");
+            Wpn.Give(i, true);
+            var L = Wpn.loadouts[i];
+            L.build = GunBuilder.Stock("AK-74M"); Wpn.ApplyBuild(i);
+            Game.menus.ShowGunPage(i);
+            yield return new WaitForSeconds(1f);
+            yield return GrabView("smith_gpage");
+            Game.menus.OpenGunsmith(i);
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("smith_screen");
+            Game.menus.SmithSelect("B5");
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("smith_stock");
+            Game.menus.SmithSelect("SIGHT");
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("smith_sight");
+            // a build, saved, the gun reset, the build loaded back
+            L.build = new GunBuild { platform = "AK", parts = new[] { "415", "railed", "b10", "dtk1", "rk3", "zhukov", "545x60" } };
+            L.sight = SightKind.Scope4x; L.optic = "acog"; L.grip = GripKind.Vertical; L.foregrip = "rk2"; L.light = true; L.lightId = "klesch";
+            Wpn.ApplyBuild(i);
+            GunPresets.Save(GunPreset.From("AK-74M", "TEST BUILD", L));
+            L.build = GunBuilder.Stock("AK-74M"); L.sight = SightKind.Iron; L.grip = GripKind.None; L.light = false; Wpn.ApplyBuild(i);
+            var p = GunPresets.For("AK-74M").Find(x => x.name == "TEST BUILD");
+            p.Apply(L); Wpn.ApplyBuild(i); Wpn.RefreshAttachments();
+            Check(L.build.Key == "AK_415.railed.b10.dtk1.rk3.zhukov.545x60" && L.optic == "acog" && L.light, "a saved preset loads back the same build");
+            Game.menus.SmithSelect("PRESETS");
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("smith_presets");
+            Game.menus.SmithSelect("B3");
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("smith_muzzle");
+            GunPresets.Delete(p);
+            Game.menus.Toggle(MenuKind.Gunsmith);
+            yield return null;
+            Check(Game.menus.open == MenuKind.Gun, "G / ESC out of the gunsmith goes back to the gun menu");
+            Game.menus.Toggle(MenuKind.Gun);
+            Game.menus.ShowControls(1);
+            yield return new WaitForSeconds(0.5f);
+            yield return GrabView("controls_combat");
+            Game.menus.Toggle(MenuKind.Settings);
+        }
+
+        /// <summary>
+        /// The drones: carried, set down on the floor (P), flown from there (P again); a big shaped-charge
+        /// kamikaze against a big fragmentation one; the dropper's timed grenades.
+        /// </summary>
+        IEnumerator DroneOptionsTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized;
+            Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            // ---- equip, set down, fly
+            FpvDrone.WarheadSize = 1f; FpvDrone.ShapedCharge = true;
+            // P with no drone down: nothing happens
+            FpvDrone.PressP();
+            yield return null;
+            Check(FpvDrone.Piloting == null, "P with no drone down does nothing");
+            int kd = Idx("KAMIKAZE DRONE");
+            Wpn.Give(kd, true); Wpn.Select(kd);
+            yield return new WaitForSeconds(1f);
+            yield return GrabView("drone_inhand");
+            bool held = Wpn.Armed && WeaponController.IsDrone(Wpn.Current);
+            FpvDrone.SetDownHeld();
+            yield return new WaitForSeconds(1.5f);
+            Check(held && !Wpn.owned[kd], "held in the hand; LEFT CLICK puts it down and it leaves your hands");
+            var parked = FpvDrone.Parked;
+            bool onFloor = parked != null && FpvDrone.Piloting == null && parked.transform.position.y < me.y + 0.5f;
+            Line($"set down: parked {parked != null}, flying {FpvDrone.Piloting != null}, height over feet {(parked != null ? parked.transform.position.y - me.y : -1f):0.00} m");
+            yield return GrabView("drone_parked");
+            Check(onFloor, "P sets the carried drone down on the floor");
+            // a man to hit, 14 m off, and two more round him
+            Vector3 at = me + fwd * 14f;
+            var target = Dummy(at, 180f); var nearL = Dummy(at + side * 2.2f, 180f); var nearR = Dummy(at - side * 2.2f, 180f);
+            yield return new WaitForSeconds(1f);
+            int w0 = Wounds(target), l0 = Wounds(nearL) + Wounds(nearR);
+            FpvDrone.PressP();
+            yield return null;
+            var d = FpvDrone.Piloting;
+            Check(d != null && d == parked, "P again: you're flying it, from the floor");
+            float t0 = Time.time;
+            while (d != null && !d.Ended && Time.time - t0 < 12f)
+            {
+                Vector3 to = target.Chest.transform.position - d.transform.position;
+                d.autopilot = to.normalized * 8f;
+                yield return null;
+            }
+            yield return new WaitForSeconds(1.5f);
+            int shapedHit = Wounds(target) - w0, shapedSide = Wounds(nearL) + Wounds(nearR) - l0;
+            Line($"big shaped charge: target {shapedHit} wounds, the men 2.2 m either side {shapedSide}");
+            // ---- the same with a big fragmentation warhead
+            ClearEarls();
+            target = Dummy(at, 180f); nearL = Dummy(at + side * 2.2f, 180f); nearR = Dummy(at - side * 2.2f, 180f);
+            yield return new WaitForSeconds(1f);
+            w0 = Wounds(target); l0 = Wounds(nearL) + Wounds(nearR);
+            FpvDrone.ShapedCharge = false;
+            d = FpvDrone.Launch(FpvDrone.Kind.Kamikaze);
+            t0 = Time.time;
+            while (d != null && !d.Ended && Time.time - t0 < 12f)
+            {
+                Vector3 to = target.Chest.transform.position - d.transform.position;
+                d.autopilot = to.normalized * 8f;
+                yield return null;
+            }
+            yield return new WaitForSeconds(1.5f);
+            int fragHit = Wounds(target) - w0, fragSide = Wounds(nearL) + Wounds(nearR) - l0;
+            Line($"big fragmentation: target {fragHit} wounds, the men either side {fragSide}");
+            Check(fragSide > shapedSide, "fragmentation spreads out; the shaped charge stays on what it hits");
+            // ---- speed: the biggest warhead is slow
+            FpvDrone.WarheadSize = 0f;
+            var light = FpvDrone.Launch(FpvDrone.Kind.Kamikaze);
+            for (float t = 0f; t < 2.5f; t += Time.deltaTime) { light.autopilot = null; yield return null; }
+            light.End("TEST OVER", true);
+            yield return new WaitForSeconds(0.5f);
+            // ---- the dropper's timed grenades
+            ClearEarls();
+            FpvDrone.TimedBombs = true; FpvDrone.WarheadSize = 0f;
+            var b = FpvDrone.Launch(FpvDrone.Kind.Bomber);
+            Vector3 over = me + fwd * 10f + Vector3.up * 12f;
+            t0 = Time.time;
+            while (Time.time - t0 < 4f) { b.autopilot = Vector3.ClampMagnitude((over - b.transform.position) * 2f, 6f); yield return null; }
+            int g0 = Grenade.All.Count;
+            b.Drop();
+            yield return null;
+            var g = Grenade.All.Count > g0 ? Grenade.All[Grenade.All.Count - 1] : null;
+            Line($"timed drop: grenade {(g != null ? $"impact {g.impact}, fuse {g.fuse:0.0} s, power {g.power:0.0}, {g.shrapnel} fragments" : "none")}");
+            Check(g != null && !g.impact && g.power > 1.5f, "timed grenades: a fuse and a bigger charge");
+            yield return new WaitForSeconds(4f);
+            b.End("TEST OVER");
+            FpvDrone.TimedBombs = false;
+        }
+
+        /// <summary>The G menu's gunsmith with builds on the showcase.</summary>
+        IEnumerator SmithMenuTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            int i = Idx("AK-74M"), ar = Idx("AR-15");
+            Wpn.Give(i, true); Wpn.Give(ar, true);
+            var shots = new (int gun, string plat, string[] p, string tag, int slot)[]
+            {
+                (i, "AK", new[] { "206", "hinged", "plum", "booster", "plum", "skel", "545p" }, "krinkov", 5),
+                (i, "AK", new[] { "415", "railed", "zhukov", "pbs4", "moe", "zhukov", "545x60" }, "zhukov", 3),
+                (i, "AK", new[] { "590", "railed", "b10", "dtk1", "rk3", "ak12", "545x45" }, "rpk", 2),
+                (ar, "AR", new[] { "267", "raptor", "ras", "socom", "hogue", "moe", "d60" }, "arsbr", 6),
+                (ar, "AR", new[] { "508", "milspec", "mlok13", "pa", "k2", "prs", "pmag40" }, "ardmr", 5),
+                (ar, "AR", new[] { "368", "milspec", "m4", "sf3p", "moe", "m4", "sf60" }, "arm4", 2),
+            };
+            foreach (var (g, plat, p, tag, slot) in shots)
+            {
+                Wpn.loadouts[g].build = new GunBuild { platform = plat, parts = p };
+                Wpn.loadouts[g].sight = tag == "zhukov" || tag == "ardmr" ? SightKind.Scope4x : tag == "rpk" ? SightKind.RedDot : SightKind.Iron;
+                Wpn.loadouts[g].optic = tag == "zhukov" ? "pso1" : tag == "ardmr" ? "acog" : "kobra";
+                Wpn.ApplyBuild(g);
+                Game.menus.ShowGunPage(g, slot);
+                yield return new WaitForSeconds(2.5f);
+                yield return GrabView("smith_" + tag);
+            }
+            Game.menus.Toggle(MenuKind.Gun);
+        }
+
+        /// <summary>Every optic on an AK-74M with a railed cover, aimed through; with each light and laser on.</summary>
+        IEnumerator OpticsTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            int i = Idx("AK-74M");
+            Wpn.Give(i, true); Wpn.Select(i);
+            yield return new WaitForSeconds(1f);
+            var L = Wpn.loadouts[i];
+            L.build = GunBuilder.Stock("AK-74M"); L.build[PartSlot.Cover] = "railed"; L.build[PartSlot.Handguard] = "zhukov";
+            Wpn.ApplyBuild(i);
+            int k = 0;
+            foreach (var a in Attachments.Of(0))
+            {
+                L.sight = a.sight; L.optic = a.id;
+                var li = Attachments.Of(2); var la = Attachments.Of(3); var fg = Attachments.Of(1);
+                L.light = true; L.lightId = li[k % li.Count].id; L.laser = true; L.laserId = la[k % la.Count].id;
+                L.grip = fg[k % fg.Count].grip; L.foregrip = fg[k % fg.Count].id;
+                Wpn.RefreshAttachments();
+                WeaponController.ForceAim = false;
+                yield return new WaitForSeconds(0.5f);
+                yield return GrabView("optic_" + a.id + "_hip");
+                WeaponController.ForceAim = true;
+                yield return new WaitForSeconds(1.2f);
+                yield return GrabView("optic_" + a.id);
+                Line($"{a.name}: light {L.lightId}, laser {L.laserId}, grip {L.foregrip}");
+                k++;
+            }
+            WeaponController.ForceAim = false;
+        }
+
+        /// <summary>The gunsmith: AKs rebuilt from parts, in your hands, their numbers following the parts; Earls with theirs.</summary>
+        IEnumerator GunsmithTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            int i = Idx("AK-74M");
+            Wpn.Give(i, true); Wpn.Select(i);
+            yield return new WaitForSeconds(1f);
+            var L = Wpn.loadouts[i];
+            var builds = new (string tag, string[] p)[]
+            {
+                ("stock", null),
+                ("krinkov", new[] { "206", "hinged", "plum", "booster", "plum", "skel", "545p" }),
+                ("zhukov_pbs", new[] { "415", "railed", "zhukov", "pbs4", "moe", "zhukov", "545x60" }),
+                ("rpk_b10", new[] { "590", "railed", "b10", "dtk1", "rk3", "ak12", "545x45" }),
+                ("nostock", new[] { "314", "ribbed", "poly", "thread", "poly", "none", "545b" }),
+            };
+            foreach (var (tag, p) in builds)
+            {
+                L.build = p == null ? GunBuilder.Stock("AK-74M") : new GunBuild { parts = p };
+                Wpn.ApplyBuild(i);
+                yield return new WaitForSeconds(0.6f);
+                var d = Wpn.defs[i];
+                Line($"{tag}: model {GunBuilder.Model("AK-74M", L.build)}  mag {Wpn.MagSize(i)}  recoil {d.recoil:0.00}  spread {d.spread:0.00}  v {d.muzzleVelocity:0}  loud {d.loudness:0}  reload {d.reloadTime:0.00}  suppressed {L.suppressor}");
+                yield return GrabView("gunsmith_" + tag);
+            }
+            Check(Wpn.MagSize(i) == 30 && Wpn.defs[i].recoil > 1.5f, "no stock, bare muzzle: much more recoil");
+            // the AR-15 too
+            int ar = Idx("AR-15");
+            Wpn.Give(ar, true); Wpn.Select(ar);
+            yield return new WaitForSeconds(1f);
+            var LA = Wpn.loadouts[ar];
+            foreach (var (tag, p) in new (string, string[])[] { ("ar_sbr", new[] { "267", "raptor", "ras", "socom", "hogue", "moe", "d60" }), ("ar_m4", new[] { "368", "milspec", "m4", "a2", "a2", "m4", "stanag20" }), ("ar_dmr", new[] { "508", "milspec", "mlok13", "pa", "k2", "prs", "pmag40" }) })
+            {
+                LA.build = new GunBuild { platform = "AR", parts = p };
+                GunBuilder.Fit("AR-15", LA.build, PartSlot.Barrel, p[0]);
+                Wpn.ApplyBuild(ar);
+                yield return new WaitForSeconds(0.6f);
+                var d = Wpn.defs[ar];
+                Line($"{tag}: {string.Join(".", LA.build.parts)}  mag {Wpn.MagSize(ar)}  recoil {d.recoil:0.00}  spread {d.spread:0.00}  v {d.muzzleVelocity:0}  loud {d.loudness:0}");
+                yield return GrabView("gunsmith_" + tag);
+            }
+            Wpn.Select(i);
+            // Earls in a battle: their own builds
+            Nations.Active = true; Nations.NewBattle();
+            int built = 0;
+            Vector3 me = Game.SpawnPoint; Vector3 fwd = Vector3.ProjectOnPlane(Game.player.cam.transform.forward, Vector3.up).normalized; Vector3 side = Vector3.Cross(Vector3.up, fwd);
+            for (int k = 0; k < 5; k++)
+            {
+                var h = Game.SpawnCarl(me + fwd * 2.6f + side * (k - 2) * 0.8f, Quaternion.LookRotation(side).eulerAngles.y);
+                if (h == null) continue;
+                h.brain.aiEnabled = false;
+                var g = EarlGunner.Arm(h, k % 2 == 0 ? EarlWeapon.AK74M : EarlWeapon.AK47, GunKit.Random(true), Teams.Enemy);
+                if (g != null && g.Body != null) { foreach (var mf in g.Body.GetComponentsInChildren<MeshFilter>()) if (mf.name.StartsWith("Build_")) { built++; break; } }
+            }
+            Wpn.Select(Idx("PHYSICS GUN"));
+            yield return new WaitForSeconds(1.5f);
+            yield return GrabView("gunsmith_earls");
+            Line($"Earls with a rebuilt rifle: {built} of 5");
+            Nations.Active = false;
+        }
+
+        /// <summary>
+        /// An Earl right behind the edge of a wall, his man off to the side of it: from where he stands the wall is in
+        /// the way, a lean out past the edge clears it. He should lean out and shoot, not wait for a clear line.
+        /// </summary>
+        IEnumerator PeekTest()
+        {
+            Game.LoadMap(0);
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            Vector3 o = Game.SpawnPoint + new Vector3(25f, 0f, 0f);
+            if (Physics.Raycast(o + Vector3.up * 10f, Vector3.down, out var gh, 20f, ~0, QueryTriggerInteraction.Ignore)) o = gh.point;
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            wall.name = "Wall";
+            wall.transform.position = o + new Vector3(-1.1f, 1.2f, 0.75f); wall.transform.localScale = new Vector3(2.5f, 2.4f, 0.3f);
+            int total = 0, fired = 0;
+            foreach (float side in new[] { 2.5f, 4f })
+            {
+                ClearEarls();
+                var tgt = Gunner(o + new Vector3(side, 0f, 20f), Teams.Friendly, 180f);
+                tgt.Body.brain.aiEnabled = false;
+                var g = Gunner(o, Teams.Enemy, 0f);
+                g.defend = true; g.holdPoint = o;
+                yield return new WaitForSeconds(1f);
+                // the wall's right edge just left of his head, a stride in front of him
+                Vector3 hd = g.Body.Head.transform.position;
+                wall.transform.position = new Vector3(hd.x + 0.2f - 1.25f, o.y + 1.2f, hd.z + 0.7f);
+                Physics.SyncTransforms();
+                // (a firefight: he knows where his man is - he's been shot at from there)
+                g.Learn(tgt.Body.Center, 1f, false);
+                bool blocked = !EarlGunner.Clear(g.Body.Head.transform.position, tgt.Body.Chest.transform.position, g.Body);
+                int s0 = EarlGunner.ShotsFired; float maxLean = 0f, t0 = Time.time, first = -1f;
+                while (Time.time - t0 < 12f)
+                {
+                    if (g.Body != null) maxLean = Mathf.Max(maxLean, Mathf.Abs(g.Body.ragdoll.lean));
+                    if (first < 0f && EarlGunner.ShotsFired > s0) first = Time.time - t0;
+                    yield return null;
+                }
+                int n = EarlGunner.ShotsFired - s0;
+                Line($"target {side} m off the wall's line: blocked from his standing head {blocked}; {n} rounds in 12 s, first after {first:0.0} s, max lean {maxLean:0.00}");
+                Line($"  target dead {tgt.Body.Dead}, conscious {tgt.Body.physio.consciousness:0.00}; shooter status '{g.Status}', moved {Vector3.Distance(g.Body.Pelvis.transform.position, o + Vector3.up):0.0} m");
+                total++; if (n > 0) fired++;
+            }
+            Destroy(wall);
+            Check(fired == total, "half behind a corner, he leans out and shoots");
+        }
+
+        /// <summary>The houses map as HOOD (Crips v Bloods) and WAR (attack and defend, on a shelled street).</summary>
+        IEnumerator HouseModesTest()
+        {
+            bool npcs = GameSettings.SpawnNpcs; int mode = GameSettings.HouseMode; bool att = GameSettings.HouseAttack;
+            GameSettings.SpawnNpcs = true;
+            string Count()
+            {
+                int f = 0, e = 0, fs = 0, es = 0;
+                var statuses = new Dictionary<string, int>();
+                foreach (var g in EarlGunner.All)
+                {
+                    if (g == null || g.Body == null) continue;
+                    bool fr = g.team == Teams.Friendly;
+                    if (g.Fighting) { if (fr) f++; else e++; } else { if (fr) fs++; else es++; }
+                    if (g.Fighting) { statuses.TryGetValue(g.Status, out int n); statuses[g.Status] = n + 1; }
+                }
+                var st = new List<string>(); foreach (var kv in statuses) st.Add(kv.Key + " x" + kv.Value);
+                return $"friendly {f} up / {fs} down, enemy {e} up / {es} down  [{string.Join(", ", st)}]";
+            }
+            int[] modes = { HouseBattle.Hood, HouseBattle.War, HouseBattle.War };
+            bool[] attack = { true, true, false };
+            string[] tag = { "hood", "war_attack", "war_defend" };
+            for (int k = 0; k < 3; k++)
+            {
+                GameSettings.HouseMode = modes[k]; GameSettings.HouseAttack = attack[k];
+                Game.LoadMap(2);
+                yield return new WaitForSeconds(2f);
+                int craters = 0, holes = 0, glass = Object.FindObjectsByType<WindowGlass>(FindObjectsSortMode.None).Length;
+                foreach (var t in Object.FindObjectsByType<Transform>(FindObjectsSortMode.None)) { if (t.name == "Crater") craters++; if (t.name == "Rubble") holes++; }
+                Line($"{tag[k]}: mode {HouseBattle.Mode}, wrecked {Houses.Wrecked}: {craters} craters, {holes} rubble, {glass} windows; {Count()}");
+                yield return GrabView("house_" + tag[k] + "_start");
+                yield return new WaitForSeconds(k == 2 ? 20f : 25f);
+                Line($"  after {(k == 2 ? 20 : 25)} s: {Count()}");
+                yield return GrabView("house_" + tag[k] + "_later");
+                Check(EarlGunner.All.Count > 6, tag[k] + ": both sides spawned");
+            }
+            Check(HouseBattle.Mode == HouseBattle.War && Houses.Wrecked, "war street is wrecked");
+            GameSettings.SpawnNpcs = npcs; GameSettings.HouseMode = mode; GameSettings.HouseAttack = att;
+        }
 
         IEnumerator CamoTest()
         {

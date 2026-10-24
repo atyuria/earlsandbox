@@ -25,12 +25,17 @@ namespace Carl
         Vector3 droneAimPt, droneVelSm, fleeDir;
         /// <summary>For the playtests: rounds fired at drones, and times a man broke and ran from one.</summary>
         public static int DroneShots, DroneFrights, StuckBackoffs;
+        public static float DroneMissSum, DroneAimErrSum;
+        /// <summary>Playtests: every round any Earl has fired.</summary>
+        public static int ShotsFired;
+        /// <summary>Until when he knows a dropper is up there (a grenade from it went off near him and missed).</summary>
+        public float droneAlertUntil = -99f;
 
         /// <summary>Shooting at a drone, or running from one. True if that's what he's doing this frame.</summary>
         bool DroneBehaviour(float legs)
         {
             // (your drones are your side's: only the other side shoots at them, or runs from them)
-            if (FpvDrone.Active.Count == 0 || !Teams.Hostile(team, Teams.Friendly)) { droneT = null; return false; }
+            if (FpvDrone.Active.Count == 0 || flyingDrone != null) { droneT = null; return false; }
             if (Time.time > droneCheck)
             {
                 droneCheck = Time.time + 0.25f + Random.value * 0.1f;
@@ -91,8 +96,9 @@ namespace Carl
             float swing = 2.5f + dist * 0.18f;
             droneAimPt = Vector3.MoveTowards(droneAimPt, want, swing * dt);
             // and never dead on: a wandering error that grows with range
-            float t = Time.time;
-            Vector3 err = new Vector3(Mathf.PerlinNoise(t * 1.7f, seed) - 0.5f, Mathf.PerlinNoise(seed, t * 1.9f) - 0.5f, Mathf.PerlinNoise(t * 1.3f, seed + 3f) - 0.5f) * (0.12f + dist * 0.008f);
+            float t = Time.time, up = Mathf.Max(0f, dp.y - chest.y);
+            float spread = (0.12f + dist * 0.008f) * (1f + Mathf.Clamp(up - 6f, 0f, 60f) * 0.36f);
+            Vector3 err = new Vector3(Mathf.PerlinNoise(t * 1.7f, seed) - 0.5f, Mathf.PerlinNoise(seed, t * 1.9f) - 0.5f, Mathf.PerlinNoise(t * 1.3f, seed + 3f) - 0.5f) * spread;
             Vector3 aimAt = droneAimPt + err;
             rag.moveSpeed = 0f; rag.crouch = 0f; rag.pose = PoseKind.Stand;
             rag.lean = Mathf.MoveTowards(rag.lean, 0f, dt * 3f);
@@ -101,15 +107,19 @@ namespace Carl
             if (flat.sqrMagnitude > 0.01f) rag.faceDir = flat.normalized;
             rag.aimDir = AimWithError(aimAt);
             Status = "SHOOTING AT A DRONE";
-            if (dist < 95f)
+            // (he squeezes off only when the barrel has come onto where he's aiming, not while it's still swinging)
+            if (dist < 95f && Vector3.Angle(weapon.transform.forward, aimAt - muzzle.position) < 1.6f + Shakiness() * 1.5f)
             {
                 int before = rounds;
-                Shoot(aimAt);
+                Shoot(aimAt, true);
                 if (rounds < before)
                 {
                     DroneShots++;
+                    DroneMissSum += Vector3.Angle(weapon.transform.forward, dp - muzzle.position); DroneAimErrSum += Vector3.Angle(aimAt - muzzle.position, dp - muzzle.position);
                     // the noise and the tracers: everyone round about looks for it too
                     droneT.ShotAtUntil = Time.time + 4f;
+                    // a speck high overhead: he can't hold a bead on it - a shot or two, lose it, find it again
+                    if (up > 14f) nextShot = Mathf.Max(nextShot, Time.time + Random.Range(0.35f, 1.1f) * Mathf.Lerp(1f, 1.8f, Mathf.InverseLerp(14f, 50f, up)));
                 }
             }
             return true;
@@ -124,13 +134,14 @@ namespace Carl
             FpvDrone best = null; float bd = float.MaxValue;
             foreach (var d in FpvDrone.Active)
             {
-                if (d == null || d.Ended) continue;
+                if (d == null || d.Ended || !Teams.Hostile(team, d.team)) continue;
                 Vector3 dp = d.transform.position, to = dp - eye;
                 float dist = to.magnitude;
-                // revealed: a grenade from it that didn't kill them. Shot at: someone is firing at it, so those
-                // about know which way to look - but that alone doesn't pick a speck out high in the sky
-                bool revealed = Time.time < d.RevealedUntil, shotAt = Time.time < d.ShotAtUntil;
-                float range = SandboxGame.Night ? (revealed ? 45f : 22f) : (revealed || shotAt ? 120f : 75f);
+                // revealed: a grenade from it went off near HIM and missed, so he knows to look up. Shot at: someone
+                // is firing at it, so those about know roughly which way to look. Neither picks a speck out of the sky
+                // straight away; one he's already tracking he keeps (mostly).
+                bool revealed = Time.time < droneAlertUntil, shotAt = Time.time < d.ShotAtUntil, tracking = d == droneT;
+                float range = SandboxGame.Night ? (revealed ? 40f : 22f) : (revealed ? 90f : shotAt ? 80f : 70f);
                 if (dist > range || dist > bd) continue;
                 // the buzz gives it away close by, whichever way he's facing
                 bool heard = dist < (d.IsKamikaze ? 28f : 18f);
@@ -138,7 +149,15 @@ namespace Carl
                 if (!heard && !revealed && !shotAt && face.sqrMagnitude > 0.01f && fl.sqrMagnitude > 1f && Vector3.Angle(face, fl) > 70f) continue;
                 // high up, it's a speck against the sky: picked out only now and then
                 float above = dp.y - eye.y;
-                if (!heard && !revealed && above > 16f && Random.value > Mathf.Lerp(0.012f, 0f, Mathf.InverseLerp(16f, 45f, above))) continue;
+                if (!heard && above > 16f)
+                {
+                    float k = Mathf.InverseLerp(16f, 60f, above);
+                    float pick = tracking ? Mathf.Lerp(0.75f, 0.4f, k)
+                               : revealed ? Mathf.Lerp(0.12f, 0.025f, k)
+                               : shotAt ? Mathf.Lerp(0.04f, 0.008f, k)
+                               : Mathf.Lerp(0.012f, 0f, k);
+                    if (Random.value > pick) continue;
+                }
                 if (!Clear(eye, dp, body)) continue;
                 if (Haze.Transmit(eye, dp) < 0.3f) continue;
                 best = d; bd = dist;

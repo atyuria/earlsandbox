@@ -55,6 +55,10 @@ Shader "Carl/Skin"
             #include "CarlCamo.hlsl"
             half3 Uniform(float3 P, float u)
             {
+                if (u > 6.5) return half3(0.6, 0.6, 0.58);              // sneakers
+                if (u > 5.5) return half3(0.05, 0.08, 0.15) * (0.85 + 0.3 * CamoNoise(P * 160.0));   // jeans
+                if (u > 4.5) return half3(0.5, 0.025, 0.025);           // red T-shirt (Bloods)
+                if (u > 3.5) return half3(0.025, 0.07, 0.42);           // blue T-shirt (Crips)
                 if (u > 2.5) return half3(0.035, 0.03, 0.025);           // boots
                 return DigitalCamo(P, u);
             }

@@ -65,7 +65,7 @@ namespace Carl
                 if (best < float.MaxValue)
                 {
                     GroundFire.At(hit.point + hit.normal * 0.05f, hit.normal);
-                    if (Random.value < 0.3f) BloodSystem.Instance?.Mark(hit.point, hit.normal, Random.Range(0.3f, 0.6f), 0.35f);
+                    if (Random.value < 0.3f && hit.rigidbody == null) BloodSystem.Instance?.Mark(hit.point, hit.normal, Random.Range(0.3f, 0.6f), 0.35f);
                     break;
                 }
                 p = next;

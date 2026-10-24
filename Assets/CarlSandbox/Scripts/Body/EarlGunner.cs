@@ -89,6 +89,16 @@ namespace Carl
         void Build()
         {
             string model = GunInfo.Of(kind) is GunInfo.Info gi ? gi.model : kind == EarlWeapon.Beretta ? "Gun_Beretta" : kind == EarlWeapon.Pistol ? "Gun_Glock" : kind == EarlWeapon.Shotgun ? "Gun_Shotgun" : kind == EarlWeapon.Knife ? "Gun_Knife" : "Gun_Sword";
+            // in the trenches or a WAR street, about one in five has an FPV drone to fly
+            if (Gun && droneKit == null && Nations.Active && !medic && Random.value < 0.2f) droneKit = Random.value < 0.5f ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber;
+            // in a battle, his rifle is one he (or whoever had it before him) has put together from what was about
+            if (Gun && kit != null && kit.build == null && GunBuilder.Supports(WeaponName) && (Nations.Active || HouseBattle.Mode != HouseBattle.Normal))
+                kit.build = GunBuilder.Random(WeaponName, Nations.Active ? Nations.Of(team) : -1);
+            if (Gun && kit != null && kit.build != null && GunBuilder.Supports(WeaponName))
+            {
+                model = GunBuilder.Model(WeaponName, kit.build);
+                kit.suppressor = GunBuilder.Suppressed(kit.build);
+            }
             var hand = body[PartId.HandR];
             var m = ModelLibrary.Get(model);
             if (hand == null || m == null) return;
@@ -116,7 +126,7 @@ namespace Carl
             if (Gun)
             {
                 ammo = AmmoTable.For(WeaponName)[0];
-                magSize = Rifle ? GunInfo.Of(kind).earlMag : kind == EarlWeapon.Pistol ? 17 : kind == EarlWeapon.Beretta ? 15 : 8;
+                magSize = Rifle && kit != null && kit.build != null && GunBuilder.Supports(WeaponName) ? GunBuilder.Rounds(kit.build) : Rifle ? GunInfo.Of(kind).earlMag : kind == EarlWeapon.Pistol ? (kit != null && kit.extMag ? 33 : 17) : kind == EarlWeapon.Beretta ? 15 : 8;
                 rounds = magSize;
             }
         }
@@ -224,7 +234,7 @@ namespace Carl
             }
             else keepFightingDown = -1f;
             brain.hostile = able;
-            if (!able) { rag.aimDir = null; if (torch != null) torch.enabled = false; return; }
+            if (!able) { rag.aimDir = null; if (torch != null) torch.enabled = false; if (flyingDrone != null) StopPiloting(); return; }
             // (the brain leaves a fighting man to us: knocked down, he gets back up when he can, shooting meanwhile)
             if (rag.IsDown) { rag.wantStand = p.CanStand && p.EffectivePain < 0.8f; rag.wantCrawl = false; }
             // both hands on the rungs
@@ -252,6 +262,8 @@ namespace Carl
 
             // a grenade at his feet comes before everything
             if (!rag.IsDown && FleeGrenade(legs)) { KeepSpacing(); return; }
+            // flying his own drone (or going somewhere safe to)
+            if (PilotBehaviour(legs)) return;
             // a drone: shoot it down, or get out from under it
             if (!rag.IsDown && DroneBehaviour(legs)) { KeepSpacing(); return; }
 
@@ -433,7 +445,8 @@ namespace Carl
                 rag.aimDir = (look - (chest + Vector3.up * 0.15f)).normalized;
             }
             rag.crouch = 0f;
-            rag.lean = Mathf.MoveTowards(rag.lean, leans && !see ? PeekSide(watch) : 0f, Time.deltaTime * 3f);
+            // leaning out round his cover to see - and to shoot: he stays leaned out while he fires
+            rag.lean = Mathf.MoveTowards(rag.lean, leans || see ? PeekSide(see ? target : watch) : 0f, Time.deltaTime * 3f);
             if (see) Shoot(target);
         }
 
@@ -460,11 +473,17 @@ namespace Carl
             return true;
         }
 
-        /// <summary>His aim: at you, plus a wandering error that grows with every injury.</summary>
+        /// <summary>How good a shot he is (the settings' slider for his side): 0 arcade .. 1 realistic.</summary>
+        float Skill => Mathf.Pow(team == Teams.Friendly ? GameSettings.FriendlySkill : GameSettings.EnemySkill, 0.7f);
+        /// <summary>From first seeing a man to his first round at him: a trained man is quick, an arcade one dawdles.</summary>
+        float Reaction => Mathf.Lerp(1.5f, 0.25f, Skill);
+        float acquiredAt = -99f;
+
+        /// <summary>His aim: at you, plus a wandering error - smaller the better a shot he is, bigger with every injury.</summary>
         Vector3 AimWithError(Vector3 target)
         {
             float t = Time.time, shake = Shakiness();
-            Vector3 wobble = new Vector3(Mathf.PerlinNoise(t * 1.3f, seed) - 0.5f, Mathf.PerlinNoise(seed, t * 1.1f) - 0.5f, Mathf.PerlinNoise(t, seed * 0.7f) - 0.5f) * (0.05f + shake * 0.1f);
+            Vector3 wobble = new Vector3(Mathf.PerlinNoise(t * 1.3f, seed) - 0.5f, Mathf.PerlinNoise(seed, t * 1.1f) - 0.5f, Mathf.PerlinNoise(t, seed * 0.7f) - 0.5f) * (0.03f * Mathf.Lerp(1.6f, 0.3f, Skill) + shake * 0.1f);
             Vector3 sh = body.Chest.transform.position + Vector3.up * 0.15f;
             return ((target + wobble * Vector3.Distance(target, sh)) - sh).normalized;
         }
@@ -497,7 +516,9 @@ namespace Carl
             if (inCover && (reloading || Time.time < nextCrouch || suppression > 0.9f)) { rag.crouch = 1f; rag.pose = PoseKind.Crouch; }
             else rag.crouch = 0f;
             if (inCover && !reloading && Time.time > nextCrouch + 4f) nextCrouch = Time.time + Random.Range(1f, 2.2f) + suppression;
-            rag.lean = Mathf.MoveTowards(rag.lean, 0f, Time.deltaTime * 3f);
+            // round a corner or the edge of his cover he leans out to fire (only the lean shows him to you), and stands
+            // straight when you're in plain view
+            rag.lean = Mathf.MoveTowards(rag.lean, PeekSide(target), Time.deltaTime * 4f);
             if (rag.crouch < 0.5f) Shoot(target);
         }
 
@@ -514,8 +535,11 @@ namespace Carl
         {
             if (Time.time < peekCheck) return peekSide;
             peekCheck = Time.time + 0.3f;
-            if (body.Head == null) return peekSide = 0;
-            Vector3 head = body.Head.transform.position;
+            if (body.Head == null || body.Pelvis == null) return peekSide = 0;
+            // (from where his head is standing straight - over his hips - not where a lean has already put it, or
+            // a lean that shows him the target would talk itself out of leaning)
+            Vector3 hp = body.Head.transform.position, pp = body.Pelvis.transform.position;
+            Vector3 head = new Vector3(pp.x, hp.y, pp.z);
             Vector3 f = Vector3.ProjectOnPlane(focus - head, Vector3.up);
             if (f.sqrMagnitude < 0.01f) return peekSide = 0;
             Vector3 right = Vector3.Cross(Vector3.up, f.normalized);
@@ -607,25 +631,33 @@ namespace Carl
             return best;
         }
 
-        void Shoot(Vector3 target)
+        void Shoot(Vector3 target, bool atDrone = false)
         {
             if (Time.time < nextShot || Time.time < reloadUntil) return;
             if (rounds <= 0) { rounds = magSize; reloadUntil = Time.time + (kind == EarlWeapon.Shotgun ? 4f : Lmg ? 6.5f : 2.6f); Sfx.Reload(WeaponName, muzzle.position, 2.5f); nextCrouch = reloadUntil; return; }
+            // a man he has only just seen: a moment to get on him first
+            if (!atDrone && sees && Time.time - acquiredAt < Reaction) return;
             Vector3 toT = (target - muzzle.position).normalized;
             if (AllyInLine(target)) return;
-            float shake = Shakiness();
+            float shake = Shakiness(), skill = Skill;
             if (Vector3.Angle(weapon.transform.forward, toT) > 8f + shake * 2f) return;
-            float spread = (kind == EarlWeapon.Shotgun ? ammo.spread : Rifle ? 0.9f : 1.4f) + shake * 1.1f;
+            // a good shot lays his sights on the man, whatever the gun is doing in his hands; a poor one fires where
+            // the barrel happens to be pointing. (Wounds, pain and a missing hand still throw it off at any skill.)
+            float hold = Mathf.Lerp(0.6f, 0.96f, skill) * (atDrone ? 0.5f : 1f) / (1f + shake * 0.6f);
+            Vector3 fwd = Vector3.Slerp(weapon.transform.forward, toT, hold).normalized;
+            Vector3 upv = Vector3.Cross(fwd, weapon.transform.right).normalized;
+            float spread = (kind == EarlWeapon.Shotgun ? ammo.spread : (Rifle ? 0.9f : 1.4f) * Mathf.Lerp(1.6f, 0.3f, skill)) + shake * 1.1f;
             int pellets = Mathf.Max(1, ammo.pellets);
             Ballistics.FiringBody = body;
             if (weapon.transform.forward.y > 0.45f) Intel.SkyShots++;
             for (int i = 0; i < pellets; i++)
             {
-                Vector3 dir = Quaternion.AngleAxis(Random.Range(0f, 360f), weapon.transform.forward) * Quaternion.AngleAxis(Random.Range(0f, spread), weapon.transform.up) * weapon.transform.forward;
+                Vector3 dir = Quaternion.AngleAxis(Random.Range(0f, 360f), fwd) * Quaternion.AngleAxis(Random.Range(0f, spread), upv) * fwd;
                 Ballistics.Instance?.Fire(muzzle.position + dir * 0.02f, dir, ammo.velocity * Random.Range(0.97f, 1.03f), ammo.mass, ammo.diameter, HitKind.Bullet, ammo.tracer && i == 0, null, ammo);
             }
             Ballistics.FiringBody = null;
             rounds--;
+            ShotsFired++;
             Sfx.Gun(WeaponName, muzzle.position, Suppressed);
             Fx.Muzzle(muzzle.position, weapon.transform.forward, (kind == EarlWeapon.Shotgun ? 1.6f : 1f) * (Suppressed ? 0.25f : 1f));
             {
@@ -645,9 +677,10 @@ namespace Carl
                 hand.rb.AddForce(-weapon.transform.forward * kick + Vector3.up * kick * 0.6f, ForceMode.Impulse);
                 hand.rb.AddTorque(-weapon.transform.right * kick * 0.05f, ForceMode.Impulse);
             }
-            float rpm = Rifle ? GunInfo.Of(kind).earlRpm : Handgun ? 240f : 55f;
+            bool switched = kind == EarlWeapon.Pistol && kit != null && kit.autoSwitch;
+            float rpm = Rifle ? GunInfo.Of(kind).earlRpm : switched ? 1100f : Handgun ? 240f : 55f;
             // bursts: a rifleman pauses often, a machine gunner holds it down much longer
-            nextShot = Time.time + 60f / rpm + (Rifle && Random.value < (Lmg ? 0.07f : 0.25f) ? Random.Range(0.4f, 1f) : 0f) + shake * 0.08f;
+            nextShot = Time.time + 60f / rpm + ((Rifle || switched) && Random.value < (Lmg ? 0.07f : switched ? 0.15f : 0.25f) ? Random.Range(0.4f, 1f) : 0f) + shake * 0.08f;
         }
 
         // ------------------------------------------------------------ blades
@@ -840,6 +873,6 @@ namespace Carl
 
         bool holstered;
 
-        void OnDestroy() { All.Remove(this); if (weapon != null && !dropped) Destroy(weapon); }
+        void OnDestroy() { All.Remove(this); StopPiloting(); if (weapon != null && !dropped) Destroy(weapon); }
     }
 }

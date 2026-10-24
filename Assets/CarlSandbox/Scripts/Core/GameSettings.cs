@@ -13,6 +13,9 @@ namespace Carl
         /// <summary>You can't be hurt: rounds, blades, blasts, falls and fire do nothing to you.</summary>
         public static bool Invincible;
         public static float MouseSensitivity = 1f;
+        /// <summary>How well the Earls shoot, 0 arcade .. 1 realistic: your side's and the enemy's.</summary>
+        public static float FriendlySkill = 0.6f, EnemySkill = 0.6f;
+        public static string SkillName(float s) => s < 0.2f ? "ARCADE" : s < 0.4f ? "CASUAL" : s < 0.6f ? "TRAINED" : s < 0.8f ? "VETERAN" : "REALISTIC";
         public static float Volume = 0.8f;
         /// <summary>The Earls' screams, moans and begging. Off = silent dummies.</summary>
         public static bool DummyVoices = true;
@@ -30,6 +33,11 @@ namespace Carl
         public static bool TrenchAttack = false;
         /// <summary>Your army in the trenches: 0 Ukraine, 1 Russia (the other side is the enemy).</summary>
         public static int Side = 0;
+        /// <summary>The houses map: 0 a quiet street, 1 HOOD (gang war), 2 WAR (Ukraine v Russia on a shelled street).</summary>
+        public static int HouseMode = 0;
+        public static bool HouseAttack = true;
+        /// <summary>Your gang in HOOD: 0 Crips (blue), 1 Bloods (red).</summary>
+        public static int Gang = 0;
 
         static bool loaded;
 
@@ -45,6 +53,8 @@ namespace Carl
             InfiniteAmmo = PlayerPrefs.GetInt("earl.infiniteAmmo", 0) == 1;
             Invincible = PlayerPrefs.GetInt("earl.invincible", 0) == 1;
             MouseSensitivity = PlayerPrefs.GetFloat("earl.sens", 1f);
+            FriendlySkill = Mathf.Clamp01(PlayerPrefs.GetFloat("earl.skillF", 0.6f));
+            EnemySkill = Mathf.Clamp01(PlayerPrefs.GetFloat("earl.skillE", 0.6f));
             Volume = PlayerPrefs.GetFloat("earl.volume", 0.8f);
             DummyVoices = PlayerPrefs.GetInt("earl.voices", 1) == 1;
             VoiceVolume = PlayerPrefs.GetFloat("earl.voiceVolume", 1f);
@@ -54,6 +64,9 @@ namespace Carl
             SpawnNpcs = PlayerPrefs.GetInt("earl.npcs", 1) == 1;
             TrenchAttack = PlayerPrefs.GetInt("earl.trenchAttack", 0) == 1;
             Side = Mathf.Clamp(PlayerPrefs.GetInt("earl.side", 0), 0, 1);
+            HouseMode = Mathf.Clamp(PlayerPrefs.GetInt("earl.houseMode", 0), 0, 2);
+            HouseAttack = PlayerPrefs.GetInt("earl.houseAttack", 1) == 1;
+            Gang = Mathf.Clamp(PlayerPrefs.GetInt("earl.gang", 0), 0, 1);
             ApplyGraphics();
         }
 
@@ -64,6 +77,8 @@ namespace Carl
             PlayerPrefs.SetInt("earl.infiniteAmmo", InfiniteAmmo ? 1 : 0);
             PlayerPrefs.SetInt("earl.invincible", Invincible ? 1 : 0);
             PlayerPrefs.SetFloat("earl.sens", MouseSensitivity);
+            PlayerPrefs.SetFloat("earl.skillF", FriendlySkill);
+            PlayerPrefs.SetFloat("earl.skillE", EnemySkill);
             PlayerPrefs.SetFloat("earl.volume", Volume);
             PlayerPrefs.SetInt("earl.voices", DummyVoices ? 1 : 0);
             PlayerPrefs.SetFloat("earl.voiceVolume", VoiceVolume);
@@ -73,6 +88,9 @@ namespace Carl
             PlayerPrefs.SetInt("earl.npcs", SpawnNpcs ? 1 : 0);
             PlayerPrefs.SetInt("earl.trenchAttack", TrenchAttack ? 1 : 0);
             PlayerPrefs.SetInt("earl.side", Side);
+            PlayerPrefs.SetInt("earl.houseMode", HouseMode);
+            PlayerPrefs.SetInt("earl.houseAttack", HouseAttack ? 1 : 0);
+            PlayerPrefs.SetInt("earl.gang", Gang);
             PlayerPrefs.Save();
         }
 

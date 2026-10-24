@@ -4,14 +4,14 @@ using UnityEngine.InputSystem;
 
 namespace Carl
 {
-    public enum MenuKind { None, Settings, Spawn, Gun, Main }
+    public enum MenuKind { None, Settings, Spawn, Gun, Main, Gunsmith }
 
     /// <summary>
     /// Esc settings, F spawn menu (with a ghost outline where the Earl will appear and a turning showcase of the
     /// loadout) and G gun menu (showcase of the weapon as it is set up). While a menu is open the mouse is free;
     /// in the spawn menu hold right mouse to look around.
     /// </summary>
-    public class Menus : MonoBehaviour
+    public partial class Menus : MonoBehaviour
     {
         public MenuKind open;
         public bool IsOpen => open != MenuKind.None;
@@ -28,15 +28,20 @@ namespace Carl
         public EarlWeapon spawnWeapon = EarlWeapon.None;
         public int spawnTeam = Teams.Enemy;
         public bool spawnMedic;
+        /// <summary>Spawn menu: what they wear (0 as they come, 1 Crips blue, 2 Bloods red, 3 Ukrainian, 4 Russian) and a drone (0 none, 1 kamikaze, 2 grenade).</summary>
+        public int spawnOutfit, spawnDrone;
         public int spawnCount = 1;
         GameObject ghost;
         Vector3 ghostPos; float ghostYaw; bool ghostValid;
         Vector2 scroll;
         Rect panel, panel2;
         int gunTab;
+        /// <summary>Playtests: open the gun page on this weapon, with this gunsmith slot open.</summary>
+        public void ShowGunPage(int i, int slot = -1) { if (open != MenuKind.Gun) Toggle(MenuKind.Gun); gunTab = i; gunPage = 0; armourPage = false; droneTab = 0; smithSlot = slot; }
         bool armourPage;                  // G menu: the ARMOUR tab instead of a weapon
         int gunPage;                      // G menu: 0 guns, 1 melee, 2 misc (grenades, healing, the physics gun)
-        int droneTab;                     // G menu, MISC: 1 kamikaze drone, 2 grenade drone (0: a weapon)
+        int droneTab;
+        int smithSlot = -1;               // G menu, a gun: the gunsmith slot opened to pick a part for it                     // G menu, MISC: 1 kamikaze drone, 2 grenade drone (0: a weapon)
         Vector2 listScroll;
         static int PageOf(WeaponDef d) => d.type == WeaponType.Gun ? 0 : d.type == WeaponType.Knife ? 1 : 2;
         static string PageName(int p) => p == 0 ? "GUNS" : p == 1 ? "MELEE" : "MISC";
@@ -49,6 +54,9 @@ namespace Carl
 
         public void Toggle(MenuKind k)
         {
+            // out of the gunsmith (G, ESC): back to the gun menu
+            if (open == MenuKind.Gunsmith && (k == MenuKind.Gunsmith || k == MenuKind.Gun)) { CloseGunsmith(); return; }
+            if (open == MenuKind.Gunsmith) smithStage?.SetActive(false);
             open = open == k ? MenuKind.None : k;
             LastMenuFrame = Time.frameCount;
             if (k == MenuKind.Gun) { gunTab = game.weapons.current; gunPage = PageOf(game.weapons.defs[gunTab]); wearEdit = PlayerAvatar.Armour.Clone(); }
@@ -74,6 +82,7 @@ namespace Carl
             game.player.sensitivity = baseSens * GameSettings.MouseSensitivity;
             if (!IsOpen) return;
             var mouse = Mouse.current;
+            if (open == MenuKind.Gunsmith) { UpdateGunsmith(mouse); return; }
             if (open == MenuKind.Spawn || open == MenuKind.Gun)
             {
                 if (stage == null) stage = new PreviewStage(game);
@@ -87,7 +96,7 @@ namespace Carl
                 else
                 {
                     var L = game.weapons.loadouts[gunTab];
-                    string key = gunTab + "|" + L.sight + "|" + L.grip + "|" + L.extMag + "|" + L.autoSwitch + "|" + L.suppressor + L.light + L.laser + L.magnifier;
+                    string key = gunTab + "|" + L.sight + "|" + L.grip + "|" + L.extMag + "|" + L.autoSwitch + "|" + L.suppressor + L.light + L.laser + L.magnifier + "|" + L.build?.Key + "|" + L.optic + L.foregrip + L.lightId + L.laserId;
                     if (key != shownGun) { shownGun = key; shownLoadout = ""; stage.ShowGun(game.weapons, gunTab); }
                 }
                 stage.Spin(Time.unscaledDeltaTime);
@@ -111,6 +120,10 @@ namespace Carl
                         var wpn = spawnMedic ? EarlWeapon.Pistol : spawnTeam == Teams.Friendly && spawnWeapon == EarlWeapon.None ? EarlWeapon.AK47 : spawnWeapon;
                         var g = EarlGunner.Arm(h, wpn, null, spawnTeam);
                         if (g != null) { g.medic = spawnMedic; g.grenades = spawnMedic || Random.value < 0.15f ? 0 : Random.Range(1, 3); }
+                        // clothes: a gang's colours, or an army's uniform (and its armband for the side he's on)
+                        if (spawnOutfit == 1 || spawnOutfit == 2) { h.SetOutfit(spawnOutfit == 1 ? 4 : 5); Teams.RemoveArmband(h); }
+                        else if (spawnOutfit >= 3) { h.SetUniform(Nations.Uniform(spawnOutfit == 3 ? Nations.Ukraine : Nations.Russia)); Teams.Armband(h, spawnTeam); }
+                        if (g != null && spawnDrone > 0) g.droneKit = spawnDrone == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber;
                     }
                     game.Toast(spawnCount > 1 ? $"{spawnCount} EARLS SPAWNED" : "EARL SPAWNED");
                 }
@@ -287,6 +300,7 @@ namespace Carl
                 case MenuKind.Spawn: DrawSpawn(); break;
                 case MenuKind.Gun: DrawGun(); break;
                 case MenuKind.Main: DrawMain(); break;
+                case MenuKind.Gunsmith: DrawGunsmith(); break;
             }
         }
 
@@ -382,6 +396,37 @@ namespace Carl
                 Section("EARLS");
                 Check("SPAWN EARLS (NPCS)", ref GameSettings.SpawnNpcs);
                 GUILayout.Label(GameSettings.SpawnNpcs ? "The map is peopled: Earls standing about, or squads holding the trenches." : "An empty map: just you (spawn your own with F).", small);
+                if (mainMap == 2 && GameSettings.SpawnNpcs)
+                {
+                    Section("HOUSES: MODE");
+                    GUILayout.BeginHorizontal();
+                    if (Chip("QUIET STREET", GameSettings.HouseMode == 0, 0f, 34f)) GameSettings.HouseMode = 0;
+                    if (Chip("HOOD", GameSettings.HouseMode == 1, 0f, 34f)) GameSettings.HouseMode = 1;
+                    if (Chip("WAR", GameSettings.HouseMode == 2, 0f, 34f)) GameSettings.HouseMode = 2;
+                    GUILayout.EndHorizontal();
+                    if (GameSettings.HouseMode == 1)
+                    {
+                        GUILayout.BeginHorizontal();
+                        if (Chip("CRIPS (BLUE)", GameSettings.Gang == 0, 0f, 34f)) GameSettings.Gang = 0;
+                        if (Chip("BLOODS (RED)", GameSettings.Gang == 1, 0f, 34f)) GameSettings.Gang = 1;
+                        GUILayout.EndHorizontal();
+                        GUILayout.Label("Gang war on the street. Pistols mostly - some with extended mags, a few Glocks switched to full auto - and the odd AK.", small);
+                    }
+                    else if (GameSettings.HouseMode == 2)
+                    {
+                        GUILayout.BeginHorizontal();
+                        if (Chip("UKRAINE", GameSettings.Side == Nations.Ukraine, 0f, 34f)) GameSettings.Side = Nations.Ukraine;
+                        if (Chip("RUSSIA", GameSettings.Side == Nations.Russia, 0f, 34f)) GameSettings.Side = Nations.Russia;
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+                        if (Chip("ATTACK", GameSettings.HouseAttack, 0f, 34f)) GameSettings.HouseAttack = true;
+                        if (Chip("DEFEND", !GameSettings.HouseAttack, 0f, 34f)) GameSettings.HouseAttack = false;
+                        GUILayout.EndHorizontal();
+                        GUILayout.Label(GameSettings.HouseAttack ? "A shelled street. They hold the houses up the street: push up with your squad and clear them."
+                            : "A shelled street. Hold the houses at your end with your squad: they come down the street in waves.", small);
+                    }
+                    else GUILayout.Label("An ordinary street, people about.", small);
+                }
                 if (mainMap == 3 && GameSettings.SpawnNpcs)
                 {
                     Section("TRENCHES: YOUR ARMY");
@@ -449,13 +494,76 @@ namespace Carl
             GUILayout.EndHorizontal();
         }
 
+        int settingsTab, controlsTab;
+
+        /// <summary>Every key, by what it's for (ESC, CONTROLS).</summary>
+        static readonly (string tab, (string key, string what)[] rows)[] Controls =
+        {
+            ("MOVING", new[] {
+                ("W A S D", "Move"), ("SHIFT", "Sprint"), ("SPACE", "Jump  ·  hold to get back up"), ("CTRL", "Crouch"), ("Y", "Drop down prone"),
+                ("Q / E (hold)", "Lean left / right"), ("V", "Free camera on / off"), ("ESC", "Pause, settings, free the mouse") }),
+            ("COMBAT", new[] {
+                ("LEFT CLICK", "Fire  ·  stab  ·  swing"), ("RIGHT CLICK", "Aim down the sights  ·  slash"), ("R", "Reload"), ("Z", "Fire mode"),
+                ("J", "Clear a jam"), ("B", "Point aim on / off (RMB with it: raise the gun, no sights)"), ("ALT (hold)", "Swing a blade with the mouse"),
+                ("ALT + D / ALT + A", "Gun out round the corner right / left  (mouse: how far  ·  RMB + mouse: point it  ·  LMB fire)"),
+                ("1 - 9  /  WHEEL", "Weapons you carry") }),
+            ("ATTACHMENTS", new[] {
+                ("G", "Gun menu: take weapons; GUNSMITH builds a gun part by part"), ("L", "Weapon light (with none fitted: a head torch)"),
+                ("O", "Aiming laser"), ("RIGHT CLICK", "Through the optic (red dots, holos, scopes)") }),
+            ("EARLS & SQUAD", new[] {
+                ("F", "Spawn menu: click in the world to drop Earls"), ("R (hold, looking at one)", "Recruit a friendly (green armband)"),
+                ("MIDDLE MOUSE (hold)", "Squad orders"), ("C", "Clear everything"), ("SHIFT + K", "Kill all"), ("X", "Real-time x-ray") }),
+            ("DRONES & RADIO", new[] {
+                ("G > MISC", "Take a KAMIKAZE or GRENADE DRONE (warhead / grenade options there)"), ("LEFT CLICK (holding it)", "Set the drone down on the floor"),
+                ("P", "Fly the drone that's down"), ("MOUSE  ·  W S A D", "Steer  ·  forward, back, sideways"), ("SPACE / CTRL", "Up / down"),
+                ("SHIFT", "Boost"), ("LEFT CLICK (flying)", "Detonate / drop a grenade"), ("E (flying)", "Back to your body"),
+                ("RADIO + LEFT CLICK  /  M", "Map from above: 1 bombing run  ·  2 gun run  ·  3 artillery  ·  4 missile, LMB on the circle") }),
+            ("MEDICAL & BODY", new[] {
+                ("H", "Your injuries"), ("MIDDLE CLICK", "Medical panel"), ("BANDAGE / SURGERY KIT + LMB", "Treat a wound"), ("N", "Visor up / down"),
+                ("PHYSICS GUN: LMB (hold)", "Grab and drag  ·  RMB throw  ·  rub bodies on walls") }),
+            ("MAPS & TIME", new[] {
+                ("F1 / F2 / F3 / F4", "The Lab  ·  The Yard  ·  Houses  ·  Trenches"), ("T", "Slow motion"), ("K", "End slow motion"), ("TAB", "Hide the hint in the corner") }),
+        };
+
+        void DrawControls()
+        {
+            GUILayout.BeginHorizontal();
+            for (int t = 0; t < Controls.Length; t++) if (Chip(Controls[t].tab, controlsTab == t, 0f, 30f)) { controlsTab = t; scroll = Vector2.zero; }
+            GUILayout.EndHorizontal();
+            GUILayout.Space(8);
+            scroll = GUILayout.BeginScrollView(scroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+            foreach (var (key, what) in Controls[controlsTab].rows)
+            {
+                GUILayout.BeginHorizontal(GUILayout.Height(34));
+                GUILayout.Label(key, keyStyle ??= new GUIStyle(big) { fontSize = 15, alignment = TextAnchor.MiddleLeft, normal = { textColor = new Color(0.96f, 0.56f, 0.16f) }, wordWrap = true }, GUILayout.Width(250));
+                GUILayout.Label(what, rowStyle ??= new GUIStyle(small) { fontSize = 15, alignment = TextAnchor.MiddleLeft, wordWrap = true, normal = { textColor = new Color(0.92f, 0.93f, 0.95f) } });
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.EndScrollView();
+        }
+        GUIStyle keyStyle, rowStyle;
+
         void DrawSettings()
         {
             float ph = Mathf.Min(720f, Screen.height - 20f);
-            panel = new Rect(Screen.width / 2 - 250, Screen.height / 2 - ph / 2f, 500, ph);
+            float pw = settingsTab == 1 ? Mathf.Min(980f, Screen.width - 40f) : 500f;
+            panel = new Rect(Screen.width / 2 - pw / 2f, Screen.height / 2 - ph / 2f, pw, ph);
             panel2 = default;
             GUILayout.BeginArea(panel, card);
             GUILayout.Label("PAUSED", title);
+            GUILayout.BeginHorizontal();
+            if (Chip("SETTINGS", settingsTab == 0, 0f, 34f)) { settingsTab = 0; scroll = Vector2.zero; }
+            if (Chip("CONTROLS", settingsTab == 1, 0f, 34f)) { settingsTab = 1; scroll = Vector2.zero; }
+            GUILayout.EndHorizontal();
+            if (settingsTab == 1)
+            {
+                DrawControls();
+                GUILayout.BeginHorizontal();
+                if (Chip("RESUME", true, 0f, 38f)) Toggle(MenuKind.Settings);
+                GUILayout.EndHorizontal();
+                GUILayout.EndArea();
+                return;
+            }
             GUILayout.Label("Settings are saved when you close this.", sub);
             Section("BLOOD");
             GameSettings.BloodQuality = Slider("QUALITY", GameSettings.QualityName, GameSettings.BloodQuality, 0f, 1f);
@@ -464,6 +572,11 @@ namespace Carl
             GUILayout.Label("None ... realistic (middle) ... unlimited: wounds never run dry.", small);
             Section("GAME");
             GameSettings.MouseSensitivity = Slider("MOUSE SENSITIVITY", GameSettings.MouseSensitivity.ToString("0.00"), GameSettings.MouseSensitivity, 0.2f, 3f);
+            GUILayout.Space(4);
+            Section("HOW WELL THE EARLS SHOOT");
+            GameSettings.FriendlySkill = Slider("YOUR TEAM", GameSettings.SkillName(GameSettings.FriendlySkill), GameSettings.FriendlySkill, 0f, 1f);
+            GameSettings.EnemySkill = Slider("ENEMIES", GameSettings.SkillName(GameSettings.EnemySkill), GameSettings.EnemySkill, 0f, 1f);
+            GUILayout.Label("Arcade: slow to react, sloppy, they spray and mostly miss. Realistic: quick on target and accurate - stand in the open in front of one and you'll be hit.", small);
             GUILayout.Space(4);
             Check("INFINITE AMMO (AND RADIO STRIKES)", ref GameSettings.InfiniteAmmo);
             Check("INVINCIBLE (NOTHING HURTS YOU)", ref GameSettings.Invincible);
@@ -520,28 +633,39 @@ namespace Carl
             return parts.Count == 0 ? "NO ARMOUR" : string.Join("  ·  ", parts);
         }
 
-        /// <summary>The MISC page's drones: what they are, how to fly them, and LAUNCH.</summary>
-        void DrawDrone(Rect listR)
+        /// <summary>A drone's options on its G menu page: what it is, the warhead or grenades, how to fly it.</summary>
+        void DroneOptions(FpvDrone.Kind kind)
         {
-            var kind = droneTab == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber;
-            var r = new Rect(listR.xMax + 14, listR.y, Mathf.Min(560f, Screen.width - listR.xMax - 40f), listR.height);
-            GUILayout.BeginArea(r, card);
-            GUILayout.Label(FpvDrone.NameOf(kind), title);
             GUILayout.Label(kind == FpvDrone.Kind.Kamikaze
-                ? "A racing quad with an RPG warhead taped under it. Fast and twitchy. It goes off when it hits anything hard (or anyone at all), or when you click. 100 s of battery."
-                : "A slower quad with three impact grenades on a release. Hover over them and click to drop one; each goes off on whatever it lands on. 150 s of battery.", small);
-            GUILayout.Space(8);
-            GUILayout.Label("FLYING IT", section);
-            GUILayout.Label("MOUSE steers - it flies where you look\nW / S forward and back  ·  A / D sideways\nSPACE up  ·  CTRL down  ·  SHIFT boost\nLEFT CLICK " + (kind == FpvDrone.Kind.Kamikaze ? "detonate" : "drop a grenade") + "  ·  E back to your body\nYour body stands where you left it while you fly. Past ~250 m the link breaks up.", small);
-            GUILayout.Space(10);
-            if (Chip("LAUNCH NOW  (P)", true, 0f, 40f))
+                ? "A racing quad with an RPG warhead taped under it. Fast and twitchy. It goes off when it hits anything hard (or anyone at all), or when you click."
+                : "A slower quad with grenades on a release. Hover over them and click to drop one. 150 s of battery.", small);
+            if (kind == FpvDrone.Kind.Kamikaze)
             {
-                FpvDrone.Selected = kind;
-                Toggle(MenuKind.Gun);
-                FpvDrone.Launch(kind);
+                Section("WARHEAD");
+                float w = FpvDrone.WarheadSize;
+                GUILayout.Label($"SIZE  {Mathf.Lerp(1f, 4.5f, w):0.0}x  ·  top speed {Mathf.Lerp(1f, 0.5f, w) * 100f:0}%  ·  battery {Mathf.Lerp(100f, 65f, w):0} s", small);
+                FpvDrone.WarheadSize = GUILayout.HorizontalSlider(w, 0f, 1f, GUILayout.Height(22));
+                GUILayout.BeginHorizontal();
+                if (Chip("FRAGMENTATION", !FpvDrone.ShapedCharge, 0f, 34f)) FpvDrone.ShapedCharge = false;
+                if (Chip("SHAPED CHARGE", FpvDrone.ShapedCharge, 0f, 34f)) FpvDrone.ShapedCharge = true;
+                GUILayout.EndHorizontal();
+                GUILayout.Label(FpvDrone.ShapedCharge
+                    ? "Shaped: a small, precise blast - most of it goes in a narrow jet the way it's flying. Kills what it hits, little round it."
+                    : "Fragmentation: spreads out a lot - fragments everywhere, a wide blast. Hits a whole group, less sure on any one.", small);
             }
-            GUILayout.Label("P launches the last one you picked, any time.", small);
-            GUILayout.EndArea();
+            else
+            {
+                Section("GRENADES");
+                GUILayout.BeginHorizontal();
+                if (Chip("IMPACT  x3", !FpvDrone.TimedBombs, 0f, 34f)) FpvDrone.TimedBombs = false;
+                if (Chip("TIMED, BIG  x2", FpvDrone.TimedBombs, 0f, 34f)) FpvDrone.TimedBombs = true;
+                GUILayout.EndHorizontal();
+                GUILayout.Label(FpvDrone.TimedBombs
+                    ? "Timed: two bigger charges on a 3 s fuse - they land, roll and go off with a much bigger blast. Drop it into a trench or through a roof."
+                    : "Impact: three small grenades that go off on whatever they land on.", small);
+            }
+            Section("USING IT");
+            GUILayout.Label("Take it, then hold it like a weapon (1-9 / wheel). LEFT CLICK sets it down on the floor in front of you. P flies the one that's down, from wherever you are.\nFLYING: MOUSE steers  ·  W / S forward and back  ·  A / D sideways  ·  SPACE up  ·  CTRL down  ·  SHIFT boost  ·  LEFT CLICK " + (kind == FpvDrone.Kind.Kamikaze ? "detonate" : "drop a grenade") + "  ·  E back to your body. Past ~250 m the link breaks up.", small);
         }
 
         void DrawSpawn()
@@ -619,6 +743,23 @@ namespace Carl
             if (Chip("PKM", spawnWeapon == EarlWeapon.PKM)) spawnWeapon = EarlWeapon.PKM;
             if (Chip("M249", spawnWeapon == EarlWeapon.M249)) spawnWeapon = EarlWeapon.M249;
             GUILayout.EndHorizontal();
+            Section("CLOTHES");
+            GUILayout.BeginHorizontal();
+            if (Chip("AS THEY COME", spawnOutfit == 0)) spawnOutfit = 0;
+            if (Chip("CRIPS (BLUE)", spawnOutfit == 1)) spawnOutfit = 1;
+            if (Chip("BLOODS (RED)", spawnOutfit == 2)) spawnOutfit = 2;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (Chip("UKRAINIAN UNIFORM", spawnOutfit == 3)) spawnOutfit = 3;
+            if (Chip("RUSSIAN UNIFORM", spawnOutfit == 4)) spawnOutfit = 4;
+            GUILayout.EndHorizontal();
+            Section("FPV DRONE");
+            GUILayout.BeginHorizontal();
+            if (Chip("NONE", spawnDrone == 0)) spawnDrone = 0;
+            if (Chip("KAMIKAZE", spawnDrone == 1)) spawnDrone = 1;
+            if (Chip("GRENADE DROPPER", spawnDrone == 2)) spawnDrone = 2;
+            GUILayout.EndHorizontal();
+            if (spawnDrone > 0) GUILayout.Label("With AI on and a gun, he finds somewhere covered, puts his goggles on and flies it at the other side (yours, if he's an enemy). Hit him and the drone falls.", small);
             if (spawnWeapon != EarlWeapon.None) GUILayout.Label(spawnAI ? "He will come for you. Shoot his arm and his aim goes; take one arm and he can't steady a rifle." : "Dummies hold it but never use it (turn AI on).", small);
 
             ArmourOptions(L, false);
@@ -716,16 +857,12 @@ namespace Carl
                 listScroll = GUILayout.BeginScrollView(listScroll, false, false, GUIStyle.none, GUIStyle.none);
                 int num = 0;   // numbered down the page, 1, 2, 3...
                 for (int i = 0; i < w.defs.Count; i++)
-                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((++num) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i && droneTab == 0 ? bigOn : big, GUILayout.Height(38))) { gunTab = i; droneTab = 0; scroll = Vector2.zero; }
-                if (gunPage == 2)
-                    for (int k = 1; k <= 2; k++)
-                        if (GUILayout.Button("P   " + FpvDrone.NameOf(k == 1 ? FpvDrone.Kind.Kamikaze : FpvDrone.Kind.Bomber), droneTab == k ? bigOn : big, GUILayout.Height(38))) { droneTab = k; scroll = Vector2.zero; }
+                    if (PageOf(w.defs[i]) == gunPage && GUILayout.Button((++num) + "   " + w.defs[i].name + (w.owned[i] ? "   ✓" : ""), gunTab == i ? bigOn : big, GUILayout.Height(38))) { gunTab = i; droneTab = 0; scroll = Vector2.zero; }
                 GUILayout.EndScrollView();
             }
             GUILayout.EndArea();
 
             if (armourPage) { DrawArmourPage(listR); return; }
-            if (gunPage == 2 && droneTab > 0) { DrawDrone(listR); return; }
 
             var d = w.defs[gunTab];
             var L = w.loadouts[gunTab];
@@ -739,7 +876,9 @@ namespace Carl
             scroll = GUILayout.BeginScrollView(scroll, false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
             // you start with nothing: take what you want to carry
             if (Chip(w.owned[gunTab] ? "✓  CARRYING  ·  PUT BACK" : "TAKE THIS WEAPON", !w.owned[gunTab], 0f, 36f)) w.Give(gunTab, !w.owned[gunTab]);
+            if (d.type == WeaponType.Gun && !WeaponController.IsFlamer(d) && d.name != "TASER" && Chip("GUNSMITH  ·  BUILD IT PART BY PART", true, 0f, 40f)) { OpenGunsmith(gunTab); GUILayout.EndScrollView(); GUILayout.EndArea(); return; }
             GUILayout.Space(4);
+            if (WeaponController.IsDrone(d)) DroneOptions(WeaponController.DroneKind(d));
             if (d.bulletMass > 0.5f && d.type == WeaponType.Knife)
                 GUILayout.Label(d.name == "HAMMER" ? "LEFT CLICK overhead smash · RIGHT CLICK side swing · hold ALT and move the mouse to swing it freely. Crushes bone." : "LEFT CLICK overhead cut · RIGHT CLICK slash · hold ALT and move the mouse to swing it freely: fast cuts take limbs off, armour turns it.", small);
             if (d.type == WeaponType.Gun)
@@ -755,60 +894,8 @@ namespace Carl
                 Stat("ACCURACY", 1f - Mathf.Clamp01(spreadDeg / 5f), $"{spreadDeg:0.0#}°");
                 if (am != null && am.incendiary) GUILayout.Label("INCENDIARY: sets a 30 m jet of fire, sears whoever it hits.", small);
             }
-            if (d.name == "GLOCK 17")
-            {
-                Section("MODIFICATIONS");
-                GUILayout.BeginHorizontal();
-                if (Chip("17 RD MAG", !L.extMag)) { L.extMag = false; w.RefreshAttachments(); }
-                if (Chip("33 RD EXTENDED MAG", L.extMag)) { L.extMag = true; w.RefreshAttachments(); }
-                GUILayout.EndHorizontal();
-                GUILayout.BeginHorizontal();
-                if (Chip("SEMI-AUTO", !L.autoSwitch)) { L.autoSwitch = false; w.RefreshAttachments(); }
-                if (Chip("GLOCK SWITCH  FULL AUTO", L.autoSwitch)) { L.autoSwitch = true; w.RefreshAttachments(); }
-                GUILayout.EndHorizontal();
-                GUILayout.Label("The switch makes it fire about 1100 rounds a minute: an extended mag empties in under two seconds and the muzzle climbs fast.", small);
-            }
-            var ammo = AmmoTable.For(d.name);
-            if (ammo != null)
-            {
-                Section("AMMUNITION");
-                for (int i = 0; i < ammo.Length; i++)
-                {
-                    var a = ammo[i];
-                    if (GUILayout.Button($"{a.name}      PEN {a.pen:0.#}  ·  {a.Energy:0} J{(a.pellets > 1 ? $"  ·  {a.pellets} PELLETS" : "")}", L.ammo == i ? bigOn : big, GUILayout.Height(32))) L.ammo = i;
-                    GUILayout.Label(a.desc, small);
-                }
-            }
-            var sights = WeaponController.SightsFor(d);
-            if (sights.Length > 0)
-            {
-                Section("OPTIC");
-                GUILayout.BeginHorizontal();
-                foreach (var s in sights) if (Chip(SightName(s), L.sight == s)) { L.sight = s; w.RefreshAttachments(); }
-                GUILayout.EndHorizontal();
-            }
-            if (WeaponController.GripsFor(d))
-            {
-                Section("FOREGRIP");
-                GUILayout.BeginHorizontal();
-                if (Chip("NONE", L.grip == GripKind.None)) { L.grip = GripKind.None; w.RefreshAttachments(); }
-                if (Chip("VERTICAL  -30% RECOIL", L.grip == GripKind.Vertical)) { L.grip = GripKind.Vertical; w.RefreshAttachments(); }
-                if (Chip("ANGLED  FASTER AIM", L.grip == GripKind.Angled)) { L.grip = GripKind.Angled; w.RefreshAttachments(); }
-                GUILayout.EndHorizontal();
-            }
-            if (WeaponController.SuppressorFor(d) || WeaponController.LightFor(d) || WeaponController.LaserFor(d))
-            {
-                Section("MUZZLE AND RAILS");
-                GUILayout.BeginHorizontal();
-                if (WeaponController.SuppressorFor(d) && Check(WeaponController.IsPistol(d) ? "SUPPRESSOR  9MM CAN" : "SUPPRESSOR  QD CAN", ref L.suppressor)) w.RefreshAttachments();
-                if (WeaponController.LightFor(d) && Check("WEAPON LIGHT  X300", ref L.light)) w.RefreshAttachments();
-                GUILayout.EndHorizontal();
-                GUILayout.BeginHorizontal();
-                if (WeaponController.LaserFor(d) && Check("LASER  PEQ-15", ref L.laser)) w.RefreshAttachments();
-                if (WeaponController.MagnifierFor(d) && (L.sight == SightKind.RedDot || L.sight == SightKind.Holo) && Check("3X MAGNIFIER  G33", ref L.magnifier)) w.RefreshAttachments();
-                GUILayout.EndHorizontal();
-                GUILayout.Label("Suppressed shots carry about a third as far and barely flash. The light lights what you point at; the laser dot sits where the barrel points.", small);
-            }
+            if (d.type == WeaponType.Gun && !WeaponController.IsFlamer(d) && d.name != "TASER")
+                GUILayout.Label("Optics, foregrips, lights, lasers, muzzles, magazines, ammunition - and on the AKs and the AR-15 the barrel, handguard, grip, stock and the rest: all in the GUNSMITH.", small);
             if (WeaponController.IsRadio(d))
                 GUILayout.Label("Hold it and LEFT CLICK (or press M): a picture of the map from above comes up. Pick 1 BOMBING RUN (six heavy bombs along the arrow), 2 GUN RUN (cannon along the arrow) 3 ARTILLERY (20 s of shells all over the circle) or 4 MISSILE (one precise hit, small blast), move the circle with the mouse (SCROLL zoom, WASD move the map, Q / E turn the arrow) and LEFT CLICK. ESC or M backs out. A red smoke goes down and it arrives some seconds later; each needs time before you can call it again.", small);
             else if (d.type == WeaponType.Medical)
@@ -834,6 +921,7 @@ namespace Carl
                 {
                     L.ammo = 0; L.grip = GripKind.None; L.extMag = false; L.autoSwitch = false; L.suppressor = L.light = L.laser = L.magnifier = false;
                     L.sight = d.scope ? SightKind.Scope8x : SightKind.Iron;
+                    if (GunBuilder.Supports(d.name)) { L.build = GunBuilder.Stock(d.name); w.ApplyBuild(gunTab); }
                     w.RefreshAttachments();
                 }
             }
@@ -960,14 +1048,16 @@ namespace Carl
             SetLayer(gun, Layer);
             float size = Mathf.Max(0.25f, b.size.magnitude);
             cam.fieldOfView = 22f;
-            cam.transform.position = At + Vector3.up * 0.9f + new Vector3(0.0f, size * 0.45f, size * 2.6f);
+            // close enough that the gun fills the frame side on (its parts are what you're looking at)
+            cam.transform.position = At + Vector3.up * 0.9f + new Vector3(0.0f, size * 0.25f, size * 1.75f);
             cam.transform.LookAt(At + Vector3.up * 0.9f);
         }
 
         public void Spin(float dt)
         {
             angle += dt * 28f;
-            turntable.localRotation = Quaternion.Euler(0f, angle, 0f);
+            // a gun rocks slowly either side of its side view; an Earl turns all the way round
+            turntable.localRotation = Quaternion.Euler(0f, gun != null ? -90f + Mathf.Sin(angle * 0.03f) * 30f : angle, 0f);
             if (gun != null)
             {
                 // the gun turns about its own middle
