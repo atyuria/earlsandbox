@@ -69,6 +69,19 @@ namespace Carl
             return m;
         }
 
+        /// <summary>A gun and, if it has one as its own model (name_Mag), its magazine as a child called "Mag" (it comes
+        /// out when the gun is reloaded).</summary>
+        public static GameObject SpawnWithMag(string name, Transform parent, Func<string, Material> mat, bool shadows = true)
+        {
+            var g = Spawn(name, parent, mat, shadows);
+            if (g != null && Get(name + "_Mag") != null)
+            {
+                var m = Spawn(name + "_Mag", g.transform, mat, shadows);
+                if (m != null) m.name = "Mag";
+            }
+            return g;
+        }
+
         /// <summary>Instantiates a model as a child object with materials resolved by name.</summary>
         public static GameObject Spawn(string name, Transform parent, Func<string, Material> mat, bool shadows = true, bool mirrorX = false)
         {
@@ -97,6 +110,8 @@ namespace Carl
                 case "Olive": return Mats.Lit(new Color(0.3f, 0.36f, 0.22f), 0.3f);
                 case "Yellow": return Mats.Lit(new Color(0.95f, 0.78f, 0.08f), 0.45f);          // Taser body
                 case "Tan": return Mats.Lit(new Color(0.62f, 0.52f, 0.38f), 0.3f);               // flat dark earth
+                case "Blued": return Mats.Lit(new Color(0.07f, 0.07f, 0.075f), 0.45f, 0.75f);     // blued / phosphated steel (AK, PKM)
+                case "Plum": return Mats.Lit(new Color(0.32f, 0.12f, 0.08f), 0.32f);              // the AK-74's plum polymer
                 case "Rubber": return Mats.Lit(new Color(0.06f, 0.06f, 0.065f), 0.12f);          // grip panels, pads
                 case "Brass": return Mats.Lit(new Color(0.78f, 0.6f, 0.26f), 0.7f, 0.9f);
                 case "Lens": return Mats.Lit(new Color(0.75f, 0.8f, 0.85f), 0.95f, 0.3f);         // torch lens, laser window

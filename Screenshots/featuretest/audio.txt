@@ -1,18 +1,26 @@
-== audio  (20:18:10)
+== audio  (10:39:07)
 PASS  sound 'gun_ak' exists (1.80 s)
-PASS  sound 'gun_ak_supp' exists (0.55 s)
+PASS  sound 'gun_ak_full' exists (1.40 s)
+PASS  sound 'gun_glock_full' exists (1.40 s)
+PASS  sound 'gun_50_full' exists (1.40 s)
+PASS  sound 'gun_ak_supp' exists (0.60 s)
 PASS  sound 'gun_ak_tail_open' exists (3.70 s)
 PASS  sound 'gun_ak_tail_tight' exists (2.50 s)
 PASS  sound 'gun_ak_far' exists (3.60 s)
-PASS  sound 'gun_glock_supp' exists (0.55 s)
+PASS  sound 'gun_glock_supp' exists (0.60 s)
 PASS  sound 'thump' exists (0.32 s)
 PASS  sound 'mech_rifle' exists (0.16 s)
 PASS  sound 'flyby_crack' exists (0.22 s)
 PASS  sound 'flyby_whiz' exists (0.40 s)
 PASS  sound 'casing' exists (0.90 s)
 PASS  sound 'casing_dirt' exists (0.18 s)
-PASS  sound 'ricochet' exists (1.17 s)
-PASS  suppressed shot has the crack taken off (high-frequency share 0.029 vs 0.062)
+PASS  sound 'ricochet' exists (1.07 s)
+AK report, first 100 ms: recording -22.9 dBFS, as played -12.0 dBFS, suppressed -18.3 dBFS (6.3 dB down)
+PASS  the report is much fuller than the bare recording
+PASS  suppressed: quieter, but still a loud gunshot (3-9 dB down)
+PASS  suppressed rifle keeps its crack (high-frequency share 0.141 vs 0.069 unsuppressed)
+full auto 2.5 s: the limiter pulled the mix down at most -2.8 dB
+PASS  full auto stays loud but under control (limiter under 10 dB)
 PASS  in the trench: short slap echo
 PASS  out in the field: long rolling echo
 PASS  a round going past your head cracks

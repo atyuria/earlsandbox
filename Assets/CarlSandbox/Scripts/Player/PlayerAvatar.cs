@@ -217,8 +217,11 @@ namespace Carl
             // footsteps: running is heard a good way off, creeping crouched hardly at all
             if (rag.moveSpeed > 0.3f && Time.time > nextStepNoise)
             {
-                nextStepNoise = Time.time + 0.45f;
-                Intel.Noise(h.Pelvis.transform.position, Teams.Friendly, crouch ? 2.5f : sprint ? 16f : 7f);
+                nextStepNoise = Time.time + (sprint ? 0.36f : 0.5f);
+                // your own vest rattles too: the Earls hear it further off
+                bool vest = ArmourSystem.WearsVest(h);
+                Intel.Noise(h.Pelvis.transform.position, Teams.Friendly, (crouch ? 2.5f : sprint ? 16f : 7f) * (vest ? 1.4f : 1f));
+                if (vest && !crouch) Sfx.Play("gear_rattle", h.Chest.transform.position, sprint ? 0.12f : 0.07f, 0.4f, 1f, 0.12f, 10f);
             }
             // Z: go down / try to get up. On the ground: hold space to get up, keys to crawl
             if (keys && kb.yKey.wasPressedThisFrame && !rag.IsDown) { rag.Fall("player"); stayDown = true; downFrame = Time.frameCount; }

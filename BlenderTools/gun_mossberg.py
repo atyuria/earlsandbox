@@ -3,8 +3,8 @@
 # with protective ears, front blade, magazine tube under the barrel with its cap and the bayonet lug, barrel
 # clamp ring, ribbed pump forend, polymer trigger guard, synthetic stock with a rubber pad. Bore axis y = 0.
 import bpy
-K = bpy.app.driver_namespace["gunkit2"]
-G = K.Gun2("Gun_Shotgun", ["Anod", "Metal", "Polymer", "Rubber", "Steel"])
+K = bpy.app.driver_namespace["gunkit3"]
+G = K.Gun3("Gun_Shotgun", ["Anod", "Metal", "Polymer", "Rubber", "Steel"])
 A, M, P, R, S = "Anod", "Metal", "Polymer", "Rubber", "Steel"
 
 # ---- receiver (z -112 .. 92)
@@ -42,11 +42,14 @@ G.tube([(0, -32, -36), (0, -40, -34), (0, -46, -37)], 3, S, seg=10)
 G.box((-7.5, -44, -72), (2, 7, 4), S, bevel=0.6)
 for z in (-20, -88): G.screw((15, -12, z), 2.2, "x", S); G.screw((-15, -12, z), 2.2, "x", S)
 # ---- synthetic stock: wrist, comb, rubber recoil pad
-G.prof([(-108, 20), (-112, -10), (-150, -40, 20), (-392, -130), (-392, -16), (-200, 6, 40)], -19, 19, P, bevel=4.5, seg=3)
+# the 590A1's synthetic stock: a slim curved wrist behind the receiver, the comb line dropping to the heel, a
+# straight toe line to the pad - wider at the butt than at the wrist
+sk = G.prof([(-108, 20), (-112, -12), (-136, -36, 18), (-170, -54, 26), (-392, -132, 4), (-392, -18, 4), (-250, -2, 50), (-150, 10, 30)], -19, 19, P, bevel=4.5, seg=3)
+G.taper(sk, -110, 0.72, -392, 1.0)
 G.prof([(-392, -14), (-414, -14, 4), (-414, -134, 6), (-392, -132)], -21, 21, R, bevel=3, seg=2)
 G.cyl((0, -112, -320), (0, -120, -320), 4, S, seg=10)
 
 pts = {"Muzzle": [0, 0, 0.616], "Grip": [0, -0.046, -0.168], "Fore": [0, -0.03, 0.26], "Iron": [0, 0.04, 0.581],
-       "Eject": [0.016, 0.006, 0.04]}
+       "Eject": [0.016, 0.006, 0.04], "MagTop": [0, -0.034, 0.045], "MagBottom": [0, -0.06, 0.045], "Charge": [0, -0.03, 0.25]}
 result = {"verts": G.stats()}
 bpy.app.driver_namespace["lastgun"] = (G, pts)

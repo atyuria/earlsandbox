@@ -1,0 +1,9 @@
+== armies  (11:58:00)
+you: UKRAINE  ·  you hold AK-74
+   your side (UKRAINE): AK-47 x2  AK-74 x2  GLOCK 17 x1  AKS-74U x1  
+   the enemy (RUSSIA): AK-74M x3  AK-105 x1  PKM x2  AKS-74U x1  RPK-74 x1  
+PASS  UKRAINE: you start with the AK-74
+you: RUSSIA  ·  you hold AK-74M
+   your side (RUSSIA): AK-12 x1  PKM x1  GLOCK 17 x1  AK-74M x3  
+   the enemy (UKRAINE): AK-47 x2  AK-74 x5  GLOCK 17 x3  RPK-74 x1  
+PASS  RUSSIA: you start with the AK-74M

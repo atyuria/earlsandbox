@@ -53,6 +53,32 @@ namespace Carl
             }
         }
 
+        /// <summary>For checking the sounds by ear or by measurement: writes every clip whose name starts with
+        /// <paramref name="prefix"/> to <paramref name="dir"/> as 16-bit WAV.</summary>
+        public static string Export(string prefix, string dir)
+        {
+            if (I == null) return "no sfx";
+            System.IO.Directory.CreateDirectory(dir);
+            int n = 0;
+            foreach (var kv in I.groups)
+                foreach (var c in kv.Value)
+                {
+                    if (c == null || !c.name.StartsWith(prefix)) continue;
+                    var d = new float[c.samples * c.channels];
+                    if (!c.GetData(d, 0)) continue;
+                    using (var f = new System.IO.BinaryWriter(System.IO.File.Create(System.IO.Path.Combine(dir, c.name + ".wav"))))
+                    {
+                        int bytes = d.Length * 2;
+                        f.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); f.Write(36 + bytes); f.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+                        f.Write(16); f.Write((short)1); f.Write((short)c.channels); f.Write(c.frequency); f.Write(c.frequency * c.channels * 2); f.Write((short)(c.channels * 2)); f.Write((short)16);
+                        f.Write(System.Text.Encoding.ASCII.GetBytes("data")); f.Write(bytes);
+                        foreach (var v in d) f.Write((short)Mathf.Clamp(Mathf.RoundToInt(v * 32767f), -32768, 32767));
+                    }
+                    n++;
+                }
+            return n + " clips";
+        }
+
         public static AudioClip Clip(string group)
         {
             if (I == null || !I.groups.TryGetValue(group, out var l) || l.Count == 0) return null;
@@ -118,15 +144,17 @@ namespace Carl
         }
 
         static string Family(string weapon) =>
-            weapon == "AK-47" || weapon == "AR-15" ? "gun_ak" : weapon == "GLOCK 17" || weapon == "BERETTA M9" ? "gun_glock" : weapon == "AWP" ? "gun_awp" : weapon == ".50 CAL" ? "gun_50" : "gun_shotgun";
+            GunInfo.Of(weapon) is GunInfo.Info gi ? gi.sound : weapon == "GLOCK 17" || weapon == "BERETTA M9" ? "gun_glock" : weapon == "AWP" ? "gun_awp" : weapon == ".50 CAL" ? "gun_50" : "gun_shotgun";
 
         /// <summary>
         /// A shot, as it reaches your ears: the report (late by its distance at the speed of sound, duller the further
         /// off), a thump and the action working when it's your own or right by you, the echo off what is round
         /// about it, and far off just the boom. A suppressor takes the crack off: a thud and a clack, little echo.
         /// </summary>
+        static float lastSupp = -99f;
         public static void Gun(string weapon, Vector3 pos, bool suppressed = false)
         {
+            MasterLimiter.Ensure();
             if (weapon == "TASER") { Play("taser_pop", pos, 0.8f, 0.3f, 1f, 0.05f, 25f); return; }
             string g = Family(weapon);
             bool pistol = g == "gun_glock";
@@ -136,19 +164,25 @@ namespace Carl
             float delay = own ? 0f : dist / 343f;
             float dull = Mathf.Lerp(22000f, 2600f, Mathf.Clamp01(dist / 220f));
             string tail = g + (Enclosed(pos) ? "_tail_tight" : "_tail_open");
-            float heavy = g == "gun_50" ? 1.3f : g == "gun_awp" ? 1.15f : g == "gun_shotgun" ? 1.1f : 1f;
+            float heavy = g == "gun_50" ? 1.45f : g == "gun_awp" ? 1.5f : g == "gun_shotgun" ? 1.45f : g == "gun_pkm" ? 1.3f : 1f;
             if (suppressed)
             {
-                PlayLater(delay, g + "_supp", pos, own ? 0.8f : 1f, spatial, 2f, 80f, 0.05f, dull);
-                if (own) Play(pistol ? "mech_pistol" : "mech_rifle", pos, 0.45f, 0f, 1f, 0.05f);
-                PlayLater(delay + 0.02f, tail, pos, own ? 0.12f : 0.18f, own ? 0.3f : 0.8f, 4f, 70f, 0.05f, dull, 90f);
+                // still loud and still carries (a suppressed rifle is heard a long way off); the first round out of a
+                // cold can is louder (the air in it burns)
+                bool cold = Time.time - lastSupp > 15f;
+                if (own) lastSupp = Time.time;
+                PlayLater(delay, g + "_supp", pos, own && cold ? 1f : own ? 0.85f : 1f, spatial, own ? 2f : 5f, 260f, 0.05f, dull);
+                if (own && cold) Play("thump", pos, 0.35f, spatial, 2f, 0.08f, 20f);
+                if (own) Play(pistol ? "mech_pistol" : "mech_rifle", pos, 0.4f, 0f, 1f, 0.05f);
+                PlayLater(delay + 0.02f, tail, pos, (own ? 0.32f : 0.4f) * heavy, own ? 0.3f : 0.8f, 6f, 350f, 0.05f, dull, 100f);
                 return;
             }
-            if (dist < 260f) PlayLater(delay, g, pos, 1f, spatial, own ? 3f : 8f, 450f, 0.04f, dull);
-            if (own || dist < 8f) Play("thump", pos, (own ? 0.75f : 0.45f) * heavy, spatial, 3f, 0.08f, 30f);
+            if (dist < 260f) PlayLater(delay, g + "_full", pos, 1f, spatial, own ? 3f : 9f, 500f, 0.04f, dull);
+            if (own || dist < 10f) Play("thump", pos, Mathf.Min(1f, (own ? 0.9f : 0.55f) * heavy), spatial, 3f, 0.08f, 35f);
+            if (heavy > 1.2f && (own || dist < 25f)) Play("thump", pos, own ? 0.8f : 0.5f, spatial, 4f, 0.03f, 60f, 900f);
             if (own) Play(pistol ? "mech_pistol" : "mech_rifle", pos, 0.22f, 0f, 1f, 0.05f);
             // the echo comes from everywhere round, not from the gun
-            PlayLater(delay + 0.015f, tail, pos, (own ? 0.5f : 0.7f) * heavy, own ? 0.3f : 0.75f, 12f, 700f, 0.05f, own ? 22000f : Mathf.Lerp(22000f, 5000f, Mathf.Clamp01(dist / 300f)), 120f);
+            PlayLater(delay + 0.015f, tail, pos, (own ? 0.6f : 0.75f) * heavy, own ? 0.3f : 0.75f, 12f, 700f, 0.05f, own ? 22000f : Mathf.Lerp(22000f, 5000f, Mathf.Clamp01(dist / 300f)), 120f);
             if (dist > 70f) PlayLater(delay, g + "_far", pos, Mathf.Clamp01(1.3f - dist / 700f) * heavy, 1f, 40f, 1200f, 0.05f, 22000f, 60f);
             // (the cases make their own sound, as they land: Casing)
         }

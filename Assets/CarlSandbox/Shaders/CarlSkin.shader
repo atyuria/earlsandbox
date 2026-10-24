@@ -20,6 +20,7 @@ Shader "Carl/Skin"
         _BurnCount("Burn Count", Float) = 0
         _Char("Char", Range(0,1)) = 0
         _Heat("Heat", Range(0,1)) = 0
+        _Uniform("Uniform (0 skin, 1 EMR, 2 MM-14, 3 boots)", Float) = 0
     }
     SubShader
     {
@@ -41,10 +42,22 @@ Shader "Carl/Skin"
             #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
             #pragma multi_compile _ SHADOWS_SHADOWMASK
             #pragma multi_compile_fog
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "CarlLights.hlsl"
             #include "CarlBloodCommon.hlsl"
+
+            // ---- the uniform painted on the body (the mannequins wear no separate clothes): the army's digital camo
+            // in the body part's own space, so it moves with the limb; boots on the feet
+            #include "CarlCamo.hlsl"
+            half3 Uniform(float3 P, float u)
+            {
+                if (u > 2.5) return half3(0.035, 0.03, 0.025);           // boots
+                return DigitalCamo(P, u);
+            }
             CBUFFER_START(UnityPerMaterial)
                 half4 _BaseColor;
                 half _Smoothness;
@@ -56,6 +69,7 @@ Shader "Carl/Skin"
                 float _Heat;
                 float4 _BurnStyle;
                 float4 _MeltCenter;
+                float _Uniform;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -181,13 +195,21 @@ Shader "Carl/Skin"
                 half3 h = normalize(ml.direction + vdir);
                 half ndl = saturate(dot(n, ml.direction));
                 half wrap = saturate((dot(n, ml.direction) + 0.35) / 1.35);
-                half3 light = SampleSH(n) + ml.color * lerp(ndl, wrap, 0.35) * atten;
+                half3 light = SampleSH(n) + ml.color * lerp(ndl, wrap, 0.35) * atten + CarlOtherLights(i.positionWS, n, i.positionCS, 0.35);
 
                 // ---- skin with bruises and scrapes
                 half3 albedo = _BaseColor.rgb;
                 albedo = lerp(albedo, half3(0.5, 0.2, 0.3), min(saturate(i.color.g), 0.7) * 0.55);
                 albedo = lerp(albedo, half3(0.72, 0.33, 0.27), saturate(i.color.b) * 0.6);
-                half spec = pow(saturate(dot(n, h)), exp2(10.0 * _Smoothness + 1.0)) * _Smoothness * 0.5;
+                half clothK = 1.0;
+                if (_Uniform > 0.5)
+                {
+                    // cloth (or boot leather): the camo, bruise and scrape marks don't show through it, and matte
+                    // (and the cloth itself: faint weave, soft folds where it bunches)
+                    albedo = Uniform(i.positionOS, _Uniform) * (0.9 + 0.12 * WoundNoise(i.positionOS * 900.0)) * (0.88 + 0.2 * WoundNoise(i.positionOS * 45.0));
+                    clothK = 0.12;
+                }
+                half spec = pow(saturate(dot(n, h)), exp2(10.0 * _Smoothness + 1.0)) * _Smoothness * 0.5 * clothK;
                 half3 col = albedo * light + ml.color * spec * atten;
 
                 // ---- blood on the skin
@@ -300,6 +322,7 @@ Shader "Carl/Skin"
                 float _Heat;
                 float4 _BurnStyle;
                 float4 _MeltCenter;
+                float _Uniform;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -354,6 +377,7 @@ Shader "Carl/Skin"
                 float _Heat;
                 float4 _BurnStyle;
                 float4 _MeltCenter;
+                float _Uniform;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -389,6 +413,7 @@ Shader "Carl/Skin"
                 float _Heat;
                 float4 _BurnStyle;
                 float4 _MeltCenter;
+                float _Uniform;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"
@@ -420,6 +445,7 @@ Shader "Carl/Skin"
                 float _Heat;
                 float4 _BurnStyle;
                 float4 _MeltCenter;
+                float _Uniform;
             CBUFFER_END
             #define CARL_HOLES
             #include "CarlWounds.hlsl"

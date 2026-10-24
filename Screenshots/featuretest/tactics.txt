@@ -1,27 +1,27 @@
-== tactics  (21:45:37)
+== tactics  (10:39:32)
 nav: 937 points
 path to their line: by trench 50 points 100 m (uses field: False); over the top 44 points 115 m, 2 ladder climbs
 PASS  routes to their trench, along the trenches and over the top
-enemy heard the shot: suspects 1.8 m from you (conf 0.69); stance Hold
+enemy heard the shot: suspects 1.2 m from you (conf 0.69); stance Push
 PASS  a shot gives your position away (roughly)
-what he did:  Hold
+what he did:  Push
 grenade: thrown after 0.0 s, 1 left
 PASS  throws a grenade into the corner you've gone quiet in
-grenade at his feet: 1.4 m -> 5.5 m when it went off, down False
+grenade at his feet: 1.4 m -> 5.8 m when it went off, down False
 PASS  runs from (or dives away from) a grenade
-  over-the-top: sees False conf 0.0 None step 3/29 next Walk at (10.13, -0.03, -20.75) feet (5.63, -0.04, -21.28) speed 2.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.4 order None
-  trench: sees False conf 0.0 None step 3/33 next Walk at (14.94, -0.03, -21.70) feet (8.64, -0.06, -20.89) speed 2.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 0.6 order None
-  over-the-top: sees False conf 0.0 None step 1/27 next Walk at (10.13, -0.03, -20.75) feet (7.71, -0.05, -21.07) speed 2.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.3 order None
-  trench: sees False conf 0.0 None step 3/32 next Walk at (16.97, 0.00, -21.19) feet (12.68, -0.10, -21.32) speed 2.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 1.1 order None
-  over-the-top: sees False conf 0.0 None step 3/27 next Walk at (14.94, -0.03, -21.70) feet (8.68, -0.05, -20.87) speed 2.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.1 order None
-  trench: sees False conf 0.0 None step 4/32 next Walk at (19.98, -0.02, -20.41) feet (19.06, -0.11, -20.64) speed 2.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 1.2 order None
-  over-the-top: sees False conf 0.0 None step 1/27 next Walk at (10.13, -0.03, -20.75) feet (9.00, -0.02, -20.64) speed 0.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.1 order None
-  trench: sees False conf 0.0 None step 4/29 next Walk at (17.50, -0.04, -15.50) feet (19.59, -0.03, -19.76) speed 0.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 0.1 order None
-  over-the-top: sees False conf 0.0 None step 1/27 next Walk at (10.13, -0.03, -20.75) feet (8.98, -0.02, -20.56) speed 0.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.1 order None
-  trench: sees False conf 0.0 None step 4/29 next Walk at (17.50, -0.04, -15.50) feet (19.59, -0.06, -19.58) speed 0.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 0.1 order None
-  over-the-top: sees False conf 0.0 None step 1/27 next Walk at (10.13, -0.03, -20.75) feet (9.33, -0.06, -20.30) speed 0.0 obj (14.55, 0.00, 23.77) wait - 0.0s [] v 0.1 order None
-  trench: sees False conf 0.0 None step 4/29 next Walk at (17.50, -0.04, -15.50) feet (19.71, -0.06, -19.36) speed 0.0 obj (15.71, 0.00, 26.23) wait - 0.0s [] v 0.1 order None
-wanderer went up to 8 m from his start; trench friendly z -21 -> -19; over-the-top friendly z -21 -> -20, highest 1.0
+  over-the-top: sees False conf 0.0 None step 3/32 next Walk at (10.13, -0.03, -20.75) feet (5.80, -0.03, -21.31) speed 2.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 0.4 order None
+  trench: sees False conf 0.0 None step 3/37 next Walk at (14.94, -0.03, -21.70) feet (8.75, 0.02, -20.76) speed 2.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 1.0 order None
+  over-the-top: sees False conf 0.0 None step 2/30 next Walk at (12.97, -0.01, -21.31) feet (8.05, -0.04, -20.86) speed 2.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 0.7 order None
+  trench: sees False conf 0.0 None step 3/35 next Walk at (19.98, -0.02, -20.41) feet (14.89, -0.10, -21.51) speed 2.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 1.0 order None
+  over-the-top: sees False conf 0.0 None step 5/30 next Walk at (18.92, -0.03, -20.75) feet (14.33, -0.08, -21.42) speed 2.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 1.5 order None
+  trench: sees False conf 0.0 None step 6/35 next Walk at (17.50, -0.04, -15.50) feet (19.30, -0.05, -19.20) speed 2.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 1.1 order None
+  over-the-top: sees False conf 0.0 None step 2/27 next Walk at (18.92, -0.03, -20.75) feet (17.91, -0.05, -20.98) speed 0.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 0.1 order None
+  trench: sees False conf 0.0 None step 2/31 next Walk at (17.50, -0.04, -15.50) feet (17.95, -0.06, -16.58) speed 0.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 0.1 order None
+  over-the-top: sees False conf 0.0 None step 2/27 next Walk at (18.92, -0.03, -20.75) feet (17.85, -0.05, -20.98) speed 0.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 0.1 order None
+  trench: sees False conf 0.0 None step 2/31 next Walk at (17.50, -0.04, -15.50) feet (17.97, -0.06, -16.55) speed 0.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 0.1 order None
+  over-the-top: sees False conf 0.0 None step 2/27 next Walk at (18.92, -0.03, -20.75) feet (17.89, -0.05, -21.00) speed 0.0 obj (10.34, -0.03, 20.51) wait - 0.0s [] v 0.1 order None
+  trench: sees False conf 0.0 None step 2/31 next Walk at (17.50, -0.04, -15.50) feet (17.95, -0.07, -16.44) speed 0.0 obj (6.17, -0.01, 23.55) wait - 0.0s [] v 0.2 order None
+wanderer went up to 9 m from his start; trench friendly z -21 -> -16; over-the-top friendly z -21 -> -21, highest 1.0
 PASS  enemies wander their trench
 FAIL  friendlies push toward their trench
 FAIL  the over-the-top one climbed out

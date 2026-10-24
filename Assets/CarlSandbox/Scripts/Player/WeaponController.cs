@@ -29,7 +29,7 @@ namespace Carl
 
     /// <summary>Weapons, viewmodels and the physics grab (F).</summary>
     [DefaultExecutionOrder(100)]   // after the camera has gone to your head (PlayerAvatar.LateUpdate)
-    public class WeaponController : MonoBehaviour
+    public partial class WeaponController : MonoBehaviour
     {
         public readonly List<WeaponDef> defs = new List<WeaponDef>
         {
@@ -59,6 +59,16 @@ namespace Carl
             // a backpack-tank flamethrower: hold the trigger and it throws burning fuel ~5 m; a full tank is 30 s of
             // flame (the "magazine" is tenths of a second of it), R swaps the tank (Flamethrower)
             new WeaponDef { name = "FLAMETHROWER", type = WeaponType.Gun, auto = true, rpm = 600, muzzleVelocity = 16, bulletMass = 0.001f, diameter = 0.01f, magazine = 300, reloadTime = 4.5f, recoil = 0f, spread = 0f, zoomFov = 62, loudness = 35, tracer = false },
+            // ---- the Kalashnikovs since the AKM, 5.45x39 (GunInfo has the rest of what each one is)
+            new WeaponDef { name = "AK-74", type = WeaponType.Gun, auto = true, rpm = 650, muzzleVelocity = 900, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 30, reloadTime = 2.4f, recoil = 1.05f, spread = 0.3f, zoomFov = 55, loudness = 75, tracer = true },
+            new WeaponDef { name = "AK-74M", type = WeaponType.Gun, auto = true, rpm = 650, muzzleVelocity = 900, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 30, reloadTime = 2.3f, recoil = 1.0f, spread = 0.28f, zoomFov = 55, loudness = 75, tracer = true },
+            new WeaponDef { name = "AK-105", type = WeaponType.Gun, auto = true, rpm = 650, muzzleVelocity = 840, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 30, reloadTime = 2.3f, recoil = 1.15f, spread = 0.32f, zoomFov = 55, loudness = 78, tracer = true },
+            new WeaponDef { name = "AKS-74U", type = WeaponType.Gun, auto = true, rpm = 700, muzzleVelocity = 735, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 30, reloadTime = 2.2f, recoil = 1.3f, spread = 0.45f, zoomFov = 58, loudness = 82, tracer = true },
+            new WeaponDef { name = "AK-12", type = WeaponType.Gun, auto = true, rpm = 700, muzzleVelocity = 880, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 30, reloadTime = 2.3f, recoil = 0.95f, spread = 0.25f, zoomFov = 55, loudness = 75, tracer = true },
+            // ---- machine guns: the RPK-74 (45-round magazine), the PKM and the M249 off 100/200-round belts
+            new WeaponDef { name = "RPK-74", type = WeaponType.Gun, auto = true, rpm = 600, muzzleVelocity = 960, bulletMass = 0.0034f, diameter = 0.0056f, magazine = 45, reloadTime = 2.9f, recoil = 1.0f, spread = 0.26f, zoomFov = 55, loudness = 78, tracer = true },
+            new WeaponDef { name = "PKM", type = WeaponType.Gun, auto = true, rpm = 650, muzzleVelocity = 825, bulletMass = 0.0096f, diameter = 0.0079f, magazine = 100, reloadTime = 6.5f, recoil = 2.4f, spread = 0.34f, zoomFov = 55, loudness = 95, tracer = true },
+            new WeaponDef { name = "M249", type = WeaponType.Gun, auto = true, rpm = 800, muzzleVelocity = 915, bulletMass = 0.004f, diameter = 0.0057f, magazine = 200, reloadTime = 7f, recoil = 1.3f, spread = 0.34f, zoomFov = 55, loudness = 80, tracer = true },
         };
 
         /// <summary>Is this the flamethrower (a gun in the hands, but it throws fire, not rounds)?</summary>
@@ -154,6 +164,7 @@ namespace Carl
         /// <summary>The fire modes a gun has, in the order Z goes through them.</summary>
         public string[] ModesFor(int i)
         {
+            if (defs[i].name != "AK-47" && defs[i].name != "AR-15" && GunInfo.Of(defs[i].name) is GunInfo.Info gi) return gi.modes;
             switch (defs[i].name)
             {
                 case "AK-47": return new[] { "AUTO", "SEMI" };
@@ -207,7 +218,7 @@ namespace Carl
             return new[] { SightKind.Iron, SightKind.RedDot, SightKind.Holo, SightKind.Scope4x };
         }
         public static bool GripsFor(WeaponDef d) => d.type == WeaponType.Gun && !IsPistol(d) && d.name != "MOSSBERG 590" && !IsFlamer(d);
-        public static bool SuppressorFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && d.name != "MOSSBERG 590" && !IsFlamer(d);
+        public static bool SuppressorFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && d.name != "MOSSBERG 590" && !IsFlamer(d) && d.name != "PKM" && d.name != "M249";
         public static bool LightFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !d.scope && !IsFlamer(d);
         public static bool LaserFor(WeaponDef d) => d.type == WeaponType.Gun && d.name != "TASER" && !IsFlamer(d);
         /// <summary>L and J: the weapon light (or, with none fitted, a head torch) and the laser, on and off.</summary>
@@ -344,7 +355,8 @@ namespace Carl
         static GameObject Barrel(Transform p, Vector3 pos, float d, float len, Color c) =>
             Part(p, PrimitiveType.Cylinder, pos, new Vector3(d, len * 0.5f, d), c, new Vector3(90, 0, 0), 0.5f, 0.7f);
 
-        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery", "Med_Radio", "Gun_Flamer" };
+        static readonly string[] modelNames = { "Gun_AK47", "Gun_Glock", "Gun_AWP", "Gun_Barrett", "Gun_Shotgun", "Gun_Knife", "Gun_Grenade", "Gun_Hammer", "Gun_Sword", "Gun_AR15", "Gun_Beretta", "Gun_Taser", "Gun_PhysGun", "Med_Bandage", "Med_Surgery", "Med_Radio", "Gun_Flamer",
+            "Gun_AK74", "Gun_AK74M", "Gun_AK105", "Gun_AKS74U", "Gun_AK12", "Gun_RPK74", "Gun_PKM", "Gun_M249" };
 
         /// <summary>
         /// The flamethrower (no sculpted model of it either): the wand - a pistol grip and a fore grip on a long tube
@@ -392,6 +404,8 @@ namespace Carl
         }
 
         readonly List<float> ironY = new List<float>(), scopeY = new List<float>();
+        /// <summary>Where the back of each gun's own scope (its eyepiece glass) is, front to back (NaN: no scope).</summary>
+        readonly List<float> ocularZ = new List<float>();
 
         /// <summary>Height of the line you look along for the current weapon and sight (model space).</summary>
         float SightHeight()
@@ -420,10 +434,11 @@ namespace Carl
                 var model = ModelLibrary.Get(name);
                 // (anything without a model in the library is built here: the radio)
                 Vector3[] built = null;
-                if (model != null) ModelLibrary.Spawn(name, root, ModelLibrary.GunMaterial, false);
+                if (model != null) ModelLibrary.SpawnWithMag(name, root, ModelLibrary.GunMaterial, false);
                 else built = name == "Gun_Flamer" ? FlamerModel(root) : RadioModel(root);
                 var points = model != null ? model.points : BuiltPoints(name);
                 Vector3 grip = points.TryGetValue("Grip", out var g) ? g : Vector3.zero;
+                AddAnimPoints(points, grip);
                 Vector3 muzzle = points.TryGetValue("Muzzle", out var mz) ? mz : new Vector3(0, 0, 0.3f);
                 AddArm(root, grip, skinMat, name);
                 AddModel(root.gameObject, muzzle);
@@ -451,6 +466,16 @@ namespace Carl
                 if (points.TryGetValue("Iron", out var ir)) iron = ir.y;
                 ironY.Add(iron == float.MinValue ? 0.05f : iron);
                 scopeY.Add(points.TryGetValue("Scope", out var sc) ? sc.y : (iron == float.MinValue ? 0.08f : iron + 0.04f));
+                // the eyepiece: the back of the glass (the eye has to sit a few centimetres behind it, wherever the
+                // scope is mounted on that gun - on the .50 it's a long way back)
+                float oz = float.NaN;
+                if (model != null && model.materials != null)
+                    for (int sm = 0; sm < model.materials.Length && sm < model.mesh.subMeshCount; sm++)
+                    {
+                        if (model.materials[sm] != "Glass") continue;
+                        foreach (int ti in model.mesh.GetTriangles(sm)) oz = float.IsNaN(oz) ? mv[ti].z : Mathf.Min(oz, mv[ti].z);
+                    }
+                ocularZ.Add(oz);
                 mountUnder.Add(new Vector3(0f, under == float.MaxValue ? -0.03f : under, (zC + zD) * 0.5f));
             }
         }
@@ -464,6 +489,14 @@ namespace Carl
         public static readonly Dictionary<string, (Vector3 off, Vector3 rot, Vector3 supOff, Vector3 supRot)> HandPose = new Dictionary<string, (Vector3, Vector3, Vector3, Vector3)>
         {
             ["Gun_AK47"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_AK74"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_AK74M"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_AK105"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_AKS74U"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_AK12"] = (Vector3.zero, new Vector3(20f, 0f, 0f), default, default),
+            ["Gun_RPK74"] = (Vector3.zero, new Vector3(18f, 0f, 0f), default, default),
+            ["Gun_PKM"] = (Vector3.zero, new Vector3(20f, 0f, 0f), default, default),
+            ["Gun_M249"] = (Vector3.zero, new Vector3(20f, 0f, 0f), default, default),
             ["Gun_Glock"] = (Vector3.zero, new Vector3(16f, 0f, 0f), new Vector3(-0.012f, -0.012f, 0.004f), new Vector3(16f, 8f, 0f)),
             ["Gun_Beretta"] = (Vector3.zero, new Vector3(16f, 0f, 0f), new Vector3(-0.012f, -0.012f, 0.004f), new Vector3(16f, 8f, 0f)),
             ["Gun_Taser"] = (new Vector3(0f, -0.02f, -0.006f), new Vector3(14f, 0f, 0f), new Vector3(-0.012f, -0.032f, -0.002f), new Vector3(14f, 8f, 0f)),   // shorter grip, lower hands
@@ -821,7 +854,11 @@ namespace Carl
                 case "GLOCK 17": return (new Vector3(0f, 0.002f, 0.066f), Vector3.zero);
                 case "BERETTA M9": return (new Vector3(0f, 0.003f, 0.078f), Vector3.zero);
                 case "AR-15": return (new Vector3(0.023f, -0.001f, 0.3f), new Vector3(0f, 0f, 90f));
-                case "AK-47": return (new Vector3(0.026f, -0.004f, 0.215f), new Vector3(0f, 0f, 90f));
+                case "AK-47": case "AK-74": case "AK-74M": case "AK-12": case "RPK-74": return (new Vector3(0.026f, -0.004f, 0.215f), new Vector3(0f, 0f, 90f));
+                case "AK-105": return (new Vector3(0.026f, -0.004f, 0.18f), new Vector3(0f, 0f, 90f));
+                case "AKS-74U": return (new Vector3(0.026f, -0.004f, 0.12f), new Vector3(0f, 0f, 90f));
+                case "PKM": return (new Vector3(0.02f, -0.03f, 0.3f), new Vector3(0f, 0f, 90f));
+                case "M249": return (new Vector3(0.028f, -0.03f, 0.22f), new Vector3(0f, 0f, 90f));
                 case "MOSSBERG 590": return (new Vector3(0.012f, -0.015f, 0.53f), new Vector3(0f, 0f, 90f));
                 default: return (new Vector3(0f, -0.03f, 0.3f), Vector3.zero);
             }
@@ -857,7 +894,7 @@ namespace Carl
                     lo.transform.localPosition = new Vector3(0f, -0.022f, 0.05f);
                     var lt = lo.AddComponent<Light>();
                     // 1000 lumens of tight hotspot and wide spill
-                    lt.type = LightType.Spot; lt.spotAngle = 38f; lt.innerSpotAngle = 9f; lt.range = 45f; lt.intensity = 9f;
+                    lt.type = LightType.Spot; lt.spotAngle = 40f; lt.innerSpotAngle = 10f; lt.range = 55f; lt.intensity = 14f;
                     lt.color = new Color(1f, 0.97f, 0.92f); lt.shadows = LightShadows.Soft;
                     lights[i] = lt;
                     attach.Add(lo);
@@ -906,7 +943,7 @@ namespace Carl
                 tg.transform.SetParent(cam.transform, false);
                 tg.transform.localPosition = new Vector3(0.08f, 0.06f, 0.05f);
                 torch = tg.AddComponent<Light>();
-                torch.type = LightType.Spot; torch.spotAngle = 55f; torch.innerSpotAngle = 20f; torch.range = 28f; torch.intensity = 4f;
+                torch.type = LightType.Spot; torch.spotAngle = 55f; torch.innerSpotAngle = 20f; torch.range = 32f; torch.intensity = 6f;
                 torch.color = new Color(1f, 0.93f, 0.82f); torch.shadows = LightShadows.Soft;
             }
             if (torch != null) torch.enabled = TorchOn && !gunLight && FpvDrone.Piloting == null;
@@ -970,6 +1007,8 @@ namespace Carl
 
         public void Select(int i)
         {
+            // (another gun in the hands: whatever the hands were doing to this one stops, its magazine back in)
+            if (i != current) { moves.Clear(); movesEnd = -1f; DropHeld(false); var mg = MagOf(current); if (mg != null) mg.gameObject.SetActive(true); magOut = false; }
             if (i < 0 || i >= defs.Count || (owned != null && !owned[i])) return;
             current = i;
             reloading = false;
@@ -1256,6 +1295,8 @@ namespace Carl
         }
 
         // ---- your blade, for the Earls (parries)
+        public int MuzzleCount => muzzles.Count;
+        public Transform MuzzleOf(int i) => muzzles[i];
         public bool BladeOut => Armed && Current.type == WeaponType.Knife && current < muzzles.Count;
         public Vector3 BladeTip => muzzles[current].position;
         public Vector3 BladeHilt => models[current].transform.position;
@@ -1484,6 +1525,7 @@ namespace Carl
         /// <summary>What it weighs in the hands (kg).</summary>
         static float GunMass(WeaponDef d)
         {
+            if (d.name != "AK-47" && d.name != "AR-15" && GunInfo.Of(d.name) is GunInfo.Info gi) return gi.mass;
             switch (d.name)
             {
                 case "GLOCK 17": case "BERETTA M9": return 0.95f;
@@ -1949,14 +1991,14 @@ namespace Carl
             // aiming down the sights: cheek on the stock, the sights held on the eye - much stiffer, only the shakes
             float ads = melee ? 0f : Mathf.SmoothStep(0f, 1f, Mathf.Max(Mathf.Max(aimT, pointT * 0.5f), pointAimT * 0.9f));
             kp *= 1f + 5f * ads; kr *= 1f + 6f * ads;
+            // held out round a corner (ALT+A / ALT+D): no shoulder behind it, arms out - it can't be held still, every
+            // shot throws it about and it comes back slowly
+            kp *= Mathf.Lerp(1f, 0.25f, blindT); kr *= Mathf.Lerp(1f, 0.2f, blindT);
             kp = Mathf.Max(kp, 60f); kr = Mathf.Max(kr, 40f);              // (even limp arms keep it roughly up)
             float dp = 2f * Mathf.Sqrt(kp) * 0.85f, dr = 2f * Mathf.Sqrt(kr) * 0.85f;
 
-            Vector3 acc = (tpL - offPos) * kp - offVel * dp;
-            (trL * Quaternion.Inverse(offRot)).ToAngleAxis(out float ang, out Vector3 ax);
-            if (ang > 180f) ang -= 360f;
-            if (!float.IsFinite(ax.x)) ax = Vector3.zero;
-            Vector3 angAcc = ax * (ang * Mathf.Deg2Rad) * kr - offAng * dr;
+            // (the springs below are stepped in their own small steps; this is everything else pushing on it)
+            Vector3 acc = Vector3.zero, angAcc = Vector3.zero;
             // weak arms can't hold the weight up: it sags and the muzzle droops
             float weak = (1f - Mathf.Clamp01(hold)) * (1f - 0.85f * ads);
             acc += (inv * Vector3.down) * 9.81f * weak * 0.35f * heavy;
@@ -1972,12 +2014,24 @@ namespace Carl
             float jitter = rush * (0.35f + 0.9f * ads);
             acc += new Vector3(Mathf.PerlinNoise(t * 14f, 21f) - 0.5f, Mathf.PerlinNoise(23f, t * 14f) - 0.5f, 0f) * jitter * 30f;
             angAcc += new Vector3(Mathf.PerlinNoise(t * 12f, 31f) - 0.5f, Mathf.PerlinNoise(37f, t * 12f) - 0.5f, Mathf.PerlinNoise(t * 9f, 41f) - 0.5f) * jitter * 34f;
-            offVel = Vector3.ClampMagnitude(offVel + acc * dt, 4f);
-            offAng = Vector3.ClampMagnitude(offAng + angAcc * dt, 22f);
-            offPos += offVel * dt;
-            float w = offAng.magnitude;
-            if (w > 1e-5f) offRot = Quaternion.AngleAxis(w * Mathf.Rad2Deg * dt, offAng / w) * offRot;
-            offRot.Normalize();
+            // the hold itself: stiff springs (very stiff aiming down the sights), stepped in pieces of 5 ms or less -
+            // in one long physics step (60 or 80 a second) they overshoot and the gun rings on the sights
+            int subs = Mathf.Max(1, Mathf.CeilToInt(dt / 0.005f));
+            float h = dt / subs;
+            for (int k = 0; k < subs; k++)
+            {
+                Vector3 a = (tpL - offPos) * kp - offVel * dp + acc;
+                (trL * Quaternion.Inverse(offRot)).ToAngleAxis(out float ang, out Vector3 ax);
+                if (ang > 180f) ang -= 360f;
+                if (!float.IsFinite(ax.x)) ax = Vector3.zero;
+                Vector3 aa = ax * (ang * Mathf.Deg2Rad) * kr - offAng * dr + angAcc;
+                offVel = Vector3.ClampMagnitude(offVel + a * h, 4f);
+                offAng = Vector3.ClampMagnitude(offAng + aa * h, 22f);
+                offPos += offVel * h;
+                float w = offAng.magnitude;
+                if (w > 1e-5f) offRot = Quaternion.AngleAxis(w * Mathf.Rad2Deg * h, offAng / w) * offRot;
+                offRot.Normalize();
+            }
             // never out of a small box round where it is held: not back into your chest, not off to the side
             // (a blade or a grenade goes wherever the swing takes it)
             Vector3 dv = melee || recovering ? Vector3.zero : offPos - tpL;
@@ -2017,13 +2071,16 @@ namespace Carl
             var rb = h.hand.rb;
             float dt = Time.fixedDeltaTime;
             float k = Mathf.Lerp(0.5f, 1f, Mathf.Clamp01(strength));
-            Vector3 target = simPos + simRot * h.gunLocal;
+            // (reloading, clearing a jam: the support hand goes where the move takes it - WeaponMoves)
+            bool working = SupportTarget(h, out var moveTo);
+            Vector3 target = working ? moveTo : simPos + simRot * h.gunLocal;
             Vector3 at = h.hand.transform.TransformPoint(h.handLocal);
             Vector3 gunVelAt = simVel + Vector3.Cross(simAng, target - simPos);
             Vector3 e = target - at;
             // knocked off the grip (a hard knock, a fall, a teleport): straight back on it, closed round it again
-            if (e.sqrMagnitude > 0.12f * 0.12f)
+            if (e.sqrMagnitude > 0.12f * 0.12f && !working)
             {
+                GripSnaps++;
                 rb.position = target - rb.rotation * h.handLocal;
                 h.hand.transform.SetPositionAndRotation(rb.position, rb.rotation);
                 rb.linearVelocity = gunVelAt; rb.angularVelocity = simAng;
@@ -2183,6 +2240,8 @@ namespace Carl
         readonly float[] dbgWrist = new float[2];
         readonly bool[] dbgOn = new bool[2];
         int snaps;
+        /// <summary>For the playtests: a hand knocked off the grip and put straight back on it.</summary>
+        public static int GripSnaps;
 
         /// <summary>What the automated playtest (ArmTest) measures: the arms as drawn, the gun and its offset.</summary>
         public struct HoldDebug
@@ -2253,7 +2312,9 @@ namespace Carl
                 case "Gun_Barrett": return (new Vector3(0f, -0.963f, -0.27f), 0.0185f);
                 case "Gun_PhysGun": return (new Vector3(0f, -0.95f, -0.3f), 0.017f);
                 case "Gun_AR15": return (new Vector3(0f, -0.953f, -0.302f), 0.0175f);
-                case "Gun_AK47": return (new Vector3(0f, -0.959f, -0.283f), 0.0175f);
+                case "Gun_AK47": case "Gun_AK74": case "Gun_AK74M": case "Gun_AK105": case "Gun_AKS74U": case "Gun_RPK74": return (new Vector3(0f, -0.959f, -0.283f), 0.0175f);
+                case "Gun_AK12": return (new Vector3(0f, -0.94f, -0.33f), 0.0175f);
+                case "Gun_PKM": case "Gun_M249": return (new Vector3(0f, -0.959f, -0.283f), 0.019f);
                 case "Gun_Shotgun": return (new Vector3(0f, -0.82f, -0.57f), 0.02f);   // the wrist of the stock
                 default: return (new Vector3(0f, -0.92f, -0.38f), 0.0175f);
             }
@@ -2311,9 +2372,16 @@ namespace Carl
             // the hand shapes are locked on the gun as they were closed round it (never twisted off it or sunk into
             // it); the physical wrists are pulled to meet them, so the forearms still run into them
             if (jointedR != null && visR != null && jointedR.id == PartId.HandR) visR.transform.SetPositionAndRotation(vmRoot.TransformPoint(visRelPosR), vmRoot.rotation * visRelRotR);
-            if ((jointedL != null || jointedR != null && jointedR.id == PartId.HandL) && visL != null) visL.transform.SetPositionAndRotation(vmRoot.TransformPoint(visRelPosL), vmRoot.rotation * visRelRotL);
+            if ((jointedL != null || jointedR != null && jointedR.id == PartId.HandL) && visL != null)
+            {
+                // (reloading, clearing a jam: the hand is off doing the move - WeaponMoves)
+                Vector3 moved = SupportVisual(out var dv) ? dv : Vector3.zero;
+                if (moved == Vector3.zero) handAt = Vector3.zero;
+                visL.transform.SetPositionAndRotation(vmRoot.TransformPoint(visRelPosL) + moved, vmRoot.rotation * visRelRotL);
+            }
             // and your arms, from your shoulders to those hands
             DrawArms();
+            UpdateMagVisual();
             UpdateRailGear();
             if (flash.activeSelf && current < muzzles.Count) { flash.transform.position = muzzles[current].position; flash.transform.rotation = muzzles[current].rotation; }
             muzzleLight.transform.position = muzzles[current].position;
@@ -2382,6 +2450,7 @@ namespace Carl
             if (Current.name == "TASER" && TaserWires.Current != null) Destroy(TaserWires.Current.gameObject);   // spent cartridge off, wires and all
             reloadEnd = Time.unscaledTime + Current.reloadTime;
             Sfx.Reload(Current.name, cam.transform.position, Current.reloadTime);
+            QueueReload(Current, Current.reloadTime);
         }
 
         /// <summary>Taser: the cartridge fires both probes along the barrel line (the lower one 8 degrees down).</summary>
@@ -2419,7 +2488,8 @@ namespace Carl
         static CaseKind CaseFor(string model) => model switch
         {
             "Gun_Glock" => CaseKind.Nine, "Gun_Beretta" => CaseKind.Nine, "Gun_AR15" => CaseKind.FiveFiveSix, "Gun_AK47" => CaseKind.SevenSixTwo,
-            "Gun_AWP" => CaseKind.ThreeThreeEight, "Gun_Barrett" => CaseKind.Fifty, "Gun_Shotgun" => CaseKind.TwelveGauge, _ => CaseKind.None,
+            "Gun_AWP" => CaseKind.ThreeThreeEight, "Gun_Barrett" => CaseKind.Fifty, "Gun_Shotgun" => CaseKind.TwelveGauge,
+            _ => GunInfo.OfModel(model) is GunInfo.Info gi ? gi.casing : CaseKind.None,
         };
 
         void EjectCase(int i)
@@ -2483,6 +2553,7 @@ namespace Carl
             float oneK = OneHandK(d);
             spread = spread * oneK + (PlayerBody.I != null ? PlayerBody.I.Tremor * 1.2f : 0f);
             if (BarrelHeat.I != null) spread *= BarrelHeat.I.SpreadMul(current);
+            spread *= 1f + 1.5f * blindT;   // (and round a corner it isn't aimed at all)
             Vector3 origin = cam.transform.position;
             Vector3 dir = cam.transform.forward;
             Vector3 aimF = AimDirection;
@@ -2506,7 +2577,7 @@ namespace Carl
             float gripK = Loadout.grip == GripKind.Vertical ? 0.78f : Loadout.grip == GripKind.Angled ? 0.88f : 1f;
             float ammoK = am != null ? Mathf.Clamp(Mathf.Sqrt(am.Energy / Mathf.Max(1f, d.Energy)), 0.5f, 1.4f) : 1f;
             // held out at arm's length round a corner, one-handed, no shoulder behind it: it jumps all over
-            float blindK = Mathf.Lerp(1f, 2.8f, blindT);
+            float blindK = Mathf.Lerp(1f, 6f, blindT);
             float suppK = Loadout.suppressor && SuppressorFor(d) ? 0.9f : 1f;    // a can takes a little of the muzzle rise off
             // braced into the shoulder, cheek on the stock: it helps, but a rifle still kicks hard
             float adsK = Mathf.Lerp(1f, 0.62f, aimT);
@@ -2546,8 +2617,8 @@ namespace Carl
             Fx.Muzzle(muzzles[current].position, AimDirection, Mathf.Clamp(Mathf.Sqrt((am != null ? am.Energy * am.pellets : d.Energy) / 2000f), 0.6f, 2.2f) * (supp ? 0.25f : 1f));
             Fx.BlastDust(muzzles[current].position, AimDirection, Mathf.Clamp(Mathf.Sqrt((am != null ? am.Energy * am.pellets : d.Energy) / 2000f), 0.6f, 2.2f) * (supp ? 0.4f : 1f));
             if (am != null && am.incendiary) Fx.DragonsBreath(muzzles[current].position, cam.transform.forward);
-            HumanBrain.BroadcastNoise(origin, d.loudness * (supp ? 0.3f : 1f), 0.35f);
-            Intel.Gunshot(origin, Teams.Friendly, d.loudness * (supp ? 0.3f : 1f), PlayerAvatar.Body, null);
+            HumanBrain.BroadcastNoise(origin, d.loudness * (supp ? 0.5f : 1f), 0.35f);
+            Intel.Gunshot(origin, Teams.Friendly, d.loudness * (supp ? 0.5f : 1f), PlayerAvatar.Body, null);
             Sfx.Gun(d.name, muzzles[current].position, supp);
 
             // near misses frighten people the bullet passes close to
@@ -2744,13 +2815,16 @@ namespace Carl
             bool optic = d.scope || Loadout.sight != SightKind.Iron;
             Vector3 aim = new Vector3(0f, -SightHeight() * VmScale, optic ? 0.2f : 0.24f);
             if (d.type == WeaponType.Gun && IsPistol(d)) { hip = new Vector3(0.17f, -0.17f, 0.38f); aim.z = 0.32f; }
-            if (d.scope) { hip = new Vector3(0.25f, -0.25f, 0.3f); aim.z = 0.17f; }
+            // (eye relief: the eye ~6 cm behind the eyepiece, wherever that is on the gun; at the hip it is held
+            // that much further out too, or the back of a long scope would be in your face)
+            float back = d.scope && current < ocularZ.Count && !float.IsNaN(ocularZ[current]) ? Mathf.Max(0f, -ocularZ[current] - 0.177f) : 0f;
+            if (d.scope) { hip = new Vector3(0.25f, -0.25f, 0.3f + back * VmScale); aim.z = 0.17f + back * VmScale; }
             if (d.type != WeaponType.Gun) aim = new Vector3(0f, -0.075f, 0.24f);
             if (held)
             {
                 // cheek on the stock with the eye behind the sights; a pistol pushed out at arm's length
                 if (IsPistol(d)) { hip = new Vector3(0.05f, -0.15f, 0.46f); aim.z = 0.5f; }   // pushed out, arms nearly straight
-                else if (d.scope) { hip = new Vector3(0.12f, -0.32f, 0.3f); aim.z = 0.24f; }   // (scope eye relief)
+                else if (d.scope) { hip = new Vector3(0.12f, -0.32f, 0.3f + back); aim.z = 0.24f + back; }   // (scope eye relief)
                 // the butt in the shoulder, the grip a forearm in front of it, the eye 8-10 cm behind the rear sight
                 else if (d.type == WeaponType.Gun) { hip = new Vector3(0.1f, -0.32f, 0.3f); aim.z = optic ? 0.25f : 0.27f; }
                 else if (d.type == WeaponType.Tool) { hip = new Vector3(0.12f, -0.16f, 0.42f); aim = hip; }
@@ -2776,7 +2850,9 @@ namespace Carl
             pos.z -= kick * 0.05f;
             pos.y += kick * 0.01f;
             rot *= Quaternion.Euler(-kick * 6f, 0, 0);
-            if (reloading)
+            // reloading, clearing a jam: the gun canted round to the support hand and the moves' jolts (WeaponMoves)
+            if (BodyHeld) MovePose(ref pos, ref rot);
+            else if (reloading)
             {
                 float t = 1f - (reloadEnd - Time.unscaledTime) / d.reloadTime;
                 float dip = Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI);

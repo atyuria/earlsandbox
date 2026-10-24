@@ -1,0 +1,3 @@
+== blind  (10:37:40)
+a 1.2 s burst: the barrel wandered up to 28.3 deg shouldered, 49.0 deg held out round a corner
+FAIL  round a corner it kicks all over the place

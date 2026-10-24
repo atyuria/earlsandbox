@@ -30,6 +30,7 @@ Shader "Carl/Armour"
         TEXTURE2D_FLOAT(_DmgTex);
 
         float AH(float3 p) { return frac(sin(dot(p, float3(12.9898, 78.233, 37.719))) * 43758.5453); }
+        #include "CarlCamo.hlsl"
         float ANoise(float3 p)
         {
             float3 i = floor(p), f = frac(p);
@@ -75,7 +76,10 @@ Shader "Carl/Armour"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT
             #pragma multi_compile_fog
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "CarlLights.hlsl"
             struct A { float4 positionOS : POSITION; float3 normalOS : NORMAL; half4 color : COLOR; };
             struct V { float4 positionCS : SV_POSITION; float3 positionWS : TEXCOORD0; float3 normalWS : TEXCOORD1; float3 positionOS : TEXCOORD2; half4 color : COLOR; half fog : TEXCOORD3; };
 
@@ -104,15 +108,8 @@ Shader "Carl/Armour"
                 half metal = _Metal, gloss = _Gloss;
                 if (_Pattern > 0.5 && _Pattern < 1.5)
                 {
-                    // EMR digital camo: blocky pixels in 4 shades (light sand, light green, dark green, brown)
-                    float3 c1 = floor(P * 55.0), c2 = floor(P * 22.0);
-                    float a = H(c1), b = H(c2 + 7.0);
-                    half3 sand = half3(0.55, 0.56, 0.4), lg = half3(0.38, 0.45, 0.27), dg = half3(0.2, 0.27, 0.16), br = half3(0.3, 0.26, 0.17);
-                    albedo = lg;
-                    if (b > 0.62) albedo = dg;
-                    if (a > 0.78) albedo = sand;
-                    else if (a < 0.18) albedo = br;
-                    else if (a < 0.4 && b > 0.4) albedo = dg;
+                    // EMR digital camo
+                    albedo = DigitalCamo(P, 1.0) * (0.9 + 0.12 * ANoise(P * 600.0));
                 }
                 else if (_Pattern > 1.5 && _Pattern < 2.5)
                 {
@@ -126,6 +123,11 @@ Shader "Carl/Armour"
                 {
                     // nylon webbing weave
                     albedo *= 0.85 + 0.15 * sin(P.y * 900.0) * sin(P.x * 900.0 + P.z * 900.0);
+                }
+                else if (_Pattern > 4.5)
+                {
+                    // MM-14
+                    albedo = DigitalCamo(P, 2.0) * (0.9 + 0.12 * ANoise(P * 600.0));
                 }
                 else if (_Pattern > 3.5)
                 {
@@ -167,13 +169,14 @@ Shader "Carl/Armour"
                 half3 vdir = normalize(GetWorldSpaceViewDir(i.positionWS));
                 half3 h = normalize(ml.direction + vdir);
                 half ndl = saturate(dot(n, ml.direction));
-                half3 diffuse = albedo * (SampleSH(n) + ml.color * ndl * atten) * (1.0 - metal * 0.7);
+                half3 other = CarlOtherLights(i.positionWS, n, i.positionCS, 0.15);
+                half3 diffuse = albedo * (SampleSH(n) + ml.color * ndl * atten + other) * (1.0 - metal * 0.7);
                 half specPow = exp2(10.0 * gloss + 1.0);
                 half3 specCol = lerp(half3(0.04, 0.04, 0.04), albedo, metal);
                 half3 spec = specCol * ml.color * pow(saturate(dot(n, h)), specPow) * gloss * 3.0 * atten;
                 // cheap reflection of the sky / floor for metal
                 half3 r = reflect(-vdir, n);
-                half3 env = lerp(half3(0.25, 0.25, 0.27), half3(0.75, 0.78, 0.82), saturate(r.y * 0.5 + 0.5));
+                half3 env = SampleSH(r) * 1.5 + ml.color * 0.08 + other * 0.25;
                 half fres = pow(1.0 - saturate(dot(n, vdir)), 4.0);
                 half3 col = diffuse + spec + env * specCol * metal * gloss + env * fres * 0.06 * (0.3 + gloss);
                 return half4(MixFog(col, i.fog), 1);

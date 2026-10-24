@@ -62,8 +62,10 @@ namespace Carl
                 int tier = d < 20f ? 0 : d < 45f ? 1 : 2;
                 if (tier == st.solverTier) continue;
                 st.solverTier = tier;
-                int pos = tier == 0 ? (GameSettings.Graphics == 0 ? 10 : 14) : tier == 1 ? 8 : 6;
-                int vel = tier == 0 ? (GameSettings.Graphics == 0 ? 4 : 6) : tier == 1 ? 3 : 2;
+                // (physics runs at 100 Hz on every setting: on low and medium the saving is here, mostly far off)
+                int q = GameSettings.Graphics;
+                int pos = tier == 0 ? (q == 0 ? 8 : q == 1 ? 11 : 14) : tier == 1 ? (q == 0 ? 6 : q == 1 ? 7 : 8) : (q == 0 ? 4 : q == 1 ? 5 : 6);
+                int vel = tier == 0 ? (q == 0 ? 3 : q == 1 ? 4 : 6) : tier == 1 ? (q == 0 ? 2 : 3) : (q == 2 ? 2 : 1);
                 foreach (var bp in h.partList)
                     if (bp != null && bp.rb != null) { bp.rb.solverIterations = pos; bp.rb.solverVelocityIterations = vel; }
             }

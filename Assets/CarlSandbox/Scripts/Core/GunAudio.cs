@@ -20,19 +20,27 @@ namespace Carl
         public static void Build(Dictionary<string, List<AudioClip>> groups)
         {
             var rng = new System.Random(1234);
-            foreach (var fam in new[] { "gun_ak", "gun_glock", "gun_awp", "gun_50", "gun_shotgun" })
+            // the recorded families, and the ones made from them: the 5.45 and 5.56 cracks (smaller, faster rounds:
+            // the AK's report pitched up), the PKM's full-power 7.62x54R (the magnum rifle's, pitched down a touch)
+            var fams = new (string fam, string from, float pitch)[]
             {
-                if (!groups.TryGetValue(fam, out var src) || src.Count == 0) continue;
+                ("gun_ak", "gun_ak", 1f), ("gun_glock", "gun_glock", 1f), ("gun_awp", "gun_awp", 1f), ("gun_50", "gun_50", 1f), ("gun_shotgun", "gun_shotgun", 1f),
+                ("gun_545", "gun_ak", 1.07f), ("gun_556", "gun_ak", 1.12f), ("gun_pkm", "gun_awp", 0.94f),
+            };
+            foreach (var (fam, from, pitch) in fams)
+            {
+                if (!groups.TryGetValue(from, out var src) || src.Count == 0) continue;
                 bool pistol = fam == "gun_glock";
-                for (int i = 0; i < src.Count && i < 3; i++)
+                for (int i = 0; i < src.Count; i++)
                 {
-                    var x = Mono(src[i]);
+                    var x = Pitch(Mono(src[i]), pitch);
                     if (x == null) continue;
-                    Add(groups, fam + "_supp", Make(fam + "_supp_" + i, Suppressed(x, pistol, rng), Rate));
+                    Add(groups, fam + "_full", Make(fam + "_full_" + i, Full(x, fam, rng), Rate));
+                    if (i < 4) Add(groups, fam + "_supp", Make(fam + "_supp_" + i, Suppressed(x, fam, rng), Rate));
                 }
                 for (int i = 0; i < src.Count && i < 2; i++)
                 {
-                    var x = Mono(src[i]);
+                    var x = Pitch(Mono(src[i]), pitch);
                     if (x == null) continue;
                     var low = Resample(x, 2);   // the echoes are dull anyway: half rate
                     Add(groups, fam + "_tail_open", Make(fam + "_tail_open_" + i, TailOpen(low, fam == "gun_50" ? 1.25f : 1f), TailRate));
@@ -48,9 +56,20 @@ namespace Carl
                 Add(groups, "flyby_crack", Make("flyby_crack_" + i, Crack(rng), Rate));
                 Add(groups, "flyby_whiz", Make("flyby_whiz_" + i, Whiz(rng), Rate));
                 Add(groups, "helmet_ping", Make("helmet_ping_" + i, Ping(rng), Rate));
+                Add(groups, "gear_rattle", Make("gear_rattle_" + i, Rattle(rng), Rate));
             }
             if (groups.TryGetValue("casing", out var cas))
                 for (int i = 0; i < cas.Count; i++) { var x = Mono(cas[i]); if (x != null) Add(groups, "casing_dirt", Make("casing_dirt_" + i, Dirt(x), Rate)); }
+        }
+
+        /// <summary>Played faster or slower (a smaller or bigger round's report from the same recording).</summary>
+        static float[] Pitch(float[] x, float k)
+        {
+            if (x == null || Mathf.Abs(k - 1f) < 0.001f) return x;
+            int n = Mathf.Max(1, Mathf.FloorToInt((x.Length - 1) / k));
+            var y = new float[n];
+            for (int i = 0; i < n; i++) { float p = i * k; int a = (int)p; float f = p - a; y[i] = x[a] * (1f - f) + x[Mathf.Min(a + 1, x.Length - 1)] * f; }
+            return y;
         }
 
         static void Add(Dictionary<string, List<AudioClip>> g, string name, AudioClip c)
@@ -171,29 +190,168 @@ namespace Carl
 
         // ------------------------------------------------------------ gun layers
 
-        static float[] Suppressed(float[] x, bool pistol, System.Random rng)
+        // ------------------------------------------------------------ the report
+        //
+        // What the recordings lacked (measured): each is one sharp spike - peak 15-20 dB over its own level a
+        // moment later - with next to nothing under 150 Hz and gone in a fifth of a second, so even at full volume
+        // it reads as a cap gun. A real rifle or pistol is 155-165 dB at your ear: broadband (the blast is
+        // strongest at 0.5-1 kHz but runs up past 20 kHz), a pressure wave you feel, and it rings on. The .50's
+        // recordings are the opposite - all boom, no crack. So: the crack sharpened, a boom put under it (lower
+        // and longer the bigger the gun), the whole thing compressed so it holds its loudness instead of being a
+        // spike, and a soft limit on top so it is loud without distorting.
+
+        struct Voice { public float boomHz, boomLow, boomDecay, boom, crack, crackHz, keepLow, rms; }
+
+        static Voice VoiceOf(string fam)
         {
-            // the crack gone: what's left is the low body of the report, cut short
-            var y = LowPass(x, pistol ? 1300f : 950f, Rate, 3);
-            int len = Mathf.Min(y.Length, Mathf.RoundToInt(0.55f * Rate));
-            var o = new float[len];
-            for (int i = 0; i < len; i++)
+            switch (fam)
             {
-                float t = i / (float)Rate;
-                o[i] = y[i] * (t < 0.008f ? 1f : Mathf.Exp(-(t - 0.008f) / 0.065f));
+                case "gun_glock":   return new Voice { boomHz = 260f, boomLow = 120f, boomDecay = 0.04f, boom = 0.22f, crack = 0.9f, crackHz = 2200f, keepLow = 1f, rms = -12f };
+                case "gun_awp":     return new Voice { boomHz = 170f, boomLow = 50f, boomDecay = 0.14f, boom = 0.38f, crack = 1.2f, crackHz = 2300f, keepLow = 1f, rms = -8f };
+                case "gun_50":      return new Voice { boomHz = 170f, boomLow = 55f, boomDecay = 0.12f, boom = 0.12f, crack = 1.8f, crackHz = 1600f, keepLow = 0.35f, rms = -9f };
+                case "gun_pkm":     return new Voice { boomHz = 180f, boomLow = 58f, boomDecay = 0.11f, boom = 0.32f, crack = 1.15f, crackHz = 2400f, keepLow = 1f, rms = -8.5f };
+                case "gun_shotgun": return new Voice { boomHz = 180f, boomLow = 55f, boomDecay = 0.13f, boom = 0.45f, crack = 1.1f, crackHz = 2000f, keepLow = 1f, rms = -8.5f };
+                default:            return new Voice { boomHz = 220f, boomLow = 85f, boomDecay = 0.06f, boom = 0.26f, crack = 0.9f, crackHz = 2500f, keepLow = 1f, rms = -10.5f };   // rifles
             }
-            Normalize(o, 0.7f);
-            // gas spitting out of the can: a short breathy "pff"
-            for (int i = 0; i < Mathf.Min(len, Rate / 20); i++)
+        }
+
+        static int Onset(float[] x)
+        {
+            float m = 1e-6f; foreach (var v in x) m = Mathf.Max(m, Mathf.Abs(v));
+            for (int i = 0; i < x.Length; i++) if (Mathf.Abs(x[i]) > m * 0.25f) return i;
+            return 0;
+        }
+
+        /// <summary>A quick drop in pitch with a fast attack: the pressure wave of the blast.</summary>
+        static void AddBoom(float[] y, int at, float hi, float lo, float decay, float gain, System.Random rng)
+        {
+            float ph = 0f, lp = 0f;
+            int n = Mathf.Min(y.Length - at, Mathf.RoundToInt((decay * 7f + 0.02f) * Rate));
+            for (int i = 0; i < n; i++)
             {
                 float t = i / (float)Rate;
-                o[i] += ((float)rng.NextDouble() * 2f - 1f) * 0.07f * Mathf.Exp(-t / 0.01f);
+                float f = lo + (hi - lo) * Mathf.Exp(-t / 0.018f);
+                ph += 2f * Mathf.PI * f / Rate;
+                float noise = (float)rng.NextDouble() * 2f - 1f;
+                lp = lp * 0.93f + noise * 0.07f;
+                float att = Mathf.Clamp01(t / 0.0012f);
+                y[at + i] += (Mathf.Sin(ph) + lp * 2.2f) * gain * att * Mathf.Exp(-t / decay);
+            }
+        }
+
+        /// <summary>Noise burst at the front of the shot: the crack (bright, very short).</summary>
+        static void AddCrack(float[] y, int at, float hz, float gain, float decay, System.Random rng)
+        {
+            float lp = 0f, a = Mathf.Exp(-2f * Mathf.PI * hz / Rate);
+            int n = Mathf.Min(y.Length - at, Mathf.RoundToInt(decay * 6f * Rate));
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)Rate;
+                float noise = (float)rng.NextDouble() * 2f - 1f;
+                lp = (1f - a) * noise + a * lp;
+                y[at + i] += (noise - lp) * gain * Mathf.Exp(-t / decay);
+            }
+        }
+
+        /// <summary>
+        /// Level held up after the peak (a fast compressor: instant attack, ~70 ms release, 4:1 over the
+        /// threshold), brought to a set loudness, then a soft knee into the top so nothing hard-clips.
+        /// </summary>
+        static float[] Loud(float[] y, float rmsDb, int onset, float window = 0.1f)
+        {
+            float m = 1e-6f; foreach (var v in y) m = Mathf.Max(m, Mathf.Abs(v));
+            for (int i = 0; i < y.Length; i++) y[i] /= m;
+            float thr = 0.18f, rel = Mathf.Exp(-1f / (0.07f * Rate)), env = 0f, g = 1f, gRel = Mathf.Exp(-1f / (0.004f * Rate));
+            for (int i = 0; i < y.Length; i++)
+            {
+                float a = Mathf.Abs(y[i]);
+                env = a > env ? a : env * rel + a * (1f - rel);
+                float want = env > thr ? Mathf.Pow(thr / env, 0.75f) : 1f;
+                g = want < g ? want : g * gRel + want * (1f - gRel);
+                y[i] *= g;
+            }
+            // to the loudness wanted over the body of the shot
+            int n = Mathf.Min(y.Length - onset, Mathf.RoundToInt(window * Rate));
+            double sum = 0; for (int i = 0; i < n; i++) sum += y[onset + i] * y[onset + i];
+            float rms = Mathf.Sqrt((float)(sum / Mathf.Max(1, n))) + 1e-6f;
+            float k = Mathf.Pow(10f, rmsDb / 20f) / rms;
+            for (int i = 0; i < y.Length; i++) y[i] *= k;
+            return SoftKnee(y);
+        }
+
+        /// <summary>A soft knee from 0.6 up into 0.98: louder without the harsh edge of clipping.</summary>
+        static float[] SoftKnee(float[] y)
+        {
+            for (int i = 0; i < y.Length; i++)
+            {
+                float v = y[i], av = Mathf.Abs(v);
+                if (av > 0.6f) y[i] = Mathf.Sign(v) * (0.6f + 0.38f * (float)System.Math.Tanh((av - 0.6f) / 0.38f));
+            }
+            return y;
+        }
+
+        /// <summary>The full report: the recording with its crack sharpened, the blast's boom under it, held loud.</summary>
+        static float[] Full(float[] x, string fam, System.Random rng)
+        {
+            var vo = VoiceOf(fam);
+            int len = Mathf.Min(x.Length, Mathf.RoundToInt(1.4f * Rate));
+            var y = new float[len];
+            System.Array.Copy(x, y, len);
+            int on = Onset(y);
+            float m = 1e-6f; foreach (var v in y) m = Mathf.Max(m, Mathf.Abs(v));
+            for (int i = 0; i < len; i++) y[i] /= m;
+            // (the .50's recordings are nearly all sub-bass: thinned before the crack goes on)
+            if (vo.keepLow < 1f) { var hp = HighPass(y, 90f, Rate); for (int i = 0; i < len; i++) y[i] = Mathf.Lerp(hp[i], y[i], vo.keepLow); }
+            // the crack: the recording's own highs, pushed up for the first few milliseconds, plus a fresh burst
+            var hi = HighPass(y, vo.crackHz, Rate);
+            for (int i = on; i < len; i++) { float t = (i - on) / (float)Rate; y[i] += hi[i] * vo.crack * 1.6f * Mathf.Exp(-t / 0.012f); }
+            AddCrack(y, on, vo.crackHz, vo.crack * 0.55f, 0.006f, rng);
+            AddBoom(y, on, vo.boomHz, vo.boomLow, vo.boomDecay, vo.boom, rng);
+            y = Loud(y, vo.rms, on);
+            // and the crack again on top, after the squeeze, so the boom can't bury it (a big round has both)
+            AddCrack(y, on, vo.crackHz * 1.2f, 0.32f * vo.crack, 0.007f, rng);
+            return FadeEnd(SoftKnee(y), Rate, 0.08f);
+        }
+
+        /// <summary>
+        /// A suppressed shot as it really is - not the film "pfft". At your ear a suppressed rifle is still about
+        /// 135-145 dB (measured: the can takes 15-25 dB off a metre out, only 6-9 dB at the shooter's right ear),
+        /// so it is a hard, flat "whack": the low boom of the blast mostly gone, the top end softened, cut much
+        /// shorter, with gas spitting out of the can. A rifle round is still supersonic, so its crack is still
+        /// there (the can can't touch that). A 9 mm is quieter - "thwap" - and its slide is loud by comparison.
+        /// </summary>
+        static float[] Suppressed(float[] x, string fam, System.Random rng)
+        {
+            bool pistol = fam == "gun_glock";
+            var vo = VoiceOf(fam);
+            int len = Mathf.Min(x.Length, Mathf.RoundToInt(0.6f * Rate));
+            var y = new float[len];
+            System.Array.Copy(x, y, len);
+            int on = Onset(y);
+            float m = 1e-6f; foreach (var v in y) m = Mathf.Max(m, Mathf.Abs(v));
+            for (int i = 0; i < len; i++) y[i] /= m;
+            // the can: the blast's low end mostly gone, the top softened (not removed), and much shorter
+            y = HighPass(y, pistol ? 260f : 200f, Rate);
+            y = LowPass(y, pistol ? 3200f : 4200f, Rate, 1);
+            for (int i = on; i < len; i++) { float t = (i - on) / (float)Rate; y[i] *= t < 0.006f ? 1f : Mathf.Exp(-(t - 0.006f) / (pistol ? 0.045f : 0.07f)); }
+            // a little body left in it: a short, higher thump (the gas still coming out, slowed in the baffles)
+            AddBoom(y, on, vo.boomHz * 1.4f, vo.boomLow * 1.6f, vo.boomDecay * 0.35f, vo.boom * 0.35f, rng);
+            // gas spitting out of the can: a short sizzle
+            AddCrack(y, on + Mathf.RoundToInt(0.0015f * Rate), 2500f, 0.35f, 0.018f, rng);
+            // the round leaving at rifle speed: its sonic crack, untouched by the can
+            if (!pistol && fam != "gun_shotgun")
+            {
+                int c0 = on + Mathf.RoundToInt(0.0025f * Rate), w = Mathf.RoundToInt(0.0004f * Rate);
+                for (int i = 0; i < w && c0 + i < len; i++) y[c0 + i] += 0.6f * (1f - 2f * i / (float)w);
+                AddCrack(y, c0, 3500f, 0.45f, 0.004f, rng);
             }
             // and the action, loud by comparison
-            var m = Mech(rng, pistol);
-            int at = Mathf.RoundToInt(0.006f * Rate);
-            for (int i = 0; i < m.Length && at + i < len; i++) o[at + i] += m[i] * 0.24f;
-            return FadeEnd(Normalize(o, 0.85f), Rate);
+            var mech = Mech(rng, pistol);
+            int at = on + Mathf.RoundToInt(0.008f * Rate);
+            for (int i = 0; i < mech.Length && at + i < len; i++) y[at + i] += mech[i] * (pistol ? 0.5f : 0.4f);
+            // only about 5 dB under the full report (7 for the pistol): measured at the shooter's ear a suppressed
+            // rifle is still well over 140 dB - a loud, hard gunshot, just without the boom
+            return FadeEnd(Loud(y, vo.rms - (pistol ? 7f : 5f), on), Rate, 0.04f);
         }
 
         static float[] TailOpen(float[] x, float size)
@@ -310,6 +468,32 @@ namespace Carl
             // the impact itself
             for (int i = 0; i < Rate / 60; i++) { float t = i / (float)Rate; y[i] += ((float)rng.NextDouble() * 2f - 1f) * 2.2f * Mathf.Exp(-t / 0.004f); }
             return FadeEnd(Normalize(y, 0.95f), Rate, 0.2f);
+        }
+
+        /// <summary>A plate carrier on the move: the canvas rustling, plates knocking, buckles and mags clinking.</summary>
+        static float[] Rattle(System.Random rng)
+        {
+            int n = Mathf.RoundToInt(0.32f * Rate);
+            var y = new float[n];
+            float lp = 0f, lp2 = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                float t = i / (float)Rate;
+                float noise = (float)rng.NextDouble() * 2f - 1f;
+                lp = lp * 0.82f + noise * 0.18f; lp2 = lp2 * 0.5f + lp * 0.5f;
+                y[i] = (lp - lp2) * 1.6f * Mathf.Sin(Mathf.PI * t / 0.32f);               // a swish of cloth
+            }
+            // a dull knock (the plate settling on the step) and a few small clinks
+            int k0 = Mathf.RoundToInt((0.02f + 0.03f * (float)rng.NextDouble()) * Rate);
+            for (int i = 0; i < Rate / 25 && k0 + i < n; i++) { float t = i / (float)Rate; y[k0 + i] += Mathf.Sin(2f * Mathf.PI * 180f * t) * 0.7f * Mathf.Exp(-t / 0.012f); }
+            // (dull plastic and nylon ticks, not ringing metal: the bright pings sounded like breaking glass)
+            for (int c = 0; c < 1 + rng.Next(2); c++)
+            {
+                int at = Mathf.RoundToInt((0.04f + 0.2f * (float)rng.NextDouble()) * Rate);
+                float f = 700f + 600f * (float)rng.NextDouble(), g = 0.12f + 0.12f * (float)rng.NextDouble();
+                for (int i = 0; i < Rate / 80 && at + i < n; i++) { float t = i / (float)Rate; y[at + i] += Mathf.Sin(2f * Mathf.PI * f * t) * g * Mathf.Exp(-t / 0.0018f); }
+            }
+            return FadeEnd(Normalize(y, 0.7f), Rate, 0.03f);
         }
 
         /// <summary>A slower round or a ricochet fragment going by: a falling whine.</summary>

@@ -24,8 +24,18 @@ namespace Carl
         readonly System.Text.StringBuilder report = new System.Text.StringBuilder();
         readonly List<float>[] dts = { new List<float>(), new List<float>(), new List<float>(), new List<float>() };
 
+        static readonly Dictionary<string, string> edArgs = new Dictionary<string, string>();
+
+        /// <summary>The same run from inside the editor (play mode): graphics setting, report file name.</summary>
+        public static void Run(int graphics, string outName)
+        {
+            edArgs.Clear(); edArgs["-graphics"] = graphics.ToString(); edArgs["-out"] = outName;
+            new GameObject("Benchmark").AddComponent<Benchmark>();
+        }
+
         static string Arg(string name)
         {
+            if (edArgs.TryGetValue(name, out var v)) return v;
             var a = System.Environment.GetCommandLineArgs();
             int i = System.Array.IndexOf(a, name);
             return i >= 0 && i + 1 < a.Length ? a[i + 1] : null;
@@ -107,6 +117,7 @@ namespace Carl
             if (spikeP != null) spikeP.Write();
             System.IO.File.WriteAllText(System.IO.Path.Combine(Application.dataPath, "../" + (Arg("-out") ?? "benchmark.txt")), report.ToString());
             yield return null;
+            if (Application.isEditor) { edArgs.Clear(); Destroy(gameObject); }
             Application.Quit();
         }
 

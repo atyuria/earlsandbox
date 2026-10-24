@@ -94,6 +94,22 @@ namespace Carl
             return 500f;
         }
 
+        static readonly int UniformId = Shader.PropertyToID("_Uniform");
+        /// <summary>
+        /// Dress him: 0 bare (the mannequin), 1 EMR (Russia), 2 MM-14 (Ukraine) - a uniform over the torso, arms and
+        /// legs, boots on the feet; head, neck and hands stay bare.
+        /// </summary>
+        public void SetUniform(int camo)
+        {
+            foreach (var bp in partList)
+            {
+                if (bp == null || bp.skinMaterial == null) continue;
+                bool bare = bp.id == PartId.Head || bp.id == PartId.Neck || bp.id == PartId.HandL || bp.id == PartId.HandR;
+                bool foot = bp.id == PartId.FootL || bp.id == PartId.FootR;
+                bp.skinMaterial.SetFloat(UniformId, camo == 0 || bare ? 0f : foot ? 3f : camo);
+            }
+        }
+
         public static HumanBody Spawn(Vector3 feetPos, float yaw)
         {
             var go = new GameObject($"Earl_{++counter:00}");

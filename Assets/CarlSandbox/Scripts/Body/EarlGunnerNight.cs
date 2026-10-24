@@ -39,12 +39,42 @@ namespace Carl
         static void ResetNight() { Lamps.Clear(); flashed.Clear(); }
 
         public static void Flashed(HumanBody shooter) { if (shooter != null) flashed[shooter] = Time.time; }
+        /// <summary>For the playtests: frames any torch was on, and guesses made off someone else's light.</summary>
+        public static int TorchUses, LightGuesses;
+
+        /// <summary>
+        /// A light in the dark is seen a long way off - long before the man behind it is. Any enemy light in front
+        /// of him (a torch, your flashlight) gives a guess at where that man is: close to, near enough exact; far
+        /// off, roughly that way and roughly that far. (The point of fighting with the light off.)
+        /// </summary>
+        void SpotLights(Vector3 eye)
+        {
+            Vector3 face = body.ragdoll.faceDir;
+            void Check(Vector3 at)
+            {
+                Vector3 to = at - eye;
+                float d = to.magnitude;
+                if (d > 150f || d < 1f) return;
+                if (face.sqrMagnitude > 0.01f && Vector3.Angle(face, Vector3.ProjectOnPlane(to, Vector3.up)) > 100f) return;
+                if (!Clear(eye, at, body)) return;
+                LightGuesses++;
+                Learn(at + Intel.Guess(d, 0.03f, 0.0025f), Mathf.Lerp(0.75f, 0.45f, d / 150f), false);
+            }
+            var me = PlayerAvatar.Body;
+            if (WeaponController.PlayerLightOn && me != null && !me.Dead && Teams.Hostile(team, Teams.Friendly) && !Teams.PlayerOutOfIt)
+            {
+                var w = SandboxGame.Instance != null ? SandboxGame.Instance.weapons : null;
+                Check(w != null && w.Armed && w.current < w.MuzzleCount ? w.MuzzleOf(w.current).position : me.Head.transform.position);
+            }
+            foreach (var g in All)
+                if (g != null && g != this && g.TorchOn && Teams.Hostile(team, g.team)) Check(g.torch.transform.position);
+        }
 
         /// <summary>Can he make out this man from his eye, in the dark? (Always yes in daylight.)</summary>
         bool Visible(HumanBody h, Vector3 eye, float dist2)
         {
             if (!SandboxGame.Night) return true;
-            if (dist2 < 8f * 8f) return true;                                          // a shape right in front of him
+            if (dist2 < 3.5f * 3.5f) return true;                                      // a shape right in front of him
             if (flashed.TryGetValue(h, out float f) && Time.time - f < 0.35f) return true;    // the muzzle flash
             if (h == PlayerAvatar.Body ? WeaponController.PlayerLightOn : h.gunner != null && h.gunner.TorchOn) return true;   // his own light
             Vector3 c = h.Center;
@@ -86,11 +116,12 @@ namespace Carl
             else if (Time.time > torchNext && !on)
             {
                 bool hunting = SuspectConf > 0.25f && (stance == Stance.Peek || stance == Stance.Push || stance == Stance.Search || Vector3.Distance(body.Center, suspect) < 25f);
-                float chance = hunting ? 0.55f : 0.08f;
+                float chance = hunting ? 0.55f : 0f;
                 if (Random.value < chance) torchUntil = Time.time + Random.Range(hunting ? 1.2f : 0.6f, hunting ? 3.2f : 1.4f);
                 torchNext = Time.time + Random.Range(hunting ? 2.5f : 6f, hunting ? 6f : 15f);
             }
             torch.enabled = Time.time < torchUntil;
+            if (torch.enabled) TorchUses++;
             if (torch.enabled && !on) Sfx.Play("click_empty", muzzle.position, 0.15f, 1f, 1f, 0.05f);
         }
 

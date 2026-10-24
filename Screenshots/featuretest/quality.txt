@@ -1,0 +1,36 @@
+== quality  (09:57:43)
+LOW: sprinted 30.5 m in 8.0 s (31 m clear), fell 0, lowest pelvis -0.13 m, eye at the end -0.05
+   
+      0.0s pelvis +0.00 eye +0.00 chest tilt 1 pelvis tilt 1 head over chest 0.34 head tilt 12
+      0.5s pelvis -0.10 eye -0.15 chest tilt 17 pelvis tilt 18 head over chest 0.32 head tilt 21
+      1.0s pelvis -0.09 eye -0.13 chest tilt 15 pelvis tilt 15 head over chest 0.34 head tilt 11
+      1.5s pelvis -0.03 eye -0.11 chest tilt 18 pelvis tilt 32 head over chest 0.33 head tilt 14
+      2.0s pelvis -0.03 eye -0.10 chest tilt 17 pelvis tilt 32 head over chest 0.33 head tilt 12
+      2.5s pelvis -0.06 eye -0.13 chest tilt 17 pelvis tilt 29 head over chest 0.33 head tilt 16
+      3.0s pelvis -0.05 eye -0.13 chest tilt 17 pelvis tilt 30 head over chest 0.32 head tilt 20
+      3.5s pelvis -0.06 eye -0.12 chest tilt 20 pelvis tilt 28 head over chest 0.32 head tilt 20
+      4.0s pelvis -0.05 eye -0.12 chest tilt 19 pelvis tilt 26 head over chest 0.33 head tilt 14
+      4.5s pelvis -0.03 eye -0.10 chest tilt 18 pelvis tilt 23 head over chest 0.33 head tilt 13
+      5.0s pelvis -0.03 eye -0.11 chest tilt 18 pelvis tilt 26 head over chest 0.32 head tilt 16
+      5.5s pelvis -0.05 eye -0.14 chest tilt 19 pelvis tilt 27 head over chest 0.32 head tilt 20
+      6.0s pelvis -0.05 eye -0.14 chest tilt 21 pelvis tilt 30 head over chest 0.31 head tilt 25
+      6.5s pelvis -0.05 eye -0.13 chest tilt 23 pelvis tilt 31 head over chest 0.31 head tilt 23
+      7.0s pelvis -0.04 eye -0.11 chest tilt 19 pelvis tilt 30 head over chest 0.33 head tilt 15
+      7.5s pelvis -0.03 eye -0.10 chest tilt 17 pelvis tilt 29 head over chest 0.33 head tilt 12
+PASS  LOW: sprinting doesn't sink you down or trip you
+   LOW AK-47: still: judder 0.63 mm, snaps 0, grip 0   aiming: judder 0.49 mm, snaps 0, grip 0   firing: judder 2.71 mm, snaps 0, grip 0   
+PASS  LOW AK-47: steady in the hands
+   LOW GLOCK 17: still: judder 0.22 mm, snaps 0, grip 0   aiming: judder 0.20 mm, snaps 0, grip 0   firing: judder 0.22 mm, snaps 0, grip 0   
+PASS  LOW GLOCK 17: steady in the hands
+   LOW AWP: still: judder 0.80 mm, snaps 0, grip 120   aiming: judder 0.76 mm, snaps 0, grip 0   firing: judder 0.70 mm, snaps 0, grip 0   
+FAIL  LOW AWP: steady in the hands
+   LOW .50 CAL: still: judder 0.60 mm, snaps 0, grip 0   aiming: judder 0.65 mm, snaps 0, grip 0   firing: judder 0.66 mm, snaps 0, grip 0   
+PASS  LOW .50 CAL: steady in the hands
+   LOW MOSSBERG 590: still: judder 0.63 mm, snaps 0, grip 120   aiming: judder 0.56 mm, snaps 0, grip 0   firing: judder 0.49 mm, snaps 0, grip 0   
+FAIL  LOW MOSSBERG 590: steady in the hands
+   LOW AR-15: still: judder 0.83 mm, snaps 0, grip 121   aiming: judder 0.36 mm, snaps 0, grip 0   firing: judder 2.37 mm, snaps 0, grip 0   
+FAIL  LOW AR-15: steady in the hands
+   LOW BERETTA M9: still: judder 0.22 mm, snaps 0, grip 0   aiming: judder 0.22 mm, snaps 0, grip 0   firing: judder 0.21 mm, snaps 0, grip 0   
+PASS  LOW BERETTA M9: steady in the hands
+   LOW FLAMETHROWER: still: judder 0.79 mm, snaps 0, grip 121   aiming: judder 0.48 mm, snaps 0, grip 108   firing: judder 0.31 mm, snaps 0, grip 106   
+FAIL  LOW FLAMETHROWER: steady in the hands

@@ -142,11 +142,13 @@ namespace Carl
                     float yaw = face.sqrMagnitude > 0.01f ? Quaternion.LookRotation(face).eulerAngles.y : 0f;
                     var h = SandboxGame.Instance.SpawnCarl(used[k], yaw);
                     if (h == null) break;
-                    ArmourSystem.Equip(h, RandomKit());
+                    int nation = Nations.Of(Teams.Enemy);
+                    ArmourSystem.Equip(h, RandomKit(nation));
                     h.brain.aiEnabled = true;
                     // the last man of a bigger squad is often their medic: a pistol, and a bag of dressings
                     bool medic = k == used.Count - 1 && used.Count >= 3 && Random.value < 0.6f;
-                    var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null) : EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true));
+                    var gw = Nations.Active ? Nations.RandomWeapon(nation) : EarlWeapon.AK47;
+                    var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null) : EarlGunner.Arm(h, gw, GunInfo.Lmg(GunInfo.Of(gw)?.name) ? null : GunKit.Random(true));
                     if (g == null) continue;
                     g.medic = medic;
                     g.squad = sq;
@@ -192,10 +194,12 @@ namespace Carl
                 float yaw = side < 0f ? 0f : 180f;
                 var h = SandboxGame.Instance.SpawnCarl(used[k], yaw);
                 if (h == null) break;
-                ArmourSystem.Equip(h, RandomKit());
+                int nation = Nations.Of(Teams.Friendly);
+                ArmourSystem.Equip(h, RandomKit(nation));
                 h.brain.aiEnabled = true;
                 bool medic = k % 5 == 2;
-                var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null, Teams.Friendly) : EarlGunner.Arm(h, EarlWeapon.AK47, GunKit.Random(true), Teams.Friendly);
+                var gw = Nations.Active ? Nations.RandomWeapon(nation) : EarlWeapon.AK47;
+                var g = medic ? EarlGunner.Arm(h, EarlWeapon.Pistol, null, Teams.Friendly) : EarlGunner.Arm(h, gw, GunInfo.Lmg(GunInfo.Of(gw)?.name) ? null : GunKit.Random(true), Teams.Friendly);
                 if (g == null) continue;
                 g.medic = medic;
                 g.grenades = medic || Random.value < 0.15f ? 0 : Random.Range(1, 4);
@@ -208,9 +212,9 @@ namespace Carl
         }
 
         /// <summary>What a man in the trenches has on: a 6B45 with some of its parts, usually a 6B47, rarely an Altyn.</summary>
-        public static ArmourLoadout RandomKit()
+        public static ArmourLoadout RandomKit(int nation = Nations.Russia)
         {
-            var L = new ArmourLoadout { vest = VestKind.Russian6B45 };
+            var L = new ArmourLoadout { vest = VestKind.Russian6B45, camo = !Nations.Active ? 0 : nation == Nations.Ukraine ? 1 : 2 };
             L.plateClass = Random.value < 0.25f ? 3 : Random.value < 0.8f ? 4 : 5;
             L.sideArmour = Random.value < 0.55f;
             L.groinFlap = Random.value < 0.45f;

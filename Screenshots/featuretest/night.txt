@@ -1,0 +1,14 @@
+== night  (10:36:13)
+night, average brightness on screen: light off 0.018, light on 0.027
+PASS  night is dark (you need a light to see)
+FAIL  the flashlight lights things up
+PASS  light back off
+enemy placed 18 m off, clear line of sight
+light off, standing still: he saw you in 0 frames, his torch on 0 frames, suspects you 0.00
+PASS  in the dark he can't see you without a light
+PASS  an Earl with nothing to hunt keeps his torch off
+light on: guesses off it 0, sees you True, suspects you 0.99 at 0.1 m off
+PASS  your light gives you away
+a shot heard: guessed 0.17 m out at 5 m, 7.8 m out at 50 m
+PASS  close shots placed exactly, far ones only roughly
+PASS  a vest rattles when you move

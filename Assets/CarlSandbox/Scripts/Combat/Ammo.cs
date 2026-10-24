@@ -31,6 +31,19 @@ namespace Carl
                 new AmmoType { name = "7.62x39 BP", desc = "Armour piercing hardened core.", velocity = 730, mass = 0.0079f, diameter = 0.0078f, pen = 5.5f, wall = 2.2f, expand = 0.85f, tracer = true },
                 new AmmoType { name = "7.62x39 US", desc = "Subsonic. Quiet, weak.", velocity = 300, mass = 0.0125f, diameter = 0.0078f, pen = 2.5f, wall = 0.5f },
             },
+            ["AK-74"] = new[]
+            {
+                new AmmoType { name = "5.45x39 7N6", desc = "Steel-core ball with an air pocket in the nose: it tumbles early.", velocity = 900, mass = 0.0034f, diameter = 0.0056f, pen = 3.6f, wall = 1f, expand = 1.3f, tracer = true },
+                new AmmoType { name = "5.45x39 7N10", desc = "Improved penetration core.", velocity = 880, mass = 0.0036f, diameter = 0.0056f, pen = 4.4f, wall = 1.3f, expand = 1.15f, tracer = true },
+                new AmmoType { name = "5.45x39 7N24", desc = "Hardened steel AP core.", velocity = 840, mass = 0.0042f, diameter = 0.0056f, pen = 5.6f, wall = 2.1f, expand = 0.85f, tracer = true },
+                new AmmoType { name = "5.45x39 7U1", desc = "Subsonic. Quiet, weak.", velocity = 303, mass = 0.0052f, diameter = 0.0056f, pen = 2f, wall = 0.4f },
+            },
+            ["PKM"] = new[]
+            {
+                new AmmoType { name = "7.62x54R LPS", desc = "Steel-core ball. Belts of it.", velocity = 825, mass = 0.0096f, diameter = 0.0079f, pen = 5f, wall = 1.8f, tracer = true },
+                new AmmoType { name = "7.62x54R 7N13", desc = "Improved penetration.", velocity = 830, mass = 0.0094f, diameter = 0.0079f, pen = 5.8f, wall = 2.3f, expand = 0.9f, tracer = true },
+                new AmmoType { name = "7.62x54R BZ", desc = "Armour piercing incendiary.", velocity = 810, mass = 0.0105f, diameter = 0.0079f, pen = 6.4f, wall = 2.8f, expand = 0.85f, tracer = true },
+            },
             ["GLOCK 17"] = new[]
             {
                 new AmmoType { name = "9x19 FMJ", desc = "Full metal jacket.", velocity = 375, mass = 0.0075f, diameter = 0.009f, pen = 2f, wall = 0.6f },
@@ -73,7 +86,8 @@ namespace Carl
             },
         };
 
-        public static AmmoType[] For(string weapon) => table.TryGetValue(weapon, out var a) ? a : null;
+        public static AmmoType[] For(string weapon)
+            => weapon != null && table.TryGetValue(weapon, out var a) ? a : GunInfo.Of(weapon) is GunInfo.Info gi && table.TryGetValue(gi.ammo, out var b) ? b : null;
     }
 
     public enum SightKind { Iron, RedDot, Holo, Scope4x, Scope8x }

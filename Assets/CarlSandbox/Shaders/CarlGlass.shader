@@ -22,8 +22,11 @@ Shader "Carl/Glass"
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "CarlLights.hlsl"
             CBUFFER_START(UnityPerMaterial)
                 half4 _Color;
                 float _DmgCount;
@@ -99,10 +102,11 @@ Shader "Carl/Glass"
                 half3 h = normalize(ml.direction + vdir);
                 half spec = pow(saturate(dot(n, h)), 120.0) * 1.5;
                 half fres = pow(1.0 - saturate(dot(n, vdir)), 3.0);
-                half3 col = _Color.rgb * (SampleSH(n) + 0.3) + ml.color * spec + fres * 0.25;
+                half3 lit = SampleSH(n) + ml.color * 0.3 + CarlOtherLights(i.positionWS, n, i.positionCS, 0.0);
+                half3 col = _Color.rgb * lit + ml.color * spec + fres * 0.4 * (SampleSH(reflect(-vdir, n)) + ml.color * 0.15);
                 // older scuffs come in through vertex colour
                 half scuff = 1.0 - i.color.r;
-                half3 cracked = half3(0.9, 0.93, 0.95) * (SampleSH(n) * 0.6 + 0.55);
+                half3 cracked = half3(0.9, 0.93, 0.95) * (SampleSH(n) * 0.6 + lit * 0.5);
                 col = lerp(col + scuff * 0.4, cracked, crack);
                 half a = saturate(_Color.a + fres * 0.4 + spec + scuff * 0.4 + crack * 0.85);
                 return half4(col, a);

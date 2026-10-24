@@ -102,7 +102,7 @@ namespace Carl
             if (daySky != null)
             {
                 var sky = RenderSettings.skybox = new Material(daySky);
-                if (sky.HasProperty("_Exposure")) sky.SetFloat("_Exposure", t == 0 ? daySky.GetFloat("_Exposure") : t == 1 ? 0.55f : 0.035f);
+                if (sky.HasProperty("_Exposure")) sky.SetFloat("_Exposure", t == 0 ? daySky.GetFloat("_Exposure") : t == 1 ? 0.55f : 0.012f);
                 if (sky.HasProperty("_Tint")) sky.SetColor("_Tint", t == 1 ? new Color(0.75f, 0.5f, 0.45f) : t == 2 ? new Color(0.25f, 0.3f, 0.45f) : sky.GetColor("_Tint"));
                 if (sky.HasProperty("_SkyTint")) sky.SetColor("_SkyTint", t == 1 ? new Color(0.65f, 0.42f, 0.38f) : t == 2 ? new Color(0.1f, 0.12f, 0.2f) : daySky.GetColor("_SkyTint"));
             }
@@ -124,16 +124,26 @@ namespace Carl
             }
             else
             {
-                // a half moon: faint, blue, high. Dark, but not black: people are grey-blue shapes you can make
-                // out once your eyes are used to it (they were pitch-black cut-outs), with their colours coming
-                // back under a lamp or a torch
+                // a thin moon behind cloud: properly dark. The sky is a shade lighter than the ground, so a man on
+                // the skyline is a shape; anything in a trench or more than a few metres off is gone into black
+                // unless a lamp, a flashlight or a muzzle flash lights it
                 sun.transform.rotation = Quaternion.Euler(40f, 150f, 0f);
-                sun.intensity = 0.16f; sun.color = new Color(0.62f, 0.72f, 1f); sun.shadowStrength = 0.6f;
-                RenderSettings.ambientSkyColor = new Color(0.11f, 0.13f, 0.19f);
-                RenderSettings.ambientEquatorColor = new Color(0.08f, 0.09f, 0.12f);
-                RenderSettings.ambientGroundColor = new Color(0.045f, 0.045f, 0.055f);
+                sun.intensity = 0.035f; sun.color = new Color(0.62f, 0.72f, 1f); sun.shadowStrength = 0.6f;
+                RenderSettings.ambientSkyColor = new Color(0.02f, 0.024f, 0.036f);
+                RenderSettings.ambientEquatorColor = new Color(0.012f, 0.013f, 0.018f);
+                RenderSettings.ambientGroundColor = new Color(0.005f, 0.005f, 0.006f);
             }
             Night = t == 2;
+            // the day sky reflected in everything lights it up even at night: hardly any of that in the dark
+            RenderSettings.reflectionIntensity = Night ? 0.06f : 1f;
+            // and the haze in the distance is darkness, not a pale grey glow
+            if (Night)
+            {
+                RenderSettings.fog = true;
+                RenderSettings.fogMode = FogMode.ExponentialSquared;
+                RenderSettings.fogColor = new Color(0.006f, 0.007f, 0.011f);
+                RenderSettings.fogDensity = 0.03f;
+            }
             EarlGunner.Lamps.Clear();
             if (t != 2 || map == null) return;
             foreach (var tr in map.GetComponentsInChildren<Transform>())
@@ -227,6 +237,10 @@ namespace Carl
             if (mapRoot != null) { mapRoot.gameObject.SetActive(false); Destroy(mapRoot.gameObject); }   // (gone now: the new map is laid out against what is there)
             mapIndex = index;
             mapRoot = MapBuilder.Build(index, out var spawn, out playerYaw, out var carls);
+            Nations.Active = MapBuilder.Names[index] == "TRENCHES";
+            Nations.NewBattle();
+            dressed = null;
+            DressPlayer();
             ApplyTimeOfDay(mapRoot);
             Haze.Clear();
             Haze.ShelterHeight = MapBuilder.Names[index] == "TRENCHES" ? 1.45f : -1000f;
@@ -246,6 +260,28 @@ namespace Carl
             }
             else TrenchBattle.Stop();
             Toast("MAP: " + MapBuilder.Names[index]);
+        }
+
+        /// <summary>
+        /// You, for the battle: in the trenches your army's uniform and tape, and its rifle in your hands; anywhere
+        /// else back in your own clothes.
+        /// </summary>
+        HumanBody dressed;
+        void DressPlayer()
+        {
+            var me = PlayerAvatar.Body;
+            dressed = null;
+            if (me == null) return;      // (no body yet on the very first load: done as soon as there is one, in Update)
+            dressed = me;
+            int nation = Nations.Of(Teams.Friendly);
+            me.SetUniform(Nations.Active ? Nations.Uniform(nation) : 0);
+            if (Nations.Active)
+            {
+                Teams.Armband(me, Teams.Friendly);
+                int rifle = weapons.defs.FindIndex(d => d.name == Nations.IssueRifle(nation));
+                if (rifle >= 0) { weapons.Give(rifle, true); weapons.Select(rifle); }
+            }
+            else Teams.RemoveArmband(me);
         }
 
         public HumanBody SpawnCarl(Vector3 feet, float yaw)
@@ -315,6 +351,7 @@ namespace Carl
 
             using var pmScope = PM_Update.Auto();
             BodyLod.Tick();
+            if (Nations.Active && PlayerAvatar.Body != null && dressed != PlayerAvatar.Body && !InMenu) DressPlayer();
             var kb = Keyboard.current;
             var mouse = Mouse.current;
             if (kb == null || mouse == null) return;

@@ -27,6 +27,16 @@ namespace Carl
                 // 7.62x39 out of a 3.6 kg rifle with a plain slant brake: a lot of climb, and it jumps about -
                 // first up and to the right, then dancing left and right as the burst goes on
                 case "AK-47": return new Recoil { up = 2.1f, side = 1.15f, build = 0.6f, wander = 1.6f, first = 1.3f, flip = 1.25f, jitter = 0.35f };
+                // 5.45x39: the AK-74's light fast round and its big brake - famously flat for an AK
+                case "AK-74": case "AK-74M": return new Recoil { up = 1.35f, side = 0.7f, build = 0.4f, wander = 1.2f, first = 1.2f, flip = 1.0f, jitter = 0.3f };
+                case "AK-105": return new Recoil { up = 1.55f, side = 0.8f, build = 0.45f, wander = 1.3f, first = 1.25f, flip = 1.05f, jitter = 0.32f };
+                // the stubby one: short barrel, light, a booster instead of a brake - it climbs and dances
+                case "AKS-74U": return new Recoil { up = 1.9f, side = 1.05f, build = 0.55f, wander = 1.5f, first = 1.3f, flip = 1.2f, jitter = 0.38f };
+                case "AK-12": return new Recoil { up = 1.25f, side = 0.6f, build = 0.35f, wander = 1.1f, first = 1.15f, flip = 0.95f, jitter = 0.28f };
+                // machine guns: heavy, held low - steady on the bipod, a handful off the shoulder
+                case "RPK-74": return new Recoil { up = 1.15f, side = 0.6f, build = 0.3f, wander = 1.0f, first = 1.1f, flip = 0.9f, jitter = 0.3f };
+                case "PKM": return new Recoil { up = 2.4f, side = 1.2f, build = 0.45f, wander = 1.4f, first = 1.2f, flip = 1.1f, jitter = 0.4f };
+                case "M249": return new Recoil { up = 1.4f, side = 0.8f, build = 0.35f, wander = 1.2f, first = 1.1f, flip = 0.95f, jitter = 0.35f };
                 // 5.56 out of a 3 kg carbine with a buffer and a straight stock: much flatter, a smaller wander
                 case "AR-15": return new Recoil { up = 1.25f, side = 0.5f, build = 0.35f, wander = 1.1f, first = 1.2f, flip = 0.9f, jitter = 0.25f };
                 // 9 mm pistols: a sharp snap up that comes back fast; light in the hand, so a lot of flip

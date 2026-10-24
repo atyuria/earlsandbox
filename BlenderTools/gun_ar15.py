@@ -4,8 +4,9 @@
 # magazine, A2-style grip, collapsible stock on a carbine buffer tube. About 840 mm long collapsed.
 # Bore axis y = 0; upper receiver z -165 .. 20.
 import bpy
-K = bpy.app.driver_namespace["gunkit2"]
-G = K.Gun2("Gun_AR15", ["Anod", "Steel", "Polymer", "Rubber", "Metal"])
+K = bpy.app.driver_namespace["gunkit3"]
+bez = K.bez
+G = K.Gun3("Gun_AR15", ["Anod", "Steel", "Polymer", "Rubber", "Metal"])
 A, S, P, R, M = "Anod", "Steel", "Polymer", "Rubber", "Metal"
 
 def rail(z0, z1, mat=A):
@@ -76,10 +77,12 @@ G.prof([(-74, -32), (-112, -32), (-112, -46, 3), (-74, -46, 3)], -5.5, 5.5, A, b
 G.cut(G.parts[-1], [G.C("prof", [(-78, -34), (-108, -34), (-108, -42, 2), (-78, -42, 2)], -10, 10, A, bevel=0)])
 G.tube([(0, -30, -92), (0, -36, -90.5), (0, -41, -93)], 2.4, S, seg=10)
 # ---- the 30-round magazine, curved forward
-mg = G.prof([(-8, -40), (-73, -40), (-73, -70), (-67, -126, 30), (-52, -186), (12, -176), (0, -122, 30), (-7, -70)], -11, 11, P, bevel=1.4, seg=2)
-G.cut(mg, [G.C("box", (12, -62 - k * 8, -40 - k * 1.4), (3, 1.6, 70), P, bevel=0) for k in range(5)] +
-          [G.C("box", (-12, -62 - k * 8, -40 - k * 1.4), (3, 1.6, 70), P, bevel=0) for k in range(5)])
-G.prof([(14, -175), (-53, -186), (-54, -193, 3), (15, -182, 3)], -13, 13, P, bevel=1.5, seg=2)   # floorplate
+# (the STANAG's gentle forward curve, its stamped side ribs and the flared floorplate; it comes out on a reload)
+mout = [(-8, -40)] + bez((-8, -40), (-4, -110), (12, -186), 10) + [(-54, -198)] + bez((-54, -198), (-70, -112), (-73, -40), 10)
+mg = G.prof(mout, -11, 11, P, bevel=1.4, seg=2)
+G.cut(mg, [G.C("box", (s * 11.6, -78 - k * 22, -34 + k * 3), (2.4, 3.2, 52), P, bevel=0, rot=(-7 - k * 1.5, 0, 0)) for s in (-1, 1) for k in range(5)])
+fpl = G.prof([(14, -184), (-56, -197), (-57, -205, 3), (15, -192, 3)], -13, 13, P, bevel=1.5, seg=2)   # floorplate
+G.as_mag(mg, fpl)
 # ---- pistol grip, A2 style with the finger swell
 G.prof([(-108, -22), (-146, -22), (-150, -30, 4), (-176, -112, 6), (-166, -122, 6), (-140, -118, 4),
         (-131, -86, 8), (-124, -70, 6), (-122, -52, 8), (-110, -30, 3)], -12, 12, P, bevel=3.5, seg=3)
@@ -87,12 +90,14 @@ G.prof([(-108, -22), (-146, -22), (-150, -30, 4), (-176, -112, 6), (-166, -122, 
 G.cyl((0, -6, -165), (0, -6, -400), 14.5, A, seg=24, bevel=0.6)
 G.cyl((0, -6, -165), (0, -6, -174), 18, S, seg=8, bevel=0.6)
 st = G.prof([(-262, 4, 6), (-262, -22, 8), (-300, -36, 16), (-402, -96, 4), (-418, -98), (-418, 26, 4), (-300, 22, 10)], -19, 19, P, bevel=4, seg=3)
+G.taper(st, -262, 0.82, -418, 1.0)
 G.cut(st, [G.C("cyl", (-30, -60, -372), (30, -60, -372), 5, P, seg=12),     # sling hole
            G.C("cyl", (0, -6, -250), (0, -6, -395), 15.2, P, seg=20)])
 G.prof([(-418, 26), (-430, 26, 3), (-430, -98, 3), (-418, -98)], -21, 21, R, bevel=2.5, seg=2)
 G.box((0, -30, -279), (14, 12, 22), P, bevel=2)                              # adjustment lever housing
 
 pts = {"Muzzle": [0, 0, 0.435], "Grip": [0, -0.068, -0.14], "Fore": [0, -0.02, 0.27], "Iron": [0, 0.0605, 0.34],
-       "Scope": [0, 0.072, 0.03], "Eject": [0.016, 0.003, -0.066]}
+       "Scope": [0, 0.072, 0.03], "Eject": [0.016, 0.003, -0.066],
+       "MagTop": [0, -0.04, -0.04], "MagBottom": [0, -0.19, -0.02], "Charge": [0, 0.015, -0.172]}
 result = {"verts": G.stats()}
 bpy.app.driver_namespace["lastgun"] = (G, pts)

@@ -151,7 +151,8 @@ namespace Carl
             }
         }
 
-        static Color Tint(Color c) { float s = Random.Range(0.9f, 1.08f); return new Color(c.r * s, c.g * s, c.b * s, 1f); }
+        // (the haze isn't lit by anything: at night a pale puff would glow, so it is as dark as the night is)
+        static Color Tint(Color c) { float s = Random.Range(0.9f, 1.08f) * (SandboxGame.Night ? 0.07f : 1f); return new Color(c.r * s, c.g * s, c.b * s, 1f); }
 
         // ------------------------------------------------------------ what it does to seeing
 
@@ -261,7 +262,7 @@ namespace Carl
         {
             // in the thick of it: the screen goes brown-grey
             if (AtCamera < 0.02f || Event.current.type != EventType.Repaint) return;
-            GUI.color = new Color(0.5f, 0.46f, 0.4f, Mathf.Min(0.6f, AtCamera * 0.6f));
+            GUI.color = SandboxGame.Night ? new Color(0.03f, 0.03f, 0.03f, Mathf.Min(0.6f, AtCamera * 0.6f)) : new Color(0.5f, 0.46f, 0.4f, Mathf.Min(0.6f, AtCamera * 0.6f));
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
         }

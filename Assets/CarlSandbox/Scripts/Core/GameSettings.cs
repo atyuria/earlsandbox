@@ -28,6 +28,8 @@ namespace Carl
         public static bool SpawnNpcs = true;
         /// <summary>TRENCHES: false = you hold your trench against their assault, true = you assault theirs.</summary>
         public static bool TrenchAttack = false;
+        /// <summary>Your army in the trenches: 0 Ukraine, 1 Russia (the other side is the enemy).</summary>
+        public static int Side = 0;
 
         static bool loaded;
 
@@ -51,6 +53,7 @@ namespace Carl
             TimeOfDay = PlayerPrefs.GetInt("earl.timeOfDay", 0);
             SpawnNpcs = PlayerPrefs.GetInt("earl.npcs", 1) == 1;
             TrenchAttack = PlayerPrefs.GetInt("earl.trenchAttack", 0) == 1;
+            Side = Mathf.Clamp(PlayerPrefs.GetInt("earl.side", 0), 0, 1);
             ApplyGraphics();
         }
 
@@ -69,14 +72,18 @@ namespace Carl
             PlayerPrefs.SetInt("earl.timeOfDay", TimeOfDay);
             PlayerPrefs.SetInt("earl.npcs", SpawnNpcs ? 1 : 0);
             PlayerPrefs.SetInt("earl.trenchAttack", TrenchAttack ? 1 : 0);
+            PlayerPrefs.SetInt("earl.side", Side);
             PlayerPrefs.Save();
         }
 
         /// <summary>
-        /// How often the physics runs: ragdolls and their muscles are the biggest cost in the game, and it scales
-        /// with this. 100 Hz on high, 80 on medium, 60 on low (still smooth; joints a touch softer).
+        /// How often the physics runs: 100 Hz on every setting. (Slower steps were tried on low and medium: the
+        /// bodies are tuned at 100 Hz, and below it a sprinting body folds forward until its head is at its waist,
+        /// and the guns ring in the hands - so the savings on low come from elsewhere.)
         /// </summary>
-        public static float PhysicsStep => Graphics >= 2 ? 0.01f : Graphics == 1 ? 0.0125f : 1f / 60f;
+        public static float PhysicsStep => DbgStep > 0f ? DbgStep : 0.01f;
+        /// <summary>For the playtests: a fixed physics step whatever the setting (0 = the setting's own).</summary>
+        public static float DbgStep;
 
         /// <summary>
         /// Puts the graphics setting into effect.

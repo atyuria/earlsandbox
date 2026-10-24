@@ -17,11 +17,11 @@ namespace Carl
         public static BarrelHeat I;
         public static void Attach(GameObject g) => I = g.AddComponent<BarrelHeat>();
 
-        enum Jam { None, Stovepipe, FailureToFeed, DoubleFeed, StuckCase }
+        public enum JamKind { None, Stovepipe, FailureToFeed, DoubleFeed, StuckCase }
 
         readonly float[] heat = new float[32];
         readonly float[] lastShot = new float[32];
-        readonly Jam[] jam = new Jam[32];
+        readonly JamKind[] jam = new JamKind[32];
         readonly int[] stepsLeft = new int[32];
         float stepBusyUntil, lastClick, smokeAt;
         GameObject glow;
@@ -36,38 +36,39 @@ namespace Carl
         /// <summary>How much one round heats the barrel (1 = as hot as it gets).</summary>
         static float PerShot(WeaponDef d)
         {
+            if (d.name != "AK-47" && d.name != "AR-15" && GunInfo.Of(d.name) is GunInfo.Info gi) return gi.heat;
             switch (d.name)
             {
-                case "AK-47": return 0.022f;
-                case "AR-15": return 0.018f;
-                case "GLOCK 17": return 0.016f;
-                case "BERETTA M9": return 0.016f;
-                case "MOSSBERG 590": return 0.05f;
-                case "AWP": return 0.045f;
-                case ".50 CAL": return 0.06f;
-                default: return d.name == "TASER" || d.name == "FLAMETHROWER" ? 0f : 0.02f;
+                case "AK-47": return 0.0085f;
+                case "AR-15": return 0.0075f;
+                case "GLOCK 17": return 0.009f;
+                case "BERETTA M9": return 0.009f;
+                case "MOSSBERG 590": return 0.03f;
+                case "AWP": return 0.03f;
+                case ".50 CAL": return 0.04f;
+                default: return d.name == "TASER" || d.name == "FLAMETHROWER" ? 0f : 0.0085f;
             }
         }
 
         /// <summary>Chance a round jams, by how hot the barrel is: next to nothing cool, likely at the limit.</summary>
-        public static float JamChance(float h) => 0.0004f + 0.02f * h * h + 0.03f * h * h * h + (h > 0.85f ? 0.08f : 0f);
+        public static float JamChance(float h) => 0.0015f + 0.01f * h * h + 0.02f * h * h * h + (h > 0.9f ? 0.03f : 0f);
 
         /// <summary>
         /// How much harder a round works the gun for how soon it follows the last: a burst or a mag dump heats it
         /// far faster than shots taken one at a time (and is likelier to jam), so single, aimed shots pay.
         /// </summary>
-        static float Cadence(float gap) => gap < 0.13f ? 1.6f : gap < 0.3f ? 1.1f : 0.6f;
+        static float Cadence(float gap) => gap < 0.13f ? 1.4f : gap < 0.3f ? 1f : 0.6f;
 
         public float Heat(int idx) => idx >= 0 && idx < heat.Length ? heat[idx] : 0f;
-        public bool Jammed(int idx) => idx >= 0 && idx < jam.Length && jam[idx] != Jam.None;
+        public bool Jammed(int idx) => idx >= 0 && idx < jam.Length && jam[idx] != JamKind.None;
         public string JamName(int idx) => Jammed(idx) ? jam[idx].ToString() : "";
         public bool Glowing => glow != null && glow.activeInHierarchy;
 
         /// <summary>For the playtests: jams, dead clicks, and a jam of a given kind (1-4) or a set heat.</summary>
         public int Jams, DeadClicks;
-        public void ForceJam(int idx, int kind) { jam[idx] = (Jam)kind; stepsLeft[idx] = jam[idx] == Jam.StuckCase ? 4 : jam[idx] == Jam.DoubleFeed ? 3 : 1; }
+        public void ForceJam(int idx, int kind) { jam[idx] = (JamKind)kind; stepsLeft[idx] = jam[idx] == JamKind.StuckCase ? 4 : jam[idx] == JamKind.DoubleFeed ? 3 : 1; }
         /// <summary>A new map: every gun cool and clear.</summary>
-        public void Clear() { for (int i = 0; i < heat.Length; i++) { heat[i] = 0f; jam[i] = Jam.None; stepsLeft[i] = 0; } }
+        public void Clear() { for (int i = 0; i < heat.Length; i++) { heat[i] = 0f; jam[i] = JamKind.None; stepsLeft[i] = 0; } }
         public void SetHeat(int idx, float h) { heat[idx] = h; lastShot[idx] = Time.time; }
 
         /// <summary>A hot barrel throws rounds wider.</summary>
@@ -82,15 +83,15 @@ namespace Carl
             float add = PerShot(d);
             if (add <= 0f) return;
             float cadence = Cadence(Time.time - lastShot[idx]);
-            heat[idx] = Mathf.Min(1f, heat[idx] + add * 1.35f * cadence);
+            heat[idx] = Mathf.Min(1f, heat[idx] + add * cadence);
             lastShot[idx] = Time.time;
-            if (Random.value >= JamChance(heat[idx]) * (cadence > 1.5f ? 1.5f : 1f)) return;
+            if (Random.value >= JamChance(heat[idx]) * (cadence > 1.3f ? 1.25f : 1f)) return;
             // what went wrong: cool, it's nearly always a case or a round that didn't make it; hot, the bad ones
             float h = heat[idx], r = Random.value;
-            Jam j = h > 0.8f && r < 0.3f ? Jam.StuckCase : h > 0.5f && r < 0.55f ? Jam.DoubleFeed : r < 0.6f ? Jam.Stovepipe : Jam.FailureToFeed;
+            JamKind j = h > 0.8f && r < 0.3f ? JamKind.StuckCase : h > 0.5f && r < 0.55f ? JamKind.DoubleFeed : r < 0.6f ? JamKind.Stovepipe : JamKind.FailureToFeed;
             jam[idx] = j;
             Jams++;
-            stepsLeft[idx] = j == Jam.StuckCase ? 4 : j == Jam.DoubleFeed ? 3 : 1;
+            stepsLeft[idx] = j == JamKind.StuckCase ? 4 : j == JamKind.DoubleFeed ? 3 : 1;
             Sfx.Play("click_empty", Ears(), 0.7f, 0f, 1f, 0.05f);
         }
 
@@ -108,14 +109,16 @@ namespace Carl
         {
             if (!Jammed(idx) || Time.unscaledTime < stepBusyUntil) return;
             stepBusyUntil = Time.unscaledTime + 0.35f;
+            int total = jam[idx] == JamKind.StuckCase ? 4 : jam[idx] == JamKind.DoubleFeed ? 3 : 1;
+            w?.ClearMove(jam[idx], total - stepsLeft[idx], total, 0.33f);
             stepsLeft[idx]--;
             // the mag out, the mag back in, and the bolt racked to finish
             Sfx.Play(stepsLeft[idx] == 0 ? "reload_bolt" : stepsLeft[idx] % 2 == 0 ? "reload_magout" : "reload_magin", Ears(), 0.7f, 0f, 1f, 0.05f);
             if (stepsLeft[idx] > 0) return;
             // cleared: what was in the way is gone (a failure to feed throws out the round, a double feed two)
-            int lost = jam[idx] == Jam.FailureToFeed ? 1 : jam[idx] == Jam.DoubleFeed ? 2 : 0;
+            int lost = jam[idx] == JamKind.FailureToFeed ? 1 : jam[idx] == JamKind.DoubleFeed ? 2 : 0;
             if (lost > 0 && w != null) w.LoseRounds(idx, lost);
-            jam[idx] = Jam.None;
+            jam[idx] = JamKind.None;
             SandboxGame.Instance?.Toast("CLEARED");
         }
 
@@ -129,10 +132,10 @@ namespace Carl
             for (int i = 0; i < heat.Length; i++)
             {
                 if (heat[i] <= 0f) continue;
-                // it cools all the time, faster once you stop firing and the hotter it is - but slowly: a barrel
-                // you've cooked takes the best part of half a minute to come back down
+                // it cools all the time, faster once you stop firing and the hotter it is - but steel holds its heat:
+                // a barrel you've cooked is still half hot twenty seconds later and takes a couple of minutes to cool
                 bool resting = Time.time - lastShot[i] > 0.6f;
-                heat[i] = Mathf.Max(0f, heat[i] - dt * (resting ? 0.012f + 0.045f * heat[i] : 0.004f));
+                heat[i] = Mathf.Max(0f, heat[i] - dt * (resting ? 0.006f + 0.022f * heat[i] : 0.002f));
             }
             var w = W;
             float h = w != null && w.Armed && w.Current.type == WeaponType.Gun ? Heat(w.current) : 0f;
@@ -160,7 +163,7 @@ namespace Carl
                 mr.receiveShadows = false;
             }
             // dull red from about a third hot, brighter and more orange toward the limit
-            float k = Mathf.InverseLerp(0.3f, 1f, h);
+            float k = Mathf.InverseLerp(0.4f, 1f, h);
             bool on = muzzle != null && k > 0f;
             glow.SetActive(on);
             if (!on) { glowOn = muzzle; return; }
@@ -204,8 +207,8 @@ namespace Carl
             }
             if (Jammed(idx))
             {
-                string what = jam[idx] == Jam.Stovepipe ? "STOVEPIPE" : jam[idx] == Jam.FailureToFeed ? "FAILURE TO FEED" : jam[idx] == Jam.DoubleFeed ? "DOUBLE FEED" : "STUCK CASE";
-                int total = jam[idx] == Jam.StuckCase ? 4 : jam[idx] == Jam.DoubleFeed ? 3 : 1;
+                string what = jam[idx] == JamKind.Stovepipe ? "STOVEPIPE" : jam[idx] == JamKind.FailureToFeed ? "FAILURE TO FEED" : jam[idx] == JamKind.DoubleFeed ? "DOUBLE FEED" : "STUCK CASE";
+                int total = jam[idx] == JamKind.StuckCase ? 4 : jam[idx] == JamKind.DoubleFeed ? 3 : 1;
                 float flash = 0.75f + 0.25f * Mathf.Sin(Time.unscaledTime * 8f);
                 big.normal.textColor = new Color(1f, 0.25f, 0.15f, flash);
                 string steps = total > 1 ? $"  ({total - stepsLeft[idx] + 1}/{total})" : "";

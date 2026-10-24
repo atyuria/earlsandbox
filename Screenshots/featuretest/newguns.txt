@@ -1,0 +1,19 @@
+== newguns  (11:29:54)
+AK-47: 30 / 30 -> 25 / 30, ammo 7.62x39 PS, modes AUTO/SEMI
+PASS  AK-47: fires, its own ammo
+AK-74: 30 / 30 -> 25 / 30, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  AK-74: fires, its own ammo
+AK-74M: 30 / 30 -> 25 / 30, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  AK-74M: fires, its own ammo
+AK-105: 30 / 30 -> 25 / 30, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  AK-105: fires, its own ammo
+AKS-74U: 30 / 30 -> 24 / 30, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  AKS-74U: fires, its own ammo
+AK-12: 30 / 30 -> 24 / 30, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  AK-12: fires, its own ammo
+RPK-74: 45 / 45 -> 40 / 45, ammo 5.45x39 7N6, modes AUTO/SEMI
+PASS  RPK-74: fires, its own ammo
+PKM: 100 / 100 -> 95 / 100, ammo 7.62x54R LPS, modes AUTO
+PASS  PKM: fires, its own ammo
+M249: 200 / 200 -> 194 / 200, ammo 5.56 M855, modes AUTO
+PASS  M249: fires, its own ammo

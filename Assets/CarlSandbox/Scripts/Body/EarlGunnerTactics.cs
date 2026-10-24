@@ -116,6 +116,7 @@ namespace Carl
                 break;
             }
             if (sees) { lastSeen = Time.time; lastSeenPos = enemyAim; lastEnemy = enemy; Learn(enemyAim, 1f, true); }
+            else if (SandboxGame.Night) SpotLights(eye);
         }
 
         // ------------------------------------------------------------ getting about

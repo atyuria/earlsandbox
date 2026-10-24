@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Carl
 {
-    public enum EarlWeapon { None, AK47, Pistol, Shotgun, Knife, Sword, AR15, Beretta }
+    public enum EarlWeapon { None, AK47, Pistol, Shotgun, Knife, Sword, AR15, Beretta, AK74, AK74M, AK105, AKS74U, AK12, RPK74, PKM, M249 }
 
     /// <summary>
     /// An Earl that fights back, and means it. The weapon is a real object in his hand and his arms hold it the
@@ -70,24 +70,29 @@ namespace Carl
         {
             team = t;
             Teams.Armband(body, t);
+            if (Nations.Active) body.SetUniform(Nations.Uniform(Nations.Of(t)));
         }
 
-        bool Gun => kind == EarlWeapon.AK47 || kind == EarlWeapon.Pistol || kind == EarlWeapon.Shotgun || kind == EarlWeapon.AR15 || kind == EarlWeapon.Beretta;
-        bool Rifle => kind == EarlWeapon.AK47 || kind == EarlWeapon.AR15;
+        bool Gun => kind == EarlWeapon.Pistol || kind == EarlWeapon.Shotgun || kind == EarlWeapon.Beretta || GunInfo.Of(kind) != null;
+        /// <summary>A rifle or a machine gun (anything in GunInfo): held in both hands, fired in bursts.</summary>
+        bool Rifle => GunInfo.Of(kind) != null;
+        bool Lmg => GunInfo.Of(kind) is GunInfo.Info gi && gi.lmg;
         bool Handgun => kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta;
         bool TwoHanded => Rifle || kind == EarlWeapon.Shotgun;
-        string WeaponName => kind == EarlWeapon.AK47 ? "AK-47" : kind == EarlWeapon.AR15 ? "AR-15" : kind == EarlWeapon.Beretta ? "BERETTA M9" : kind == EarlWeapon.Pistol ? "GLOCK 17" : kind == EarlWeapon.Shotgun ? "MOSSBERG 590" : kind == EarlWeapon.Knife ? "KNIFE" : "SWORD";
+        string WeaponName => GunInfo.Of(kind) is GunInfo.Info gi ? gi.name : kind == EarlWeapon.Beretta ? "BERETTA M9" : kind == EarlWeapon.Pistol ? "GLOCK 17" : kind == EarlWeapon.Shotgun ? "MOSSBERG 590" : kind == EarlWeapon.Knife ? "KNIFE" : "SWORD";
+        /// <summary>The gun he carries (its name, as in the G menu).</summary>
+        public string GunName => WeaponName;
         public Vector3 BladeTip => weapon != null ? weapon.transform.TransformPoint(tipLocal) : Vector3.zero;
         public Vector3 BladeHilt => weapon != null ? weapon.transform.TransformPoint(gripLocal) : Vector3.zero;
         public bool BladeOut => !Gun && weapon != null && !dropped;
 
         void Build()
         {
-            string model = kind == EarlWeapon.AK47 ? "Gun_AK47" : kind == EarlWeapon.AR15 ? "Gun_AR15" : kind == EarlWeapon.Beretta ? "Gun_Beretta" : kind == EarlWeapon.Pistol ? "Gun_Glock" : kind == EarlWeapon.Shotgun ? "Gun_Shotgun" : kind == EarlWeapon.Knife ? "Gun_Knife" : "Gun_Sword";
+            string model = GunInfo.Of(kind) is GunInfo.Info gi ? gi.model : kind == EarlWeapon.Beretta ? "Gun_Beretta" : kind == EarlWeapon.Pistol ? "Gun_Glock" : kind == EarlWeapon.Shotgun ? "Gun_Shotgun" : kind == EarlWeapon.Knife ? "Gun_Knife" : "Gun_Sword";
             var hand = body[PartId.HandR];
             var m = ModelLibrary.Get(model);
             if (hand == null || m == null) return;
-            weapon = ModelLibrary.Spawn(model, null, ModelLibrary.GunMaterial, true);
+            weapon = ModelLibrary.SpawnWithMag(model, null, ModelLibrary.GunMaterial, true);
             gripLocal = m.points.TryGetValue("Grip", out var gp) ? gp : Vector3.zero;
             tipLocal = m.points.TryGetValue("Muzzle", out var mp) ? mp : Vector3.forward * 0.3f;
             Vector3 fwd = Vector3.ProjectOnPlane(body.Chest.transform.forward, Vector3.up).normalized;
@@ -111,7 +116,7 @@ namespace Carl
             if (Gun)
             {
                 ammo = AmmoTable.For(WeaponName)[0];
-                magSize = Rifle ? 30 : kind == EarlWeapon.Pistol ? 17 : kind == EarlWeapon.Beretta ? 15 : 8;
+                magSize = Rifle ? GunInfo.Of(kind).earlMag : kind == EarlWeapon.Pistol ? 17 : kind == EarlWeapon.Beretta ? 15 : 8;
                 rounds = magSize;
             }
         }
@@ -228,7 +233,14 @@ namespace Carl
             Sense();
             UpdateTorch();
             // his footsteps (louder running, and on the duckboards) carry to anyone close on the other side
-            if (Time.time > nextStep && rag.moveSpeed > 0.4f) { nextStep = Time.time + 0.6f; Intel.Noise(body.Center, team, rag.moveSpeed > 2.5f ? 16f : 9f); }
+            if (Time.time > nextStep && rag.moveSpeed > 0.4f)
+            {
+                nextStep = Time.time + (rag.moveSpeed > 2.5f ? 0.38f : 0.55f);
+                // a vest carries further: plates knocking, buckles and pouches clinking with every step
+                bool vest = ArmourSystem.WearsVest(body);
+                Intel.Noise(body.Center, team, (rag.moveSpeed > 2.5f ? 16f : 9f) * (vest ? 1.4f : 1f));
+                if (vest) Sfx.Play("gear_rattle", body.Chest.transform.position, rag.moveSpeed > 2.5f ? 0.22f : 0.12f, 1f, 1f, 0.12f, 10f);
+            }
             Vector3 chest = body.Chest.transform.position;
             rag.pose = PoseKind.Stand;
             rag.holdPart = null;
@@ -598,7 +610,7 @@ namespace Carl
         void Shoot(Vector3 target)
         {
             if (Time.time < nextShot || Time.time < reloadUntil) return;
-            if (rounds <= 0) { rounds = magSize; reloadUntil = Time.time + (kind == EarlWeapon.Shotgun ? 4f : 2.6f); Sfx.Reload(WeaponName, muzzle.position, 2.5f); nextCrouch = reloadUntil; return; }
+            if (rounds <= 0) { rounds = magSize; reloadUntil = Time.time + (kind == EarlWeapon.Shotgun ? 4f : Lmg ? 6.5f : 2.6f); Sfx.Reload(WeaponName, muzzle.position, 2.5f); nextCrouch = reloadUntil; return; }
             Vector3 toT = (target - muzzle.position).normalized;
             if (AllyInLine(target)) return;
             float shake = Shakiness();
@@ -619,22 +631,23 @@ namespace Carl
             {
                 // the empty case out of the right side, a little behind the muzzle line
                 var wt = weapon.transform;
-                var ck = kind == EarlWeapon.AK47 ? CaseKind.SevenSixTwo : kind == EarlWeapon.AR15 ? CaseKind.FiveFiveSix : kind == EarlWeapon.Shotgun ? CaseKind.TwelveGauge : (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta) ? CaseKind.Nine : CaseKind.None;
+                var ck = Rifle ? GunInfo.Of(kind).casing : kind == EarlWeapon.Shotgun ? CaseKind.TwelveGauge : (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta) ? CaseKind.Nine : CaseKind.None;
                 Casing.Eject(ck, muzzle.position - wt.forward * (kind == EarlWeapon.Pistol || kind == EarlWeapon.Beretta ? 0.12f : 0.45f) + wt.up * 0.02f, wt.right, wt.up, -wt.forward, Vector3.zero);
             }
             Fx.BlastDust(muzzle.position, weapon.transform.forward, (kind == EarlWeapon.Shotgun ? 1.6f : 1f) * (Suppressed ? 0.4f : 1f));
-            HumanBrain.BroadcastNoise(muzzle.position, Suppressed ? 22f : 60f, 0.4f);
-            Intel.Gunshot(muzzle.position, team, Suppressed ? 22f : 60f, body, target);
+            HumanBrain.BroadcastNoise(muzzle.position, Suppressed ? 30f : 60f, 0.4f);
+            Intel.Gunshot(muzzle.position, team, Suppressed ? 30f : 60f, body, target);
             var hand = body[PartId.HandR];
             float oneHand = TwoHanded && ArmHealth(-1) <= 0.3f ? 2.2f : 1f;
-            float kick = (kind == EarlWeapon.Shotgun ? 9f : kind == EarlWeapon.AK47 ? 3.5f : kind == EarlWeapon.AR15 ? 2.5f : 2f) * oneHand;
+            float kick = (kind == EarlWeapon.Shotgun ? 9f : Rifle ? GunInfo.Of(kind).earlKick : 2f) * oneHand;
             if (hand != null && hand.rb != null)
             {
                 hand.rb.AddForce(-weapon.transform.forward * kick + Vector3.up * kick * 0.6f, ForceMode.Impulse);
                 hand.rb.AddTorque(-weapon.transform.right * kick * 0.05f, ForceMode.Impulse);
             }
-            float rpm = kind == EarlWeapon.AK47 ? 600f : kind == EarlWeapon.AR15 ? 750f : Handgun ? 240f : 55f;
-            nextShot = Time.time + 60f / rpm + (Rifle && Random.value < 0.25f ? Random.Range(0.4f, 1f) : 0f) + shake * 0.08f;
+            float rpm = Rifle ? GunInfo.Of(kind).earlRpm : Handgun ? 240f : 55f;
+            // bursts: a rifleman pauses often, a machine gunner holds it down much longer
+            nextShot = Time.time + 60f / rpm + (Rifle && Random.value < (Lmg ? 0.07f : 0.25f) ? Random.Range(0.4f, 1f) : 0f) + shake * 0.08f;
         }
 
         // ------------------------------------------------------------ blades

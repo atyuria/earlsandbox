@@ -1,0 +1,10 @@
+== reload  (11:44:48)
+   0.20: reloading True, moving True, gun roll -40 deg, mag shown no mag, left hand at (0.01, -0.23, 0.43)
+   0.36: reloading True, moving True, gun roll -40 deg, mag shown no mag, left hand at (0.05, -0.46, 0.37)
+   0.50: reloading True, moving True, gun roll -40 deg, mag shown no mag, left hand at (-0.05, -0.30, 0.40)
+   0.66: reloading True, moving True, gun roll -40 deg, mag shown no mag, left hand at (0.00, -0.20, 0.41)
+   0.84: reloading True, moving True, gun roll -40 deg, mag shown no mag, left hand at (0.10, -0.13, 0.39)
+.50 CAL: reloaded to 10 / 10; the old magazine lies at 0.04 m
+PASS  the old magazine comes out and drops
+PASS  full again
+PASS  the double feed is cleared

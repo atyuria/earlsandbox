@@ -384,6 +384,14 @@ namespace Carl
                 GUILayout.Label(GameSettings.SpawnNpcs ? "The map is peopled: Earls standing about, or squads holding the trenches." : "An empty map: just you (spawn your own with F).", small);
                 if (mainMap == 3 && GameSettings.SpawnNpcs)
                 {
+                    Section("TRENCHES: YOUR ARMY");
+                    GUILayout.BeginHorizontal();
+                    if (Chip("UKRAINE", GameSettings.Side == Nations.Ukraine, 0f, 34f)) GameSettings.Side = Nations.Ukraine;
+                    if (Chip("RUSSIA", GameSettings.Side == Nations.Russia, 0f, 34f)) GameSettings.Side = Nations.Russia;
+                    GUILayout.EndHorizontal();
+                    GUILayout.Label(GameSettings.Side == Nations.Ukraine
+                        ? "MM-14 pixel camo, blue or yellow tape on the arm. Mostly AK-74s and old AKMs, some AK-74Ms, the odd M249. Against Russia."
+                        : "EMR camo, white or red tape on the arm. AK-74Ms and AK-12s, a few AK-105s and AKS-74Us, PKMs. Against Ukraine.", small);
                     Section("TRENCHES: YOUR SIDE");
                     GUILayout.BeginHorizontal();
                     if (Chip("DEFEND YOUR TRENCH", !GameSettings.TrenchAttack, 0f, 34f)) GameSettings.TrenchAttack = false;
@@ -597,6 +605,19 @@ namespace Carl
             if (Chip("MOSSBERG 590", spawnWeapon == EarlWeapon.Shotgun)) spawnWeapon = EarlWeapon.Shotgun;
             if (Chip("KNIFE", spawnWeapon == EarlWeapon.Knife)) spawnWeapon = EarlWeapon.Knife;
             if (Chip("SWORD", spawnWeapon == EarlWeapon.Sword)) spawnWeapon = EarlWeapon.Sword;
+            GUILayout.EndHorizontal();
+            // the Kalashnikovs and the machine guns
+            GUILayout.BeginHorizontal();
+            if (Chip("AK-74", spawnWeapon == EarlWeapon.AK74)) spawnWeapon = EarlWeapon.AK74;
+            if (Chip("AK-74M", spawnWeapon == EarlWeapon.AK74M)) spawnWeapon = EarlWeapon.AK74M;
+            if (Chip("AK-105", spawnWeapon == EarlWeapon.AK105)) spawnWeapon = EarlWeapon.AK105;
+            if (Chip("AKS-74U", spawnWeapon == EarlWeapon.AKS74U)) spawnWeapon = EarlWeapon.AKS74U;
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (Chip("AK-12", spawnWeapon == EarlWeapon.AK12)) spawnWeapon = EarlWeapon.AK12;
+            if (Chip("RPK-74", spawnWeapon == EarlWeapon.RPK74)) spawnWeapon = EarlWeapon.RPK74;
+            if (Chip("PKM", spawnWeapon == EarlWeapon.PKM)) spawnWeapon = EarlWeapon.PKM;
+            if (Chip("M249", spawnWeapon == EarlWeapon.M249)) spawnWeapon = EarlWeapon.M249;
             GUILayout.EndHorizontal();
             if (spawnWeapon != EarlWeapon.None) GUILayout.Label(spawnAI ? "He will come for you. Shoot his arm and his aim goes; take one arm and he can't steady a rifle." : "Dummies hold it but never use it (turn AI on).", small);
 

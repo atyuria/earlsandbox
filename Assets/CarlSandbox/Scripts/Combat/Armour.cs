@@ -12,6 +12,7 @@ namespace Carl
     public class ArmourLoadout
     {
         public VestKind vest;
+        public int camo;                     // the vest's cloth: 0 EMR camo, 1 coyote (Ukraine), 2 ranger green (Russia)
         public int plateClass = 4;           // GOST Br class of the 6B45 plates (2..6)
         public bool sideArmour = true, groinFlap = true, collar = true, pouches = true;
         public bool armGuards;               // 6B45 upper-arm protectors: soft armour down from the shoulder
@@ -371,7 +372,25 @@ namespace Carl
 
     public static class ArmourSystem
     {
+        static readonly Dictionary<HumanBody, (bool vest, float at)> vestCache = new Dictionary<HumanBody, (bool, float)>();
+
+        /// <summary>Wearing a vest (plates, webbing, pouches): it rattles and clinks when he moves.</summary>
+        public static bool WearsVest(HumanBody b)
+        {
+            if (b == null || b.Chest == null) return false;
+            if (vestCache.TryGetValue(b, out var c) && Time.time - c.at < 3f) return c.vest;
+            bool v = false;
+            foreach (var ap in b.Chest.GetComponentsInChildren<ArmourPiece>()) if (!ap.visor && !ap.glass) { v = true; break; }
+            if (vestCache.Count > 400) vestCache.Clear();
+            vestCache[b] = (v, Time.time);
+            return v;
+        }
+
         public static readonly List<ArmourPiece> All = new List<ArmourPiece>();
+        static Material camoUA, vestUA, vestRU;
+        /// <summary>The vest's cloth: in the trenches a plain colour of each army's own (coyote tan for Ukraine, ranger
+        /// green for Russia) over the uniform's camo; elsewhere the EMR cover it always had.</summary>
+        static Material CamoOf(ArmourLoadout L) => L == null ? camo : L.camo == 1 ? vestUA : L.camo == 2 ? vestRU : camo;
         static Material camo, camoCover, webbing, olive, steel, mail, glassMat, plumeMat, darkRubber, buckle;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -449,6 +468,9 @@ namespace Carl
                 return m;
             }
             camo = M(Color.white, 0f, 0.12f, 1f);
+            camoUA = M(Color.white, 0f, 0.12f, 5f);
+            vestUA = M(new Color(0.55f, 0.46f, 0.33f), 0f, 0.1f, 3f);
+            vestRU = M(new Color(0.28f, 0.32f, 0.24f), 0f, 0.1f, 3f);
             camoCover = M(new Color(0.36f, 0.38f, 0.28f), 0f, 0.08f, 4f);
             webbing = M(new Color(0.3f, 0.34f, 0.24f), 0f, 0.15f, 3f);
             olive = M(new Color(0.42f, 0.42f, 0.3f), 0.05f, 0.3f, 0f);
@@ -513,13 +535,13 @@ namespace Carl
                     bool ArmHole(Vector3 u) => chest && Mathf.Abs(u.x) > 0.58f && u.y > 0.05f;
                     // plate bulge: thickest in the middle of the plate, easing off to the soft edge of the carrier
                     float Bulge(Vector3 u) => 0.016f * Smooth(0.95f, 0.55f, Mathf.Abs(u.x)) * Smooth(top, top - 0.35f, u.y) * (chest ? 1f : Smooth(-1.05f, -0.6f, u.y));
-                    var f = Build(p, "6B45 FRONT", plate, camo, 0.022f, 0.014f, (u, n) => n.z > 0.2f && u.y < top && Mathf.Abs(u.x) < 0.97f && !ArmHole(u) && (L.sideArmour || Mathf.Abs(n.x) < 0.75f), false, false, (u, n) => Bulge(u));
-                    var k = Build(p, "6B45 BACK", plate, camo, 0.022f, 0.014f, (u, n) => n.z < -0.2f && u.y < top + 0.05f && Mathf.Abs(u.x) < 0.97f && !ArmHole(u) && (L.sideArmour || Mathf.Abs(n.x) < 0.75f), false, false, (u, n) => Bulge(u));
+                    var f = Build(p, "6B45 FRONT", plate, CamoOf(L), 0.022f, 0.014f, (u, n) => n.z > 0.2f && u.y < top && Mathf.Abs(u.x) < 0.97f && !ArmHole(u) && (L.sideArmour || Mathf.Abs(n.x) < 0.75f), false, false, (u, n) => Bulge(u));
+                    var k = Build(p, "6B45 BACK", plate, CamoOf(L), 0.022f, 0.014f, (u, n) => n.z < -0.2f && u.y < top + 0.05f && Mathf.Abs(u.x) < 0.97f && !ArmHole(u) && (L.sideArmour || Mathf.Abs(n.x) < 0.75f), false, false, (u, n) => Bulge(u));
                     if (f) f.plateUnder = true;
                     if (k) k.plateUnder = true;
                     if (L.sideArmour)
                     {
-                        var s = Build(p, "6B45 SIDE", plate, camo, 0.024f, 0.012f, (u, n) => Mathf.Abs(n.z) <= 0.25f && Mathf.Abs(n.x) > 0.5f && u.y < (chest ? 0.0f : top) && u.y > -0.95f);
+                        var s = Build(p, "6B45 SIDE", plate, CamoOf(L), 0.024f, 0.012f, (u, n) => Mathf.Abs(n.z) <= 0.25f && Mathf.Abs(n.x) > 0.5f && u.y < (chest ? 0.0f : top) && u.y > -0.95f);
                         if (s) s.plateUnder = true;
                     }
                     else
@@ -535,7 +557,7 @@ namespace Carl
                         Build(p, null, 0f, buckle, 0.045f, 0.012f, (u, n) => n.z > 0.3f && Mathf.Abs(Mathf.Abs(u.x) - 0.44f) < 0.07f && u.y > 0.5f && u.y < 0.66f);
                         if (L.pouches)
                             // admin pouch high on the chest
-                            Pouch(Build(p, "ADMIN POUCH", PouchClass, camo, 0.055f, 0.03f, (u, n) => n.z > 0.6f && Mathf.Abs(u.x) < 0.32f && u.y > -0.25f && u.y < 0.3f, false, false, (u, n) => Bulge(u)));
+                            Pouch(Build(p, "ADMIN POUCH", PouchClass, CamoOf(L), 0.055f, 0.03f, (u, n) => n.z > 0.6f && Mathf.Abs(u.x) < 0.32f && u.y > -0.25f && u.y < 0.3f, false, false, (u, n) => Bulge(u)));
                     }
                     else
                     {
@@ -547,23 +569,23 @@ namespace Carl
                             for (int i = -1; i <= 1; i++)
                             {
                                 float cx = i * 0.33f;
-                                var pouch = Pouch(Build(p, "MAG POUCH", PouchClass, camo, 0.075f, 0.055f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.13f && u.y > -0.62f && u.y < 0.12f, false, false, (u, n) => Bulge(u)));
+                                var pouch = Pouch(Build(p, "MAG POUCH", PouchClass, CamoOf(L), 0.075f, 0.055f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.13f && u.y > -0.62f && u.y < 0.12f, false, false, (u, n) => Bulge(u)));
                                 // the flap over its top is sewn to the pouch: shot off, they go together
                                 var flap = Pouch(Build(p, "POUCH FLAP", PouchClass * 0.5f, webbing, 0.082f, 0.01f, (u, n) => n.z > 0.45f && Mathf.Abs(u.x - cx) < 0.135f && u.y > 0.0f && u.y < 0.2f, false, false, (u, n) => Bulge(u)));
                                 if (pouch != null && flap != null) flap.transform.SetParent(pouch.transform, true);
                             }
-                            Pouch(Build(p, "BACK POUCH", PouchClass, camo, 0.065f, 0.045f, (u, n) => n.z < -0.55f && Mathf.Abs(u.x) < 0.42f && u.y > -0.6f && u.y < 0.5f, false, false, (u, n) => Bulge(u)));
+                            Pouch(Build(p, "BACK POUCH", PouchClass, CamoOf(L), 0.065f, 0.045f, (u, n) => n.z < -0.55f && Mathf.Abs(u.x) < 0.42f && u.y > -0.6f && u.y < 0.5f, false, false, (u, n) => Bulge(u)));
                         }
                     }
                 }
                 if (L.collar)
                 {
-                    var c = Build(b[PartId.Neck], "6B45 COLLAR", soft, camo, 0.028f, 0.022f, (u, n) => u.y < 0.3f);
+                    var c = Build(b[PartId.Neck], "6B45 COLLAR", soft, CamoOf(L), 0.028f, 0.022f, (u, n) => u.y < 0.3f);
                     if (c) c.looseness = 1.4f;
                 }
                 if (L.groinFlap)
                 {
-                    var g = Build(b.Pelvis, "6B45 GROIN FLAP", soft, camo, 0.03f, 0.02f, (u, n) => n.z > 0.25f && Mathf.Abs(u.x) < 0.42f && u.y < 0.45f);
+                    var g = Build(b.Pelvis, "6B45 GROIN FLAP", soft, CamoOf(L), 0.03f, 0.02f, (u, n) => n.z > 0.25f && Mathf.Abs(u.x) < 0.42f && u.y < 0.45f);
                     if (g != null) g.SetHang(new Vector3(g.mesh.bounds.center.x, g.mesh.bounds.max.y, g.mesh.bounds.max.z - 0.01f), 1f);
                 }
                 if (L.armGuards)
@@ -573,7 +595,7 @@ namespace Carl
                         // the shoulder and down the outside of the upper arm, open on the inside under the armpit
                         var arm = b[s < 0 ? PartId.UpperArmL : PartId.UpperArmR];
                         // (Br2 aramid: stops 9 mm ball and fragments; armour piercing and rifle rounds go through)
-                        var ag = Build(arm, "6B45 ARM GUARD", 3.1f, camo, 0.016f, 0.012f, (u, n) => u.y > -0.45f && Vector3.Dot(n, new Vector3(-s, 0f, 0f)) < 0.45f, true);
+                        var ag = Build(arm, "6B45 ARM GUARD", 3.1f, CamoOf(L), 0.016f, 0.012f, (u, n) => u.y > -0.45f && Vector3.Dot(n, new Vector3(-s, 0f, 0f)) < 0.45f, true);
                         if (ag) ag.looseness = 1.15f;
                         // its strap round the arm
                         Build(arm, null, 0f, webbing, 0.03f, 0.008f, (u, n) => u.y > -0.52f && u.y < -0.4f, true);

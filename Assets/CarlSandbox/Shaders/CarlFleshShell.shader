@@ -70,7 +70,10 @@ Shader "Carl/FleshShell"
             #pragma fragment frag
             #pragma target 3.5
             #pragma multi_compile_fog
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+            #include "CarlLights.hlsl"
             struct A { float4 positionOS : POSITION; float3 normalOS : NORMAL; };
             struct V { float4 positionCS : SV_POSITION; float3 positionWS : TEXCOORD0; float3 normalWS : TEXCOORD1; float3 positionOS : TEXCOORD2; half fog : TEXCOORD3; };
             V vert(A v)
@@ -108,7 +111,7 @@ Shader "Carl/FleshShell"
                 half3 vdir = normalize(GetWorldSpaceViewDir(i.positionWS));
                 half3 hv = normalize(ml.direction + vdir);
                 half wrap = saturate((dot(n, ml.direction) + 0.4) / 1.4);
-                half3 light = SampleSH(n) * 0.7 + ml.color * wrap * 0.6;
+                half3 light = SampleSH(n) * 0.7 + ml.color * wrap * 0.6 + CarlOtherLights(i.positionWS, n, i.positionCS, 0.4) * 0.8;
                 half spec = pow(saturate(dot(n, hv)), 70.0) * lerp(0.2, 0.5, _Tissue);
                 half3 col = c * light + ml.color * spec * (1.0 - _Depth01 * 0.6);
                 return half4(MixFog(col, i.fog), 1);

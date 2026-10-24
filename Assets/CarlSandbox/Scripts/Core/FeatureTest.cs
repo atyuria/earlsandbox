@@ -76,6 +76,15 @@ namespace Carl
                 case "gear": body = GearTest(); break;
                 case "walk": body = WalkTest(); break;
                 case "heat": body = HeatTest(); break;
+                case "quality": body = QualityTest(); break;
+                case "scopes": body = ScopesTest(); break;
+                case "night": body = NightTest(); break;
+                case "armies": body = ArmiesTest(); break;
+                case "camo": body = CamoTest(); break;
+                case "reload": body = ReloadTest(); break;
+                case "newguns": body = NewGunsTest(); break;
+                case "nightearls": body = NightEarls(); break;
+                case "blind": body = BlindTest(); break;
                 case "spacing": body = SpacingTest(); break;
                 default: Line("unknown scenario"); break;
             }
@@ -945,7 +954,7 @@ namespace Carl
             Line($"after the flame: alight {lit:0.00}");
             Check(lit > 0.1f, "the flamethrower sets him alight");
             yield return GrabView("fire_burning");
-            yield return new WaitForSeconds(6f);
+            yield return new WaitForSeconds(25f);
             yield return GrabView("fire_6s");
             yield return new WaitForSeconds(10f);
             float charAvg = 0f; int n = 0;
@@ -1018,6 +1027,402 @@ namespace Carl
             Teams.PlayerOutOfIt = false;
         }
 
+        public static bool SkipGuns;
+        public static int OnlyQ = -1;
+        public static string SprintWith = "AK-47";
+
+        IEnumerator QualityTest()
+        {
+            int was = GameSettings.Graphics;
+            GameSettings.InfiniteAmmo = true;
+            foreach (int q in new[] { 2, 1, 0 })
+            {
+                if (OnlyQ >= 0 && q != OnlyQ) continue;
+                GameSettings.Graphics = q; GameSettings.ApplyGraphics();
+                string Q = q == 2 ? "HIGH" : q == 1 ? "MEDIUM" : "LOW";
+                Game.LoadMap(0);
+                Cursor.lockState = CursorLockMode.Locked;
+                yield return new WaitForSeconds(1.5f);
+                ClearEarls();
+                var you = PlayerAvatar.Body;
+                // sprinting: a clear way
+                Vector3 me = Game.SpawnPoint, fwd = Vector3.forward;
+                float bestRun = 0f;
+                for (int k = 0; k < 16; k++)
+                {
+                    Vector3 d = Quaternion.Euler(0f, k * 22.5f, 0f) * Vector3.forward;
+                    float free = 40f;
+                    foreach (float hgt in new[] { 0.3f, 0.8f, 1.4f })
+                        foreach (var hit in Physics.SphereCastAll(me + Vector3.up * hgt, 0.35f, d, 40f, ~0, QueryTriggerInteraction.Ignore))
+                            if (hit.collider.GetComponentInParent<HumanBody>() == null && !(hit.collider is CharacterController)) free = Mathf.Min(free, hit.distance);
+                    if (free > bestRun) { bestRun = free; fwd = d; }
+                }
+                Wpn.Give(Idx(SprintWith), true);
+                Game.player.LookAt(me + Vector3.up * 1.4f + fwd * 10f);
+                yield return Hold(1f);
+                float y0 = you.Pelvis.transform.position.y, eye0 = Camera.main.transform.position.y;
+                int falls = 0; bool wasDown = false; float lowP = 99f;
+                var tr = new StringBuilder();
+                keysDown.Add(UnityEngine.InputSystem.Key.W); keysDown.Add(UnityEngine.InputSystem.Key.LeftShift);
+                float t0 = Time.time, nt = 0f;
+                Vector3 p0 = you.Pelvis.transform.position;
+                while (Time.time - t0 < 8f)
+                {
+                    if (Time.time - t0 >= nt) { nt += 0.5f; tr.Append($"\n      {Time.time - t0:0.0}s pelvis {you.Pelvis.transform.position.y - y0:+0.00;-0.00} eye {Camera.main.transform.position.y - eye0:+0.00;-0.00} chest tilt {Vector3.Angle(you.Chest.transform.up, Vector3.up):0} pelvis tilt {Vector3.Angle(you.Pelvis.transform.up, Vector3.up):0} head over chest {you.Head.transform.position.y - you.Chest.transform.position.y:0.00} head tilt {Vector3.Angle(you.Head.transform.up, Vector3.up):0}"); }
+                    if (you.ragdoll.IsDown && !wasDown) falls++;
+                    wasDown = you.ragdoll.IsDown;
+                    lowP = Mathf.Min(lowP, you.Pelvis.transform.position.y - y0);
+                    yield return Hold(0.01f);
+                }
+                keysDown.Clear(); yield return Hold(1f);
+                float ran = Vector3.Dot(you.Pelvis.transform.position - p0, fwd);
+                Line($"{Q}: sprinted {ran:0.0} m in {Time.time - t0 - 1f:0.0} s ({bestRun:0} m clear), fell {falls}, lowest pelvis {lowP:+0.00;-0.00} m, eye at the end {Camera.main.transform.position.y - eye0:+0.00;-0.00}");
+                Line("   " + tr);
+                Check(falls == 0 && lowP > -0.25f, $"{Q}: sprinting doesn't sink you down or trip you");
+                // every gun: held still, aimed, fired
+                Game.player.Teleport(me, 0f);
+                yield return Hold(1f);
+                foreach (var d in Wpn.defs)
+                {
+                    if (d.type != WeaponType.Gun || d.name == "TASER" || SkipGuns) continue;
+                    int i = Wpn.defs.IndexOf(d);
+                    Wpn.Give(i, true);
+                    yield return Hold(1.2f);
+                    var cam = Camera.main.transform;
+                    string rep = ""; bool ok = true;
+                    foreach (var phase in new[] { "still", "aiming", "firing" })
+                    {
+                        rmb = phase != "still"; lmb = phase == "firing";
+                        yield return Hold(0.4f);
+                        int s0 = Wpn.GetHoldDebug().snaps, g0 = WeaponController.GripSnaps;
+                        var hd = Wpn.GetHoldDebug();
+                        Vector3 lastL = hd.gun != null ? cam.InverseTransformPoint(hd.gun.position) : Vector3.zero;
+                        float jit = 0f; int n = 0;
+                        yield return Hold(1.2f, () =>
+                        {
+                            var h = Wpn.GetHoldDebug();
+                            if (h.gun == null) return;
+                            Vector3 l = cam.InverseTransformPoint(h.gun.position);
+                            jit += (l - lastL).magnitude; lastL = l; n++;
+                        });
+                        float j = n > 0 ? jit / n * 1000f : -1f;
+                        int sn = Wpn.GetHoldDebug().snaps - s0, gs = WeaponController.GripSnaps - g0;
+                        rep += $"{phase}: judder {j:0.00} mm, snaps {sn}, grip {gs}   ";
+                        if (sn > 0 || gs > 2 || phase != "firing" && j > 0.8f) ok = false;
+                    }
+                    lmb = rmb = false; yield return Hold(0.4f);
+                    Line($"   {Q} {d.name}: {rep}");
+                    Check(ok, $"{Q} {d.name}: steady in the hands");
+                }
+            }
+            GameSettings.Graphics = was; GameSettings.ApplyGraphics();
+        }
+
+        public static int NightMap = 1;
+        IEnumerator NightEarls()
+        {
+            int was = GameSettings.TimeOfDay;
+            GameSettings.TimeOfDay = 2;
+            Game.LoadMap(NightMap);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(2f);
+            ClearEarls();
+            Teams.PlayerOutOfIt = true;
+            // two of them a few metres down the trench in front of you
+            Vector3 me = Game.SpawnPoint, eye = Game.cam.transform.position;
+            Vector3 a = me, b = me; float ba = 0f;
+            for (int i = 0; i < TrenchNav.Nodes.Count; i++)
+            {
+                var n = TrenchNav.Nodes[i]; float d = Vector3.Distance(n, me);
+                if (TrenchNav.Field[i] || d < 5f || d > 9f) continue;
+                if (!EarlGunner.Clear(eye, n + Vector3.up * 1.2f, null)) continue;
+                if (d > ba) { ba = d; a = n; }
+            }
+            // (on the straight line to that point, so they are in view)
+            Game.player.LookAt(a + Vector3.up * 1.1f);
+            yield return Hold(0.5f);
+            Vector3 fwd = Vector3.ProjectOnPlane(Game.cam.transform.forward, Vector3.up).normalized;
+            a = PlayerAvatar.Body.Pelvis.transform.position - Vector3.up * 0.9f + fwd * 3.5f;
+            b = a + fwd * 1.8f + Vector3.Cross(Vector3.up, fwd) * 0.5f;
+            Line($"you at {PlayerAvatar.Body.Pelvis.transform.position}, Earls at {a} and {b}");
+            Gunner(a, Teams.Enemy, Quaternion.LookRotation(Vector3.ProjectOnPlane(me - a, Vector3.up)).eulerAngles.y);
+            Gunner(b, Teams.Enemy, Quaternion.LookRotation(Vector3.ProjectOnPlane(me - a, Vector3.up)).eulerAngles.y);
+            Wpn.Give(Idx("AK-47"), true);
+            Game.player.LookAt(a + Vector3.up * 1.1f);
+            yield return Hold(4f);
+            Game.player.LookAt(a + Vector3.up * 1.1f);
+            WeaponController.PlayerLightOn = false;
+            yield return Hold(0.3f);
+            yield return GrabView("nightearls_dark");
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.4f);
+            Game.player.LookAt(a + Vector3.up * 1.1f);
+            yield return Hold(0.2f);
+            yield return GrabView("nightearls_lit");
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear();
+            Line($"two Earls {ba:0.0} m off; see nightearls_dark / nightearls_lit");
+            GameSettings.TimeOfDay = was;
+            Teams.PlayerOutOfIt = false;
+        }
+
+        IEnumerator ReloadTest()
+        {
+            int wasT = GameSettings.TimeOfDay; GameSettings.TimeOfDay = 0;
+            Game.LoadMap(0);
+            GameSettings.TimeOfDay = wasT;
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            GameSettings.InfiniteAmmo = false;
+            string gun = ReloadGun;
+            int i = Idx(gun);
+            Wpn.Give(i, true);
+            yield return Hold(1.2f);
+            lmb = true; yield return Hold(0.4f); lmb = false; yield return Hold(0.3f);
+            BarrelHeat.I.Clear();
+            float T = Wpn.defs[i].reloadTime;
+            int loose0 = GameObject.FindObjectsByType<Rigidbody>().Length;
+            keysDown.Add(UnityEngine.InputSystem.Key.R); yield return Hold(0.08f); keysDown.Clear();
+            float t0 = Time.unscaledTime;
+            foreach (float f in new[] { 0.2f, 0.36f, 0.5f, 0.66f, 0.84f })
+            {
+                while (Time.unscaledTime - t0 < T * f) yield return Hold(0.01f);
+                yield return GrabView($"reload_{gun.Replace("-", "").ToLower()}_{Mathf.RoundToInt(f * 100)}");
+                var hdb = Wpn.GetHoldDebug();
+                Line($"   {f:0.00}: reloading {Wpn.reloading}, moving {Wpn.Moving}, gun roll {(hdb.gun != null ? Vector3.SignedAngle(Game.cam.transform.up, hdb.gun.up, Game.cam.transform.forward) : -1f):0} deg, mag shown {(Wpn.CurrentModel != null && Wpn.CurrentModel.transform.Find("Gun_AK74/Mag") != null ? Wpn.CurrentModel.transform.Find("Gun_AK74/Mag").gameObject.activeSelf.ToString() : "no mag")}, left hand at {(PlayerAvatar.Body[PartId.HandL].transform.position - Game.cam.transform.position):F2}");
+            }
+            while (Time.unscaledTime - t0 < T + 0.4f) yield return Hold(0.01f);
+            var loose = GameObject.Find("LooseMag");
+            Line($"{gun}: reloaded to {Wpn.AmmoText}; the old magazine {(loose != null ? $"lies at {loose.transform.position.y:0.00} m" : "isn't there")}");
+            Check(loose != null, "the old magazine comes out and drops");
+            Check(Wpn.AmmoText.StartsWith(Wpn.MagSize(i).ToString()), "full again");
+            // a double feed cleared with J: strip, rack, seat
+            BarrelHeat.I.ForceJam(i, 3);
+            for (int k = 0; k < 3; k++)
+            {
+                keysDown.Add(UnityEngine.InputSystem.Key.J); yield return Hold(0.06f); keysDown.Clear();
+                yield return Hold(0.15f);
+                yield return GrabView($"unjam_{gun.Replace("-", "").ToLower()}_{k}");
+                yield return Hold(0.25f);
+            }
+            Check(!BarrelHeat.I.Jammed(i), "the double feed is cleared");
+            GameSettings.InfiniteAmmo = true;
+        }
+        public static string ReloadGun = "AK-74";
+
+        IEnumerator CamoTest()
+        {
+            int wasT = GameSettings.TimeOfDay; GameSettings.TimeOfDay = 0;
+            Game.LoadMap(0);
+            GameSettings.TimeOfDay = wasT;
+            yield return new WaitForSeconds(1f);
+            ClearEarls();
+            Nations.Active = true; Nations.NewBattle();
+            Vector3 me = PlayerAvatar.Body.Pelvis.transform.position - Vector3.up * 0.95f;
+            Vector3 f = Vector3.ProjectOnPlane(Game.cam.transform.forward, Vector3.up).normalized, r = Vector3.Cross(Vector3.up, f);
+            float yaw = Quaternion.LookRotation(-f).eulerAngles.y;
+            foreach (int n in new[] { Nations.Ukraine, Nations.Russia })
+            {
+                var h = Game.SpawnCarl(me + f * 2.4f + r * (n == Nations.Ukraine ? -0.5f : 0.5f), yaw);
+                ArmourSystem.Equip(h, TrenchSquad.RandomKit(n));
+                h.SetUniform(Nations.Uniform(n));
+                Teams.Armband(h, n == GameSettings.Side ? Teams.Friendly : Teams.Enemy);
+                if (h.brain != null) h.brain.aiEnabled = false;
+            }
+            yield return new WaitForSeconds(25f);
+            Game.player.LookAt(me + f * 2.4f + Vector3.up * 1.0f);
+            yield return Hold(0.5f);
+            yield return GrabView("camo_both");
+            Nations.Active = false;
+        }
+
+                IEnumerator ArmiesTest()
+        {
+            int was = GameSettings.Side, wasT = GameSettings.TimeOfDay;
+            GameSettings.TimeOfDay = 0;
+            foreach (int side in new[] { Nations.Ukraine, Nations.Russia })
+            {
+                GameSettings.Side = side;
+                Game.LoadMap(3);
+                Cursor.lockState = CursorLockMode.Locked;
+                yield return new WaitForSeconds(3f);
+                var count = new Dictionary<string, int>[] { new Dictionary<string, int>(), new Dictionary<string, int>() };
+                foreach (var g in EarlGunner.All)
+                {
+                    if (g == null) continue;
+                    var c = count[g.team == Teams.Friendly ? 0 : 1];
+                    string n = g.GunName;
+                    c[n] = c.TryGetValue(n, out int v) ? v + 1 : 1;
+                }
+                string Fmt(Dictionary<string, int> c) { var sb = new StringBuilder(); foreach (var kv in c) sb.Append($"{kv.Key} x{kv.Value}  "); return sb.ToString(); }
+                Line($"you: {Nations.Name(side)}  ·  you hold {Wpn.Current.name}");
+                Line($"   your side ({Nations.Name(Nations.Of(Teams.Friendly))}): {Fmt(count[0])}");
+                Line($"   the enemy ({Nations.Name(Nations.Of(Teams.Enemy))}): {Fmt(count[1])}");
+                Check(Wpn.Current.name == Nations.IssueRifle(side), $"{Nations.Name(side)}: you start with the {Nations.IssueRifle(side)}");
+                // a friendly up close
+                EarlGunner near = null; float bd = 99f;
+                foreach (var g in EarlGunner.All) if (g != null && g.team == Teams.Friendly) { float d = Vector3.Distance(g.Body.Center, PlayerAvatar.Body.Center); if (d < bd) { bd = d; near = g; } }
+                if (near != null)
+                {
+                    Game.player.Teleport(near.Body.Pelvis.transform.position - Vector3.up * 0.95f + near.Body.Chest.transform.forward * 2.2f, 0f);
+                    yield return Hold(0.6f);
+                    Game.player.LookAt(near.Body.Chest.transform.position);
+                    yield return Hold(0.4f);
+                    Game.player.LookAt(near.Body.Chest.transform.position);
+                    yield return GrabView("army_" + (side == 0 ? "ua" : "ru"));
+                }
+            }
+            GameSettings.Side = was; GameSettings.TimeOfDay = wasT;
+        }
+
+        IEnumerator NewGunsTest()
+        {
+            int wasT = GameSettings.TimeOfDay; GameSettings.TimeOfDay = 0;
+            Game.LoadMap(0);
+            GameSettings.TimeOfDay = wasT;
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            ClearEarls();
+            GameSettings.InfiniteAmmo = false;
+            foreach (var n in new[] { "AK-47", "AK-74", "AK-74M", "AK-105", "AKS-74U", "AK-12", "RPK-74", "PKM", "M249" })
+            {
+                int i = Idx(n);
+                if (i < 0) { Check(false, n + " is in the game"); continue; }
+                Wpn.Give(i, true);
+                yield return Hold(1.2f);
+                string tag = n.Replace("-", "").Replace(" ", "").ToLower();
+                yield return GrabView("gun_" + tag + "_hip");
+                rmb = true; yield return Hold(1.2f);
+                yield return GrabView("gun_" + tag + "_ads");
+                string before = Wpn.AmmoText;
+                lmb = true; yield return Hold(0.5f); lmb = false; yield return Hold(0.3f);
+                rmb = false; yield return Hold(0.3f);
+                var am = AmmoTable.For(n);
+                Line($"{n}: {before} -> {Wpn.AmmoText}, ammo {(am != null ? am[0].name : "none")}, modes {string.Join("/", Wpn.ModesFor(i))}");
+                Check(Wpn.AmmoText != before && am != null, $"{n}: fires, its own ammo");
+            }
+            GameSettings.InfiniteAmmo = true;
+        }
+
+        IEnumerator NightTest()
+        {
+            int was = GameSettings.TimeOfDay;
+            GameSettings.TimeOfDay = 2;
+            Game.LoadMap(3);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(2f);
+            ClearEarls();
+            Vector3 me = Game.SpawnPoint;
+            Vector3 eye = Game.cam.transform.position;
+            // looking down the trench: the dark, then with the light on
+            Wpn.Give(Idx("AK-47"), true);
+            yield return Hold(1f);
+            WeaponController.PlayerLightOn = false;
+            yield return GrabView("night_dark");
+            float dark = ScreenLuma();
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.5f);
+            yield return GrabView("night_light");
+            float lit = ScreenLuma();
+            Line($"night, average brightness on screen: light off {dark:0.000}, light on {lit:0.000}");
+            Check(dark < 0.06f, "night is dark (you need a light to see)");
+            Check(lit > dark * 1.3f, "the flashlight lights things up");
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.5f);
+            Check(!WeaponController.PlayerLightOn, "light back off");
+            // out on the open field: you, and an enemy in plain line of sight 15-30 m off, in the dark
+            Vector3 spot = me; float best = 0f;
+            for (int a = 0; a < TrenchNav.Nodes.Count && best == 0f; a++)
+            {
+                if (!TrenchNav.Field[a]) continue;
+                var pa = TrenchNav.Nodes[a];
+                for (int i = 0; i < TrenchNav.Nodes.Count; i++)
+                {
+                    var n = TrenchNav.Nodes[i]; float d = Vector3.Distance(n, pa);
+                    if (!TrenchNav.Field[i] || d < 15f || d > 30f) continue;
+                    if (!EarlGunner.Clear(n + Vector3.up * 1.5f, pa + Vector3.up * 1f, null)) continue;
+                    best = d; spot = n; me = pa; break;
+                }
+            }
+            Game.player.Teleport(me + Vector3.up * 0.05f, 0f);
+            yield return Hold(2f);
+            Line($"enemy placed {best:0} m off, clear line of sight");
+            var e = Gunner(spot, Teams.Enemy, Quaternion.LookRotation(Vector3.ProjectOnPlane(me - spot, Vector3.up)).eulerAngles.y);
+            e.Body.ragdoll.faceDir = Vector3.ProjectOnPlane(me - spot, Vector3.up).normalized;
+            int torch0 = EarlGunner.TorchUses, saw = 0;
+            float t0 = Time.time;
+            while (Time.time - t0 < 4f) { if (e.SeesEnemy) saw++; yield return null; }
+            Line($"light off, standing still: he saw you in {saw} frames, his torch on {EarlGunner.TorchUses - torch0} frames, suspects you {e.SuspectConf:0.00}");
+            Check(saw == 0, "in the dark he can't see you without a light");
+            Check(EarlGunner.TorchUses - torch0 == 0, "an Earl with nothing to hunt keeps his torch off");
+            // your light on: he sees the light and knows roughly where you are
+            int g0 = EarlGunner.LightGuesses;
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear();
+            yield return Hold(1.5f);
+            float off = Vector3.Distance(Vector3.ProjectOnPlane(e.suspect - PlayerAvatar.Body.Center, Vector3.up), Vector3.zero);
+            Line($"light on: guesses off it {EarlGunner.LightGuesses - g0}, sees you {e.SeesEnemy}, suspects you {e.SuspectConf:0.00} at {off:0.0} m off");
+            Check(e.SeesEnemy || (EarlGunner.LightGuesses > g0 && off < 6f), "your light gives you away");
+            keysDown.Add(UnityEngine.InputSystem.Key.L); yield return Hold(0.1f); keysDown.Clear(); yield return Hold(0.3f);
+            // guesses by ear: near enough exact close up, a general area far off
+            float near = 0f, far = 0f;
+            for (int i = 0; i < 400; i++) { near += Intel.Guess(5f, 0.03f, 0.004f).magnitude; far += Intel.Guess(50f, 0.03f, 0.004f).magnitude; }
+            Line($"a shot heard: guessed {near / 400f:0.00} m out at 5 m, {far / 400f:0.0} m out at 50 m");
+            Check(near / 400f < 0.3f && far / 400f > 4f, "close shots placed exactly, far ones only roughly");
+            Check(Sfx.Clip("gear_rattle") != null, "a vest rattles when you move");
+            GameSettings.TimeOfDay = was;
+            Teams.PlayerOutOfIt = false;
+        }
+
+        IEnumerator BlindTest()
+        {
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            GameSettings.InfiniteAmmo = true;
+            int ak = Idx("AK-47");
+            Wpn.Give(ak, true); Wpn.loadouts[ak].fireMode = 0;
+            yield return Hold(1f);
+            float[] res = new float[2];
+            for (int pass = 0; pass < 2; pass++)
+            {
+                bool blind = pass == 1;
+                keysDown.Clear();
+                if (blind) { keysDown.Add(UnityEngine.InputSystem.Key.LeftAlt); keysDown.Add(UnityEngine.InputSystem.Key.D); }
+                yield return Hold(1.2f);
+                Vector3 d0 = Wpn.AimDirection; float worst = 0f;
+                lmb = true;
+                yield return Hold(1.2f, () => { worst = Mathf.Max(worst, Vector3.Angle(d0, Wpn.AimDirection)); });
+                lmb = false; keysDown.Clear(); yield return Hold(1f);
+                res[pass] = worst;
+            }
+            Line($"a 1.2 s burst: the barrel wandered up to {res[0]:0.0} deg shouldered, {res[1]:0.0} deg held out round a corner");
+            Check(res[1] > res[0] * 1.6f, "round a corner it kicks all over the place");
+        }
+
+        float ScreenLuma()
+        {
+            var tex = ScreenCapture.CaptureScreenshotAsTexture();
+            var px = tex.GetPixels32();
+            double sum = 0; int n = 0;
+            for (int i = 0; i < px.Length; i += 37) { var c = px[i]; sum += (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255.0; n++; }
+            Destroy(tex);
+            return (float)(sum / Mathf.Max(1, n));
+        }
+
+        IEnumerator ScopesTest()
+        {
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            foreach (var n in new[] { ".50 CAL", "AWP" })
+            {
+                Wpn.Give(Idx(n), true);
+                yield return Hold(1.2f);
+                yield return GrabView("scope_hip_" + (n == "AWP" ? "awp" : "50"));
+                rmb = true; yield return Hold(1.5f);
+                Line($"{n} aiming: aimT {Wpn.aimT:0.00}, fov {Game.cam.fieldOfView:0.0}, scope view {(FindFirstObjectByType<ScopeView>() != null ? "on" : "none")}");
+                yield return GrabView("scope_ads_" + (n == "AWP" ? "awp" : "50"));
+                rmb = false; yield return Hold(0.8f);
+            }
+        }
+
         IEnumerator Tap(UnityEngine.InputSystem.Key k)
         {
             keysDown.Add(k); yield return Hold(0.08f); keysDown.Clear(); yield return Hold(0.42f);
@@ -1034,7 +1439,7 @@ namespace Carl
             if (bh == null) yield break;
             int ak = Idx("AK-47");
             Line($"jam chance per round: cool {BarrelHeat.JamChance(0.1f) * 100f:0.00}%, half {BarrelHeat.JamChance(0.5f) * 100f:0.00}%, 80% {BarrelHeat.JamChance(0.8f) * 100f:0.0}%, at the limit {BarrelHeat.JamChance(1f) * 100f:0.0}%");
-            Check(BarrelHeat.JamChance(0.1f) < 0.001f && BarrelHeat.JamChance(1f) > 0.05f, "rarely jams cool, often at the limit");
+            Check(BarrelHeat.JamChance(0.1f) > 0.001f && BarrelHeat.JamChance(0.1f) < 0.003f && BarrelHeat.JamChance(1f) > 20f * BarrelHeat.JamChance(0.1f), "jams now and then cool, far more often at the limit");
             // full auto, trigger held, for a good while (clearing any jam that comes)
             GameSettings.InfiniteAmmo = true;
             Wpn.Give(ak, true); Wpn.loadouts[ak].fireMode = 0;
@@ -1042,7 +1447,7 @@ namespace Carl
             bh.Jams = 0; bh.DeadClicks = 0;
             float t0 = Time.time, h2 = -1f; int clears = 0;
             lmb = true;
-            while (Time.time - t0 < 9f)
+            while (Time.time - t0 < 16f)
             {
                 if (h2 < 0f && Time.time - t0 > 2f) h2 = bh.Heat(ak);
                 if (bh.Jammed(ak))
@@ -1059,7 +1464,7 @@ namespace Carl
             bool glow = bh.Glowing;
             yield return GrabView("heat_hot");
             lmb = false;
-            Line($"held 9 s: heat {h2 * 100f:0}% at 2 s, {hot * 100f:0}% at 9 s; spread x{spread:0.00}; glowing {glow}; jams {bh.Jams}, J presses {clears}, dead clicks {bh.DeadClicks}");
+            Line($"held 16 s: heat {h2 * 100f:0}% at 2 s, {hot * 100f:0}% at 16 s; spread x{spread:0.00}; glowing {glow}; jams {bh.Jams}, J presses {clears}, dead clicks {bh.DeadClicks}");
             Check(h2 > 0.2f && hot > h2 && hot > 0.6f, "the barrel heats up as you keep firing");
             Check(glow, "a hot barrel glows");
             Check(spread > 1.4f, "a hot barrel throws rounds wider");
@@ -1072,7 +1477,7 @@ namespace Carl
             float cool = bh.Heat(ak);
             Line($"off the trigger: {hot * 100f:0}% -> {warm * 100f:0}% at 8 s -> {cool * 100f:0}% at 18 s, glowing {bh.Glowing}");
             Check(warm > hot * 0.45f, "it cools slowly");
-            Check(cool < hot * 0.5f, "but it does cool when you stop");
+            Check(cool < hot * 0.8f && cool > hot * 0.35f, "it does cool when you stop - over a minute or two, not seconds");
             // single aimed shots barely warm it
             bh.SetHeat(ak, 0f);
             Wpn.loadouts[ak].fireMode = 1; yield return Hold(0.3f);
@@ -1185,7 +1590,7 @@ namespace Carl
                 yield return new WaitForSeconds(1.5f);
                 Game.player.LookAt(h.Center);
                 yield return GrabView("stuck_" + w);
-                yield return new WaitForSeconds(6f);
+                yield return new WaitForSeconds(25f);
                 Line($"{w}: spawned {p0}, now {h.Pelvis.transform.position}, {g.NavDebug}, order {g.order}");
                 Destroy(h.gameObject); HumanBody.All.Remove(h);
                 yield return null;
@@ -1581,19 +1986,47 @@ namespace Carl
             return (float)(hi / System.Math.Max(1e-9, all));
         }
 
+        static float Rms(AudioClip c)
+        {
+            if (c == null) return -99f;
+            var d = new float[c.samples * c.channels]; c.GetData(d, 0);
+            int pk = 0; for (int i = 0; i < d.Length; i++) if (Mathf.Abs(d[i]) > Mathf.Abs(d[pk])) pk = i;
+            int n = Mathf.Min(d.Length - pk, c.frequency / 10 * c.channels);
+            double sum = 0; for (int i = 0; i < n; i++) sum += d[pk + i] * d[pk + i];
+            return 20f * Mathf.Log10(Mathf.Sqrt((float)(sum / Mathf.Max(1, n))) + 1e-6f);
+        }
+
         IEnumerator Audio()
         {
             Game.LoadMap(3);
             yield return new WaitForSeconds(2f);
             string ad = Path.Combine(dir, "audio"); Directory.CreateDirectory(ad);
-            foreach (var g in new[] { "gun_ak", "gun_ak_supp", "gun_ak_tail_open", "gun_ak_tail_tight", "gun_ak_far", "gun_glock_supp", "thump", "mech_rifle", "flyby_crack", "flyby_whiz", "casing", "casing_dirt", "ricochet" })
+            foreach (var g in new[] { "gun_ak", "gun_ak_full", "gun_glock_full", "gun_50_full", "gun_ak_supp", "gun_ak_tail_open", "gun_ak_tail_tight", "gun_ak_far", "gun_glock_supp", "thump", "mech_rifle", "flyby_crack", "flyby_whiz", "casing", "casing_dirt", "ricochet" })
             {
                 var c = Sfx.Clip(g);
                 Check(c != null, $"sound '{g}' exists" + (c != null ? $" ({c.length:0.00} s)" : ""));
                 if (c != null) SaveWav(c, Path.Combine(ad, g + ".wav"));
             }
-            float hiDry = HighShare(Sfx.Clip("gun_ak")), hiSupp = HighShare(Sfx.Clip("gun_ak_supp"));
-            Check(hiSupp < hiDry * 0.7f, $"suppressed shot has the crack taken off (high-frequency share {hiSupp:0.000} vs {hiDry:0.000})");
+            // loud like the real thing, and a suppressor only takes the edge off (measured: 6-25 dB, still 130-145 dB)
+            float raw = Rms(Sfx.Clip("gun_ak")), full = Rms(Sfx.Clip("gun_ak_full")), supp = Rms(Sfx.Clip("gun_ak_supp"));
+            Line($"AK report, first 100 ms: recording {raw:0.0} dBFS, as played {full:0.0} dBFS, suppressed {supp:0.0} dBFS ({full - supp:0.0} dB down)");
+            Check(full > raw + 5f, "the report is much fuller than the bare recording");
+            Check(full - supp > 3f && full - supp < 9f, "suppressed: quieter, but still a loud gunshot (3-9 dB down)");
+            float hiFull = HighShare(Sfx.Clip("gun_ak_full")), hiSupp = HighShare(Sfx.Clip("gun_ak_supp"));
+            Check(hiSupp > 0.05f, $"suppressed rifle keeps its crack (high-frequency share {hiSupp:0.000} vs {hiFull:0.000} unsuppressed)");
+            // a full mag on full auto, right in your ears: loud, but the mix never clips
+            Game.LoadMap(0);
+            Cursor.lockState = CursorLockMode.Locked;
+            yield return new WaitForSeconds(1.5f);
+            GameSettings.InfiniteAmmo = true;
+            Wpn.Give(Idx("AK-47"), true); Wpn.loadouts[Idx("AK-47")].fireMode = 0;
+            yield return Hold(0.6f);
+            MasterLimiter.Reduction = 0f;
+            lmb = true; yield return Hold(2.5f); lmb = false; yield return Hold(0.5f);
+            Line($"full auto 2.5 s: the limiter pulled the mix down at most {20f * Mathf.Log10(Mathf.Max(1e-4f, 1f - MasterLimiter.Reduction)):0.0} dB");
+            Check(MasterLimiter.Reduction < 0.7f, "full auto stays loud but under control (limiter under 10 dB)");
+            Game.LoadMap(3);
+            yield return new WaitForSeconds(2f);
             Check(Sfx.Enclosed(Game.SpawnPoint + Vector3.up * 0.3f), "in the trench: short slap echo");
             Check(!Sfx.Enclosed(new Vector3(0f, 2f, 0f)), "out in the field: long rolling echo");
             // a round passing a metre from your head

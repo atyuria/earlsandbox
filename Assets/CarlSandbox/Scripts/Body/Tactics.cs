@@ -23,6 +23,21 @@ namespace Carl
         static Material green, red;
 
         /// <summary>Coloured tape round both upper arms: green ours, red theirs.</summary>
+        static readonly System.Collections.Generic.Dictionary<Color, Material> tapes = new System.Collections.Generic.Dictionary<Color, Material>();
+        /// <summary>Gaffer tape in that colour: a little sheen.</summary>
+        static Material Tape(Color c)
+        {
+            if (!tapes.TryGetValue(c, out var m) || m == null) tapes[c] = m = Mats.Lit(c, 0.45f);
+            return m;
+        }
+
+        public static void RemoveArmband(HumanBody h)
+        {
+            if (h == null) return;
+            foreach (var id in new[] { PartId.UpperArmL, PartId.UpperArmR })
+                if (h[id] != null && h[id].transform.Find("Armband") is Transform old) Object.Destroy(old.gameObject);
+        }
+
         public static void Armband(HumanBody h, int team)
         {
             if (h == null) return;
@@ -51,7 +66,7 @@ namespace Carl
                 g.transform.localRotation = Quaternion.FromToRotation(Vector3.up, axis);
                 float d = rad * 2f * 1.18f;
                 g.transform.localScale = new Vector3(d, 0.035f, d);
-                g.GetComponent<MeshRenderer>().sharedMaterial = team == Friendly ? green : red;
+                g.GetComponent<MeshRenderer>().sharedMaterial = Nations.Active ? Tape(Nations.Band(Nations.Of(team))) : team == Friendly ? green : red;
                 g.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 g.layer = bp.gameObject.layer;
             }
@@ -66,6 +81,12 @@ namespace Carl
     public static class Intel
     {
         static Vector3 Off(float d) { var r = Random.insideUnitCircle * d; return new Vector3(r.x, 0f, r.y); }
+
+        /// <summary>
+        /// How far off a guess from a sound (or a light) is, at a distance: right in front of him he knows near
+        /// enough exactly; it grows faster than the distance, so far off it's only a general area.
+        /// </summary>
+        public static Vector3 Guess(float d, float lin, float sq) => Off(d * lin + d * d * sq);
 
         /// <summary>Counters for the playtests: shots fired by each side, and rounds that hit someone on the shooter's own side.</summary>
         public static readonly int[] Shots = new int[2];
@@ -82,7 +103,7 @@ namespace Carl
                 float d = Vector3.Distance(g.Body.Center, pos);
                 if (Teams.Hostile(g.team, team))
                 {
-                    if (d < radius) g.Learn(pos + Off(d * 0.07f), 0.5f + 0.3f * (1f - d / radius), false);
+                    if (d < radius) g.Learn(pos + Guess(d, 0.03f, 0.004f), 0.5f + 0.3f * (1f - d / radius), false);
                 }
                 else if (g.team == team && shootingAt.HasValue && d < 25f && !g.SeesEnemy)
                     g.Learn(shootingAt.Value, 0.5f, false);
@@ -133,7 +154,7 @@ namespace Carl
             {
                 if (g == null || !Teams.Hostile(g.team, team) || !g.Fighting) continue;
                 float d = Vector3.Distance(g.Body.Center, pos);
-                if (d < radius) g.Learn(pos + Off(d * 0.1f), 0.4f, false);
+                if (d < radius) g.Learn(pos + Guess(d, 0.06f, 0.012f), Mathf.Lerp(0.55f, 0.3f, d / radius), false);
             }
         }
     }
